@@ -116,7 +116,7 @@ const Calendar: React.FC = () => {
   };
 
   return (
-    <div className="rounded-2xl border  border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="rounded-2xl border  border-gray-200 bg-white dark:border-gray-800 dark:bg-white/3">
       <div className="custom-calendar">
         <FullCalendar
           ref={calendarRef}
@@ -143,7 +143,7 @@ const Calendar: React.FC = () => {
       <Modal
         isOpen={isOpen}
         onClose={closeModal}
-        className="max-w-[700px] p-6 lg:p-10"
+        className="max-w-175 p-6 lg:p-10"
       >
         <div className="flex flex-col px-2 overflow-y-auto custom-scrollbar">
           <div>
@@ -244,7 +244,7 @@ const Calendar: React.FC = () => {
             <button
               onClick={closeModal}
               type="button"
-              className="flex w-full justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] sm:w-auto"
+              className="flex w-full justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/3 sm:w-auto"
             >
               Close
             </button>
