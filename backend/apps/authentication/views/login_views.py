@@ -1,8 +1,9 @@
-from django.contrib.auth import authenticate
+from operator import ge
+from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
-from apps.authentication.services import generate_access_token, rotate_refresh_token
+from django.contrib.auth import authenticate
+from apps.authentication.services import generate_access_token, generate_refresh_token
 
 class LoginView(APIView):
     authentication_classes = []
@@ -27,7 +28,7 @@ class LoginView(APIView):
             )
 
         access = generate_access_token(user)
-        refresh = rotate_refresh_token(user)
+        refresh = generate_refresh_token(user)
 
         return Response({
             "access": access,

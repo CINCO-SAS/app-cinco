@@ -32,3 +32,11 @@ def rotate_refresh_token(old_token_str):
         "access_token": access_token,
         "refresh_token": new_refresh.token
     }
+
+def generate_refresh_token(user):
+    refresh_token = RefreshToken.objects.create(
+        user=user,
+        token=RefreshToken.generate(),
+        expires_at=timezone.now() + timedelta(days=7)
+    )
+    return refresh_token
