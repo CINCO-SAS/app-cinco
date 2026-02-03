@@ -25,7 +25,6 @@ class ConfigMenu(models.Model):
     def get_permissions_for_user(self, user, url):
         """
         Retorna los permisos efectivos de un usuario sobre este menú.
-        NO altera la DB legacy.
         """
 
         permisos = {

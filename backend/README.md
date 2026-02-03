@@ -76,6 +76,12 @@ Si el proyecto tiene un archivo `requirements.txt`:
 pip install -r requirements.txt
 ```
 
+Actualizar `requirements.txt`
+```bash
+pip freeze > requirements.txt
+```
+
+
 Verifica dependencias instaladas:
 
 ```bash
@@ -146,6 +152,16 @@ Para ver migraciones existentes **sin ejecutarlas**:
 ```bash
 python manage.py showmigrations
 ```
+
+---
+
+## 8️⃣ Crear una nueva app
+Cuando se necesite agregar nuevos modulos al proyecto, se puede crear una nueva app *(ten en cuenta que el nombre de la app debe ser unico dentro del proyecto y primero se debe crear la carpeta dentro de apps)*
+
+```bash
+python manage.py startapp nombre_de_la_app apps/nombre_de_la_carpeta
+```
+
 
 ---
 
