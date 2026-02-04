@@ -2,7 +2,8 @@ class MultiDBRouter:
     APP_DB_MAP = {
         "authentication": "default",
         "security": "default",
-        "common": "legacy",
+        "common": "azul",
+        "operaciones": "azul",
         # "reports": "reporting",
         # "audit": "audit",
     }
