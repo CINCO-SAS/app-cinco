@@ -1,1 +1,1 @@
-from .actividad_model import ActividadModel
+from .actividad_model import Actividad

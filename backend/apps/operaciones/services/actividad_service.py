@@ -1,4 +1,4 @@
-from backend.apps.operaciones.models import ActividadModel
+from apps.operaciones.models import Actividad
 
 #1 crear una nueva actividad
 #2 listar todas las actividades
@@ -7,26 +7,28 @@ from backend.apps.operaciones.models import ActividadModel
 #5 obtener actividades de una movil (puede abarcar varias actividades y empleados)
 #6 actualizar actividad
 
-def create_actividad(data):
+def crear(data):
     # Lógica para crear una nueva actividad
-    pass
+    return Actividad.objects.create(**data)
 
-def list_actividades():
+def listar():
     # Lógica para listar todas las actividades
-    pass
+    return Actividad.objects.all()
 
-def get_actividades_by_area(area_id):
+def obtener_por_area(area_id):
     # Lógica para obtener actividades de un área específica
     pass
+    # return ActividadModel.objects.filter(area_id=area_id)
 
-def get_actividades_by_empleado(empleado_id):
+def obtener_por_empleado(empleado_id):
     # Lógica para obtener actividades de un empleado específico
     pass
+    # return ActividadModel.objects.filter(responsable=empleado_id)
 
-# def get_actividades_by_movil(movil_id):9
+# def obtener_por_movil(movil_id):
 #     # Lógica para obtener actividades de una móvil específica
 #     pass
 
-def update_actividad(actividad_id, data):
+def actualizar(actividad_id, data):
     # Lógica para actualizar una actividad
     pass

@@ -3,7 +3,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
-# from apps.operaciones.services import 
+
+from apps.operaciones.services import crear
 
 class ActividadesView(APIView):
     authentication_classes = []
@@ -20,14 +21,8 @@ class ActividadesView(APIView):
     
     
     # 1 Crear una nueva actividad
-    def post(self, request):
-
-        # validar y crear la nueva actividad aquí
-        return Response({"message": "Crear una nueva actividad"})
+    def create(self, request):
+        data = request.data
+        nueva_actividad = crear(data)
+        return Response({"actividad": nueva_actividad.id}, status=201)
     
-
-    # def get(self, request):
-    #     # return Response({"message": "Actividades endpoint"})
-    
-    # def post(self, request):
-    #     return Response({"message": "Crear una nueva actividad"})

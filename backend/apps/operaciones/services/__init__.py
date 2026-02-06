@@ -1,8 +1,7 @@
-from .actividadesServices import (
-    create_actividad, 
-    get_actividades_by_area, 
-    get_actividades_by_empleado, 
-    # get_actividades_by_movil, 
-    list_actividades, 
-    update_actividad
+from .actividad_service import (
+    crear,
+    listar,
+    obtener_por_area,
+    obtener_por_empleado,
+    actualizar,
 )

@@ -56,12 +56,14 @@ INSTALLED_APPS = [
     # Third-party
     "rest_framework",
     "corsheaders",
+    'drf_spectacular',
     
     # Local apps
     'apps.authentication',
     'apps.common',
     'apps.security',
     'apps.operaciones',
+    'apps.empleados',
 ]
 
 MIDDLEWARE = [
@@ -101,6 +103,24 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'App Cinco API',
+    'DESCRIPTION': 'Documentación de endpoints - App Cinco',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SECURITY': [{'BearerAuth': []}],
+    'COMPONENTS': {
+        'securitySchemes': {
+            'BearerAuth': {
+                'type': 'http',
+                'scheme': 'bearer',
+                'bearerFormat': 'JWT',
+            }
+        }
+    }
 }
 
 # Database
