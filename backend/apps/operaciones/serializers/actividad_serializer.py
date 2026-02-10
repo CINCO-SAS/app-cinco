@@ -1,17 +1,58 @@
 from rest_framework import serializers
-
+from apps.operaciones.models import (
+    Actividad,
+    ActividadDetalle,
+    ActividadUbicacion
+)
 from apps.empleados.services import EmpleadoService
-from apps.operaciones.models import Actividad
 
+
+class ActividadDetalleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ActividadDetalle
+        exclude = ('actividad',)
+
+
+class ActividadUbicacionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ActividadUbicacion
+        exclude = ('actividad',)
+
+
+class ActividadCreateSerializer(serializers.ModelSerializer):
+    detalle = ActividadDetalleSerializer()
+    ubicacion = ActividadUbicacionSerializer()
+
+    class Meta:
+        model = Actividad
+        fields = (
+            'ot',
+            'responsable_id',
+            'fin_estimado',
+            'detalle',
+            'ubicacion'
+        )
+
+    def validate_responsable_id(self, value):
+        if not EmpleadoService().existe(value):
+            raise serializers.ValidationError("El empleado no existe.")
+        return value
 
 class ActividadSerializer(serializers.ModelSerializer):
-    
-    empleado = serializers.SerializerMethodField()
-    
+    detalle = ActividadDetalleSerializer(read_only=True)
+    ubicacion = ActividadUbicacionSerializer(read_only=True)
+    responsable_snapshot = serializers.SerializerMethodField()
+
     class Meta:
         model = Actividad
         fields = "__all__"
-        
-    def get_empleado(self, obj):
-        # pass
-        return EmpleadoService().obtener_basico(obj.responsable)
+
+    def get_responsable_snapshot(self, obj):
+        if hasattr(obj, 'responsable_snapshot'):
+            return {
+                "nombre": obj.responsable_snapshot.nombre,
+                "area": obj.responsable_snapshot.area,
+                "cargo": obj.responsable_snapshot.cargo,
+                "movil": obj.responsable_snapshot.movil,
+            }
+        return None
