@@ -1,40 +1,77 @@
 import { z } from "zod";
 
 // {
-//   "ot": "string",
-//   "responsable_id": 9223372036854776000,
-//   "fecha_inicio": "2026-02-12T15:04:13.119Z",
-//   "fecha_fin_estimado": "2026-02-12T15:04:13.119Z",
-//   "fecha_fin_real": "",
-//   "detalle": {
-//     "tipo_trabajo": "string",
-//     "descripcion": "string",
-//     "extra": "string"
-//   },
-//   "ubicacion": {
-//     "direccion": "string",
-//     "coordenada_x": "string",
-//     "coordenada_y": "string",
-//     "zona": "string",
-//     "nodo": "string"
-//   }
-// }
+//     "id": 3,
+//     "detalle": {
+//         "id": 3,
+//         "tipo_trabajo": "PRUEBA",
+//         "descripcion": "Esta es una actividad de prueba",
+//         "extra": null
+//     },
+//     "ubicacion": {
+//         "id": 3,
+//         "direccion": "Medellin",
+//         "coordenada_x": "000000000",
+//         "coordenada_y": "000000000",
+//         "zona": "SUR",
+//         "nodo": "N600"
+//     },
+//     "responsable_snapshot": {
+//         "nombre": "CARLOS ALBERTO",
+//         "area": "DEPARTAMENTO TI",
+//         "carpeta": "PROGRAMACION",
+//         "cargo": "LIDER DESARROLLADOR",
+//         "movil": "PROGRAM01"
+//     },
+//     "ot": "00003",
+//     "estado": "pendiente",
+//     "responsable_id": 2761,
+//     "fecha_inicio": "2026-02-17",
+//     "fecha_fin_estimado": "2026-02-19",
+//     "fecha_fin_real": "1900-01-01",
+//     "created_at": "2026-02-12T16:01:35.352362-05:00",
+//     "created_by": null,
+//     "updated_at": "2026-02-12T16:01:35.352362-05:00",
+//     "updated_by": null,
+//     "is_deleted": false,
+//     "deleted_at": null,
+//     "deleted_by": null
+// },
 
 export const ActividadSchema = z.object({
   id: z.number().optional(),
-  ot: z.string().min(1, "La OT es requerida"),
-  responsable_id: z.number().int().positive("El ID del responsable debe ser un número entero positivo"),
   
-  fecha_actividad: z
-    .string()
-    .min(1, "La fecha es requerida")
-    .refine((v) => !isNaN(Date.parse(v)), {
-      message: "Fecha inválida",
-    }),
+  detalle: z.object({
+    tipo_trabajo: z.string().min(1, "El tipo de trabajo es requerido"),
+    descripcion: z.string().min(1, "La descripción es requerida"),
+    // extra: z.string().optional(),
+  }),
 
-  descripcion: z.string().min(1, "La descripción es requerida"),
+  ubicacion: z.object({
+    direccion: z.string().min(1, "La dirección es requerida"),
+    coordenada_x: z.string().min(1, "La coordenada X es requerida"),
+    coordenada_y: z.string().min(1, "La coordenada Y es requerida"),
+    zona: z.string().min(1, "La zona es requerida"),
+    nodo: z.string().min(1, "El nodo es requerido"),
+  }),
 
-  tipo_actividad: z.string().min(1, "El tipo de actividad es requerido"),
+  responsable_snapshot: z.object({
+    nombre: z.string().min(1, "El nombre del responsable es requerido"),
+    area: z.string().min(1, "El área del responsable es requerida"),
+    carpeta: z.string().min(1, "La carpeta del responsable es requerida"),
+    cargo: z.string().min(1, "El cargo del responsable es requerido"),
+    movil: z.string().min(1, "El móvil del responsable es requerido"),
+  }).optional(),
+
+  ot: z.string().min(1, "La OT es requerida"),
+  
+  estado: z.string().optional(), // opcional, se asignará automáticamente al crear la actividad
+  
+  responsable_id: z
+    .number()
+    .int()
+    .positive("Debe seleccionar un responsable"),
+
 
   fecha_inicio: z
     .string()
@@ -42,6 +79,25 @@ export const ActividadSchema = z.object({
     .refine((v) => !isNaN(Date.parse(v)), {
       message: "Fecha de inicio inválida",
     }),
+  
+    fecha_fin_estimado: z
+    .string()
+    .min(1, "La fecha de fin estimada es requerida")
+    .refine((v) => !isNaN(Date.parse(v)), {
+      message: "Fecha de fin estimada inválida",
+    }),
+
+  // no obligatoria, puede ser vacía o una fecha válida, permitir null
+  fecha_fin_real: z
+    .string()
+    .optional()
+    .nullable()
+    .refine((v) => !v || !isNaN(Date.parse(v)), {
+      message: "Fecha de fin real inválida",
+    }),
+  
+
+  
 });
 
 export type ActividadFormData = z.infer<typeof ActividadSchema>;

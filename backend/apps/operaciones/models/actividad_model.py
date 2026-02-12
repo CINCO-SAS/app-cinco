@@ -17,9 +17,9 @@ class Actividad(models.Model):
 
     responsable_id = models.IntegerField()
 
-    fecha_inicio = models.DateTimeField(blank=True, null=True)
-    fecha_fin_estimado = models.DateTimeField(blank=True, null=True)
-    fecha_fin_real = models.DateTimeField(blank=True, null=True)
+    fecha_inicio = models.DateField(blank=True, null=True)
+    fecha_fin_estimado = models.DateField(blank=True, null=True)
+    fecha_fin_real = models.DateField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.IntegerField(null=True, blank=True)

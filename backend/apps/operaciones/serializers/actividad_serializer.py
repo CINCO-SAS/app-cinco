@@ -22,6 +22,33 @@ class ActividadUbicacionSerializer(serializers.ModelSerializer):
 class ActividadCreateSerializer(serializers.ModelSerializer):
     detalle = ActividadDetalleSerializer()
     ubicacion = ActividadUbicacionSerializer()
+    
+    # fecha_inicio = serializers.DateTimeField(
+    #      input_formats=[
+    #         "%Y-%m-%d",
+    #         "%Y-%m-%dT%H:%M:%S",
+    #         "%Y-%m-%dT%H:%M",
+    #     ]
+    # )
+    
+    # fecha_fin_estimado = serializers.DateTimeField(
+    #     input_formats=[
+    #         "%Y-%m-%d",
+    #         "%Y-%m-%dT%H:%M:%S",
+    #         "%Y-%m-%dT%H:%M",
+    #     ]
+    # )
+
+    fecha_fin_real = serializers.DateField(
+        input_formats=[
+            "",
+            "%Y-%m-%d",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M",
+        ],
+        required=False,
+        allow_null=True
+    )
 
     class Meta:
         model = Actividad

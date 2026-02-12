@@ -1,225 +1,115 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { PlusIcon } from "@/icons";
+import ModalActividad from "./modalActividad";
+import { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/common/DataTable";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
-import { ColumnDef } from "@tanstack/react-table";
-import ModalAgregarActividad from "./modalAgregarActividad";
+import { ActividadFormData } from "@/schemas/actividades.schema";
+import ESTADOS from "@/utils/estados";
+import { useActividadStore } from "@/store/actividad.store";
+import Button from "@/components/ui/button/Button";
 
-interface User {
-    id: number;
-    name: string;
-    email: string;
-    role: "Admin" | "Editor" | "Viewer";
-    status: "Active" | "Inactive" | "Pending";
-    dateCreated?: string;
-    editedBy?: string;
-    functions?: string[];
-    comments?: string;
-    tags?: string[];
-}
 
 const GestionActividadesView = () => {
+    // const [actividades, setActividades] = useState<ActividadFormData[]>([]);
     const breadcrumbTitles = ["Operaciones", "Gestión de Actividades"];
+    const { loadActividades, actividades } = useActividadStore();
 
-    const userData: User[] = [
-        {
-            id: 1,
-            name: "Carlos Restrepo",
-            email: "carlos@example.com",
-            role: "Admin",
-            status: "Active",
-            dateCreated: "2024-01-15",
-            editedBy: "Maria Lopez",
-            functions: ["Create", "Edit", "Delete"],
-            comments: "Usuario con permisos completos.",
-            tags: ["priority", "internal"],
-        },
-        {
-            id: 2,
-            name: "Ana Gómez",
-            email: "ana@example.com",
-            role: "Editor",
-            status: "Pending",
-            dateCreated: "2024-02-20",
-            editedBy: "Luis Fernandez",
-            functions: ["Edit"],
-            comments: "Usuario en espera de aprobación.",
-            tags: ["review"],
-        },
-        {
-            id: 3,
-            name: "Jorge Martínez",
-            email: "jorge@example.com",
-            role: "Viewer",
-            status: "Inactive",
-            dateCreated: "2024-03-10",
-            editedBy: "Sofia Ramirez",
-            functions: ["View"],
-            comments: "Usuario inactivo.",
-            tags: ["archived"],
-        },
-        {
-            id: 4,
-            name: "Lindsey Curtis",
-            email: "lindsey@example.com",
-            role: "Editor",
-            status: "Active",
-            dateCreated: "2024-04-05",
-            editedBy: "Carlos Mendoza",
-            functions: ["Edit", "View"],
-            comments: "Editor activo con permisos limitados.",
-            tags: ["active", "editor"],
-        },
-        {
-            id: 5,
-            name: "Jorge Martínez",
-            email: "jorge@example.com",
-            role: "Viewer",
-            status: "Inactive",
-            dateCreated: "2024-05-12",
-            editedBy: "Ana Torres",
-            functions: ["View"],
-            comments: "Usuario inactivo.",
-            tags: ["archived"],
-        },
-        {
-            id: 6,
-            name: "Lindsey Curtis",
-            email: "lindsey@example.com",
-            role: "Editor",
-            status: "Active",
-            dateCreated: "2024-06-01",
-            editedBy: "Michael Scott",
-            functions: ["Edit", "View"],
-            comments: "Editor activo con permisos limitados.",
-            tags: ["active", "editor"],
-        },
-        {
-            id: 7,
-            name: "Jorge Martínez",
-            email: "jorge@example.com",
-            role: "Viewer",
-            status: "Inactive",
-            dateCreated: "2024-06-15",
-            editedBy: "Pam Beesly",
-            functions: ["View"],
-            comments: "Usuario inactivo.",
-            tags: ["archived"],
-        },
-        {
-            id: 8,
-            name: "Lindsey Curtis",
-            email: "lindsey@example.com",
-            role: "Editor",
-            status: "Active",
-            dateCreated: "2024-06-20",
-            editedBy: "Jim Halpert",
-            functions: ["Edit", "View"],
-            comments: "Editor activo con permisos limitados.",
-            tags: ["active", "editor"],
-        },
-        {
-            id: 9,
-            name: "Jorge Martínez",
-            email: "jorge@example.com",
-            role: "Viewer",
-            status: "Inactive",
-            dateCreated: "2024-06-25",
-            editedBy: "Dwight Schrute",
-            functions: ["View"],
-            comments: "Usuario inactivo.",
-            tags: ["archived"],
-        },
-        {
-            id: 10,
-            name: "Lindsey Curtis",
-            email: "lindsey@example.com",
-            role: "Editor",
-            status: "Active",
-            dateCreated: "2024-06-30",
-            editedBy: "Stanley Hudson",
-            functions: ["Edit", "View"],
-            comments: "Editor activo con permisos limitados.",
-            tags: ["active", "editor"],
-        },
-        {
-            id: 11,
-            name: "Jorge Martínez",
-            email: "jorge@example.com",
-            role: "Viewer",
-            status: "Inactive",
-            dateCreated: "2024-07-05",
-            editedBy: "Phyllis Vance",
-            functions: ["View"],
-            comments: "Usuario inactivo.",
-            tags: ["archived"],
-        },
-        {
-            id: 12,
-            name: "Lindsey Curtis",
-            email: "lindsey@example.com",
-            role: "Editor",
-            status: "Active",
-            dateCreated: "2024-07-10",
-            editedBy: "Kevin Malone",
-            functions: ["Edit", "View"],
-            comments: "Editor activo con permisos limitados.",
-            tags: ["active", "editor"],
-        },
-    ];
+    useEffect(() => {
+        loadActividades();
+    }, [loadActividades]);
 
-    const userColumns: ColumnDef<User>[] = [
+    const handleEditarActividad = (id: any) => {
+        alert(`Editar actividad ${id}`);
+    }
+
+    // const ESTADOS: Record<string, string> = {
+    //     'pendiente': 'bg-yellow-400/50', // amarillo
+    //     'en_progreso': 'bg-blue-500/50', // azul
+    //     'completada': 'bg-green-500/50', // verde
+    //     'cancelada': 'bg-red-500/50', // rojo
+    //     'pausada': 'bg-yellow-700/50', // amarillo oscuro
+    //     'reprogramada': 'bg-orange-500/50', // naranja
+    // }
+
+    // {
+    //     "id": 3,
+    //     "detalle": {
+    //         "id": 3,
+    //         "tipo_trabajo": "PRUEBA",
+    //         "descripcion": "Esta es una actividad de prueba",
+    //         "extra": null
+    //     },
+    //     "ubicacion": {
+    //         "id": 3,
+    //         "direccion": "Medellin",
+    //         "coordenada_x": "000000000",
+    //         "coordenada_y": "000000000",
+    //         "zona": "SUR",
+    //         "nodo": "N600"
+    //     },
+    //     "responsable_snapshot": {
+    //         "nombre": "CARLOS ALBERTO",
+    //         "area": "DEPARTAMENTO TI",
+    //         "carpeta": "PROGRAMACION",
+    //         "cargo": "LIDER DESARROLLADOR",
+    //         "movil": "PROGRAM01"
+    //     },
+    //     "ot": "00003",
+    //     "estado": "pendiente",
+    //     "responsable_id": 2761,
+    //     "fecha_inicio": "2026-02-17",
+    //     "fecha_fin_estimado": "2026-02-19",
+    //     "fecha_fin_real": "1900-01-01",
+    //     "created_at": "2026-02-12T16:01:35.352362-05:00",
+    //     "created_by": null,
+    //     "updated_at": "2026-02-12T16:01:35.352362-05:00",
+    //     "updated_by": null,
+    //     "is_deleted": false,
+    //     "deleted_at": null,
+    //     "deleted_by": null
+    // },
+
+    const actividadesColumns: ColumnDef<ActividadFormData>[] = [
         {
             header: "ID",
-            accessorKey: "id",
-        },
-        {
-            header: "Name",
-            accessorKey: "name",
-        },
-        {
-            header: "Email",
-            accessorKey: "email",
-        },
-        {
-            header: "Role",
-            accessorKey: "role",
-        },
-        {
-            header: "Status",
+            // accessorKey: "id",
             cell: ({ row }) => {
-                const status = row.original.status;
-                const color =
-                    status === "Active" ? "green" : status === "Pending" ? "yellow" : "red";
+                const id = row.original.id;
+                return (
+                    <Button variant="primary" size="sm" onClick={() => handleEditarActividad(id)}>
+                        editar
+                    </Button>
+                );
 
+            }
+        },
+        {
+            header: "OT",
+            accessorKey: "ot",
+        },
+        {
+            header: "ESTADO",
+            accessorKey: "estado",
+            cell: ({ row }) => {
+                const estado = row.original.estado || "Sin estado";
+                const color = ESTADOS[estado] || "bg-gray-400/50"; // color por defecto si el estado no está definido
                 return (
                     <span
-                        className={`px-2 py-1 rounded-full text-white text-xs bg-${color}-500`}
-                    >
-                        {status}
-                    </span>
+                        className={`px-2 py-1 rounded-full text-xs ${color}`}
+                    >{estado || "Sin estado"}</span>
                 );
             },
         },
         {
-            header: "Date Created",
-            accessorKey: "dateCreated",
-        },
-        {
-            header: "Edited By",
-            accessorKey: "editedBy",
-        },
-        {
-            header: "Functions",
-            cell: ({ row }) => row.original.functions?.join(", "),
-        },
-        {
-            header: "Comments",
-            accessorKey: "comments",
-        },
-        {
-            header: "Tags",
-            cell: ({ row }) => row.original.tags?.join(", "),
+            header: "RESPONSABLE",
+            accessorKey: "responsable_snapshot.nombre",
+            cell: ({ row }) => {
+                const responsable = row.original.responsable_snapshot?.nombre || "Sin responsable";
+                return (<span>{responsable}</span>);
+            },
         },
     ];
 
@@ -237,12 +127,12 @@ const GestionActividadesView = () => {
                     </p>
                 </div>
                 
-                <ModalAgregarActividad />
+                <ModalActividad iconButton={<PlusIcon />} textButton="Actividad" />
 
                 <div className="mt-10">
                     <DataTable
-                        data={userData}
-                        columns={userColumns}
+                        data={actividades}
+                        columns={actividadesColumns}
                         enablePagination={true}
                         pageSize={6}
                         emptyMessage="No hay actividades para mostrar."
