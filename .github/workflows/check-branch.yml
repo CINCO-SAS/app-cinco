@@ -3,6 +3,7 @@ on:
   pull_request:
     branches:
       - main # Se activa cuando el destino es main
+    types: [opened, synchronize, reopened]
 
 jobs:
   check-source-branch:
@@ -10,7 +11,15 @@ jobs:
     steps:
       - name: Verify that the source is develop
         run: |
-          if [[ "${{ github.head_ref }}" != "develop" ]]; then
-            echo "Error: Solo se permiten Pull Requests a 'main' desde la rama 'develop'."
+          SOURCE_BRANCH="${{ github.head_ref }}"
+          echo "🔍 Verificando rama de origen: $SOURCE_BRANCH"
+          echo "📍 Rama destino: ${{ github.base_ref }}"
+          
+          if [[ "$SOURCE_BRANCH" != "develop" ]]; then
+            echo "❌ Error: Solo se permiten Pull Requests a 'main' desde la rama 'develop'."
+            echo "   Tu PR viene desde: $SOURCE_BRANCH"
+            echo "   Debes hacer merge de tu rama a 'develop' primero."
             exit 1
           fi
+          
+          echo "✅ Verificación exitosa: El PR viene desde 'develop'"
