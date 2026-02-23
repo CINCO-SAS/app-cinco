@@ -1,2 +1,0 @@
-from .has_menu_permission import HasMenuPermission
-from .has_action_permission import HasMenuActionPermission

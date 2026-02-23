@@ -1,1 +1,0 @@
-from .actividad_view import ActividadViewSet
