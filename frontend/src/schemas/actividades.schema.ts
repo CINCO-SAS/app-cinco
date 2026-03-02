@@ -71,12 +71,9 @@ export const ActividadSchema = z.object({
 
   responsable_id: z
     .number({
-      required_error: "Debe seleccionar un responsable",
-      invalid_type_error: "Debe seleccionar un responsable válido",
+      message: "Debe seleccionar un responsable válido",
     })
-    .refine((val) => val > 0, {
-      message: "Debe seleccionar un responsable",
-    }),
+    .min(1, "Debe seleccionar un responsable"),
 
   fecha_inicio: z
     .string()
