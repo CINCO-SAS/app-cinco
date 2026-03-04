@@ -1,7 +1,7 @@
 
 from rest_framework import status
 from rest_framework.response import Response
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from rest_framework.viewsets import ModelViewSet
 
 from apps.operaciones.serializers.actividad_serializer import (
@@ -12,10 +12,46 @@ from apps.operaciones.services.actividad_service import ActividadService
 
 
 class ActividadViewSet(ModelViewSet):
-    # Usa permisos por defecto: IsAuthenticatedOrAPIKey
+    """
+    ViewSet para gestionar actividades/solicitudes.
+    
+    Proporciona listar, crear, actualizar y eliminar actividades.
+    Soporta filtrado avanzado por perfil, OT, estado, área, carpeta, etc.
+    
+    Autenticación requerida: Token Bearer o API Key
+    """
 
     def get_queryset(self):
-        return ActividadService.listar().select_related(
+        # Obtener el ID del usuario actual
+        usuario_id = self.request.user.id if self.request.user.is_authenticated else None
+        
+        # Extraer parámetros de filtro de los query parameters
+        filtros = {}
+        params = self.request.query_params
+        
+        # Parámetros de búsqueda y filtrado
+        if params.get('ot'):
+            filtros['ot'] = params.get('ot')
+        if params.get('estado'):
+            filtros['estado'] = params.get('estado')
+        if params.get('area'):
+            filtros['area'] = params.get('area')
+        if params.get('carpeta'):
+            filtros['carpeta'] = params.get('carpeta')
+        if params.get('responsable_id'):
+            filtros['responsable_id'] = params.get('responsable_id')
+        if params.get('buscar'):
+            filtros['buscar'] = params.get('buscar')
+        if params.get('zona'):
+            filtros['zona'] = params.get('zona')
+        if params.get('nodo'):
+            filtros['nodo'] = params.get('nodo')
+        if params.get('fecha_inicio_desde'):
+            filtros['fecha_inicio_desde'] = params.get('fecha_inicio_desde')
+        if params.get('fecha_inicio_hasta'):
+            filtros['fecha_inicio_hasta'] = params.get('fecha_inicio_hasta')
+        
+        return ActividadService.listar(usuario_id=usuario_id, **filtros).select_related(
             'detalle',
             'ubicacion',
             'responsable_snapshot'
@@ -27,10 +63,120 @@ class ActividadViewSet(ModelViewSet):
         return ActividadSerializer
 
     @extend_schema(
-        summary="Crear una nueva actividad",
+        summary="Listar actividades/solicitudes",
+        description="""
+        Obtiene un listado de actividades filtradas según el perfil del usuario actual.
+        
+        **Comportamiento de filtrado por perfil:**
+        - Por defecto, solo muestra actividades que el usuario creó (created_by) 
+          O donde es el responsable (responsable_snapshot.empleado_id)
+        
+        **Parámetros de filtrado disponibles:**
+        - `ot`: Filtra por Orden de Trabajo (búsqueda parcial)
+        - `estado`: Filtra por estado (pendiente, en_progreso, completada, cancelada, pausada, reprogramada)
+        - `area`: Filtra por área del responsable (búsqueda parcial)
+        - `carpeta`: Filtra por carpeta del responsable (búsqueda parcial)
+        - `responsable_id`: Filtra por ID del empleado responsable
+        - `buscar`: Búsqueda general en descripción, tipo de trabajo, OT y nombre del responsable
+        - `zona`: Filtra por zona de ubicación (búsqueda parcial)
+        - `nodo`: Filtra por nodo de ubicación (búsqueda parcial)
+        - `fecha_inicio_desde`: Filtra actividades con fecha de inicio >= a esta fecha (YYYY-MM-DD)
+        - `fecha_inicio_hasta`: Filtra actividades con fecha de inicio <= a esta fecha (YYYY-MM-DD)
+        """,
         tags=["operaciones"],
+        parameters=[
+            OpenApiParameter(
+                name='ot',
+                description='Filtra por Orden de Trabajo (búsqueda parcial). Ej: OT-2024-001',
+                required=False,
+                type=OpenApiTypes.STR
+            ),
+            OpenApiParameter(
+                name='estado',
+                description='Filtra por estado de la actividad. Valores: pendiente, en_progreso, completada, cancelada, pausada, reprogramada',
+                required=False,
+                type=OpenApiTypes.STR,
+                enum=['pendiente', 'en_progreso', 'completada', 'cancelada', 'pausada', 'reprogramada']
+            ),
+            OpenApiParameter(
+                name='area',
+                description='Filtra por área del responsable (búsqueda parcial)',
+                required=False,
+                type=OpenApiTypes.STR
+            ),
+            OpenApiParameter(
+                name='carpeta',
+                description='Filtra por carpeta del responsable (búsqueda parcial)',
+                required=False,
+                type=OpenApiTypes.STR
+            ),
+            OpenApiParameter(
+                name='responsable_id',
+                description='Filtra por ID del empleado responsable',
+                required=False,
+                type=OpenApiTypes.INT
+            ),
+            OpenApiParameter(
+                name='buscar',
+                description='Búsqueda general en descripción, tipo de trabajo, OT y nombre del responsable',
+                required=False,
+                type=OpenApiTypes.STR
+            ),
+            OpenApiParameter(
+                name='zona',
+                description='Filtra por zona de ubicación (búsqueda parcial)',
+                required=False,
+                type=OpenApiTypes.STR
+            ),
+            OpenApiParameter(
+                name='nodo',
+                description='Filtra por nodo de ubicación (búsqueda parcial)',
+                required=False,
+                type=OpenApiTypes.STR
+            ),
+            OpenApiParameter(
+                name='fecha_inicio_desde',
+                description='Filtra actividades con fecha de inicio >= a esta fecha (YYYY-MM-DD)',
+                required=False,
+                type=OpenApiTypes.DATE
+            ),
+            OpenApiParameter(
+                name='fecha_inicio_hasta',
+                description='Filtra actividades con fecha de inicio <= a esta fecha (YYYY-MM-DD)',
+                required=False,
+                type=OpenApiTypes.DATE
+            ),
+        ]
+    )
+    def list(self, request, *args, **kwargs):
+        """Lista actividades con filtros aplicados"""
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Crear una nueva actividad/solicitud",
+        description="""
+        Crea una nueva actividad con sus detalles de ubicación.
+        
+        **Nota:** La actividad será creada por el usuario autenticado (created_by).
+        El responsable debe ser un empleado válido existente en la base de datos de empleados.
+        
+        **Campos requeridos:**
+        - `ot`: Orden de Trabajo (única)
+        - `responsable_id`: ID del empleado responsable
+        - `detalle`: Objeto con descripción y tipo de trabajo
+        - `ubicacion`: Objeto con datos de ubicación
+        
+        **Campos opcionales:**
+        - `fecha_inicio`: Fecha de inicio (YYYY-MM-DD)
+        - `fecha_fin_estimado`: Fecha fin estimada (YYYY-MM-DD)
+        - `fecha_fin_real`: Fecha fin real (YYYY-MM-DD)
+        """,
+        tags=["operaciones"],
+        request=ActividadCreateSerializer,
+        responses={201: ActividadSerializer}
     )
     def create(self, request, *args, **kwargs):
+        """Crear una nueva actividad"""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -40,3 +186,46 @@ class ActividadViewSet(ModelViewSet):
             ActividadSerializer(actividad).data,
             status=status.HTTP_201_CREATED
         )
+
+    @extend_schema(
+        summary="Obtener detalles de una actividad",
+        description="Obtiene toda la información de una actividad específica incluyendo detalles, ubicación y snapshot del responsable.",
+        tags=["operaciones"],
+        responses={200: ActividadSerializer}
+    )
+    def retrieve(self, request, *args, **kwargs):
+        """Obtener detalles de una actividad"""
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Actualizar una actividad completamente",
+        description="Actualiza todos los campos de una actividad. Se requieren todos los campos requeridos.",
+        tags=["operaciones"],
+        request=ActividadSerializer,
+        responses={200: ActividadSerializer}
+    )
+    def update(self, request, *args, **kwargs):
+        """Actualizar una actividad completamente"""
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Actualizar parcialmente una actividad",
+        description="Actualiza solo los campos proporcionados de una actividad.",
+        tags=["operaciones"],
+        request=ActividadSerializer,
+        responses={200: ActividadSerializer}
+    )
+    def partial_update(self, request, *args, **kwargs):
+        """Actualizar parcialmente una actividad"""
+        return super().partial_update(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Eliminar una actividad",
+        description="Elimina (soft delete) una actividad. No se elimina realmente, solo se marca como eliminada.",
+        tags=["operaciones"],
+        responses={204: None}
+    )
+    def destroy(self, request, *args, **kwargs):
+        """Eliminar una actividad"""
+        return super().destroy(request, *args, **kwargs)
+
