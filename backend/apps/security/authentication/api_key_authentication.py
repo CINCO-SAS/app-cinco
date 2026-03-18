@@ -2,7 +2,6 @@ from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from apps.security.models import APIKey
 from django.utils import timezone
-from datetime import datetime
 import logging
 
 logger = logging.getLogger('security')
@@ -13,12 +12,12 @@ class APIKeyAuthentication(BaseAuthentication):
     Autenticación mediante API Key para aplicaciones externas
     Header requerido: X-API-Key: cinco_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
     """
-    
+
     keyword = "X-API-Key"
 
     def authenticate(self, request):
-        api_key = request.headers.get(self.keyword)
-        
+        api_key = request.headers.get(self.keyword, "").strip()
+
         if not api_key:
             # No hay API Key, otro método de autenticación lo manejará
             return None
@@ -28,7 +27,7 @@ class APIKeyAuthentication(BaseAuthentication):
 
         # Buscar la API Key por su hash
         key_hash = APIKey.hash_key(api_key)
-        prefix = api_key[:13]
+        prefix = api_key[:APIKey.get_prefix_length()]
 
         try:
             api_key_obj = APIKey.objects.get(
