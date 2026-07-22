@@ -117,7 +117,11 @@ const CertificadosLaboralesModule = () => {
   };
 
   const handleDownloadAuto = () => {
-    void triggerDownload();
+    const manualData: CertificadoLaboralManualData = {
+      estado,
+      ...(fechaEgreso ? { fecha_egreso: fechaEgreso } : {}),
+    };
+    void triggerDownload(manualData);
   };
 
   const handleDownloadManual = () => {
@@ -158,23 +162,39 @@ const CertificadosLaboralesModule = () => {
               includeInactive={true}
             />
 
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Tipo de documento
-              </label>
-              <select
-                value={documentType}
-                onChange={(event) =>
-                  setDocumentType(event.target.value as DocumentType)
-                }
-                className={selectClasses}
-              >
-                {documentTypeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Tipo de documento
+                </label>
+                <select
+                  value={documentType}
+                  onChange={(event) =>
+                    setDocumentType(event.target.value as DocumentType)
+                  }
+                  className={selectClasses}
+                >
+                  {documentTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Estado del certificado
+                </label>
+                <select
+                  value={estado}
+                  onChange={(event) => setEstado(event.target.value)}
+                  className={selectClasses}
+                >
+                  <option value="ACTIVO">Activo</option>
+                  <option value="INACTIVO">Inactivo / Retirado</option>
+                </select>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -385,6 +405,22 @@ const CertificadosLaboralesModule = () => {
                 </dt>
                 <dd className="font-medium text-gray-800 dark:text-white/90">
                   {documentType}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">
+                  Estado del certificado
+                </dt>
+                <dd className="font-medium text-gray-800 dark:text-white/90">
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                      estado === "INACTIVO"
+                        ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+                        : "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                    }`}
+                  >
+                    {estado === "INACTIVO" ? "Inactivo / Retirado" : "Activo"}
+                  </span>
                 </dd>
               </div>
               <div>

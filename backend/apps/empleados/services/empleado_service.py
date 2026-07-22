@@ -378,7 +378,14 @@ class EmpleadoService:
         else:
             estado = str(siigo_data.get("estado") or "ACTIVO").strip().upper()
 
-        is_activo = (estado != "INACTIVO") and not fecha_egreso
+        if manual_estado and str(manual_estado).strip().upper() == "ACTIVO":
+            is_activo = True
+            if not manual_data.get("fecha_egreso"):
+                fecha_egreso = None
+        elif manual_estado and str(manual_estado).strip().upper() == "INACTIVO":
+            is_activo = False
+        else:
+            is_activo = (estado != "INACTIVO") and not fecha_egreso
 
         raw_cargo = (
             manual_data.get("cargo")
@@ -787,7 +794,7 @@ class EmpleadoService:
     def _render_certificado_laboral_pdf(*, context):
         try:
             from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.pagesizes import letter
             from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
             from reportlab.lib.units import cm
             from reportlab.lib.utils import ImageReader
@@ -796,7 +803,7 @@ class EmpleadoService:
             raise RuntimeError("reportlab_no_instalado") from exc
 
         buffer = BytesIO()
-        page_width, page_height = A4
+        page_width, page_height = letter
         styles = getSampleStyleSheet()
         title_style = ParagraphStyle(
             "CertTitle",
@@ -885,11 +892,11 @@ class EmpleadoService:
                 f"Certifica que {prefijo_persona} <b>{nombre_completo}</b>, {art_identificado} con documento de "
                 f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
                 f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
-                f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
+                f"<b>{fecha_ingreso_texto}</b>, desempeñándose como "
                 f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
                 f"más auxilio de transporte {contrato_phrase}"
             )
-            body = f"Esta certificación fue expedida a solicitud {art_interesado} el <b>{fecha_expedicion_texto}</b>."
+            body = f"Esta certificación fue expedida a solicitud {art_interesado} a partir del <b>{fecha_expedicion_texto_largo}</b>."
         else:
             if contrato.strip().lower() in ("término indefinido", "término fijo"):
                 contrato_phrase = f"y su contrato fue a <b>{contrato}</b>."
@@ -941,7 +948,7 @@ class EmpleadoService:
 
         doc = SimpleDocTemplate(
             buffer,
-            pagesize=A4,
+            pagesize=letter,
             leftMargin=2 * cm,
             rightMargin=2 * cm,
             topMargin=4 * cm,
