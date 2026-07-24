@@ -16,8 +16,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es">
-      <body className={`${outfit.className} dark:bg-gray-900 overflow-hidden`}>
+    <html lang="es" suppressHydrationWarning>
+      <body className={`${outfit.className} dark:bg-gray-900 overflow-hidden`} suppressHydrationWarning>
         <Toaster />
         <ThemeProvider>
           <SidebarProvider>{children}</SidebarProvider>

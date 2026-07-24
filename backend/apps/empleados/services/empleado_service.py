@@ -1058,7 +1058,7 @@ class EmpleadoService:
                     remote_url,
                     headers={"User-Agent": "Mozilla/5.0"}
                 )
-                with urllib.request.urlopen(req, timeout=5) as response:
+                with urllib.request.urlopen(req, timeout=2) as response:
                     if response.status == 200:
                         local_path.write_bytes(response.read())
                         return local_path

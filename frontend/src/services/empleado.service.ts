@@ -107,11 +107,13 @@ export const downloadCertificadoLaboral = async (
         },
         {
           responseType: "blob",
+          timeout: 60000,
         },
       )
     : await api.get(`/empleados/empleados/${id}/certificado-laboral/`, {
         params: documentType ? { document_type: documentType } : undefined,
         responseType: "blob",
+        timeout: 60000,
       });
 
   const contentDisposition = String(

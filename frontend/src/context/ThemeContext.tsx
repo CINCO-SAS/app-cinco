@@ -15,13 +15,15 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [theme, setTheme] = useState<Theme>(() => {
-    // This will only run on the client side during initialization
-    if (typeof window === "undefined") return "light";
-    const savedTheme = localStorage.getItem("theme") as Theme | null;
-    return savedTheme || "light";
-  });
+  const [theme, setTheme] = useState<Theme>("light");
   const isInitializedRef = useRef(false);
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme") as Theme | null;
+    if (savedTheme) {
+      setTheme(savedTheme);
+    }
+  }, []);
 
   useEffect(() => {
     isInitializedRef.current = true;
