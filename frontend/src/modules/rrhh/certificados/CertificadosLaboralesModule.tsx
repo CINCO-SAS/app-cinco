@@ -8,7 +8,7 @@ import Button from "@/components/ui/button/Button";
 import { getErrorMessage, classifyError } from "@/lib/errorHandler";
 import { downloadCertificadoLaboral, CertificadoLaboralManualData } from "@/services/empleado.service";
 import { Empleado } from "@/types/empleado";
-import { Download, FileText, Edit, UserX } from "lucide-react";
+import { Download, FileText, Edit, UserX, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/auth.store";
 import { hasCertificadosPermission } from "@/utils/permission";
@@ -201,7 +201,13 @@ const CertificadosLaboralesModule = () => {
               <Button
                 onClick={handleDownloadAuto}
                 disabled={!selectedEmployee || isDownloading}
-                startIcon={<Download size={16} />}
+                startIcon={
+                  isDownloading ? (
+                    <Loader2 size={16} className="animate-spin text-white" />
+                  ) : (
+                    <Download size={16} />
+                  )
+                }
               >
                 {isDownloading ? "Generando certificado..." : "Descargar certificado"}
               </Button>
@@ -210,12 +216,29 @@ const CertificadosLaboralesModule = () => {
                 <Button
                   variant="outline"
                   onClick={() => setShowManualForm(true)}
+                  disabled={isDownloading}
                   startIcon={<Edit size={16} />}
                 >
                   Ingresar datos manualmente
                 </Button>
               )}
             </div>
+
+            {isDownloading && (
+              <div className="flex items-center gap-3.5 rounded-xl border border-brand-200 bg-brand-50/80 p-4 dark:border-brand-900/60 dark:bg-brand-950/40 text-brand-900 dark:text-brand-100 shadow-sm animate-pulse">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 dark:bg-brand-500/20 dark:text-brand-400">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                </div>
+                <div className="text-sm">
+                  <p className="font-semibold text-brand-800 dark:text-brand-200">
+                    Generando certificado laboral PDF...
+                  </p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    Consultando la información del empleado y compilando el documento. Por favor espera un momento.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {errorMessage ? (
               <Alert
@@ -354,7 +377,13 @@ const CertificadosLaboralesModule = () => {
                     size="sm"
                     onClick={handleDownloadManual}
                     disabled={isDownloading}
-                    startIcon={<Download size={15} />}
+                    startIcon={
+                      isDownloading ? (
+                        <Loader2 size={15} className="animate-spin text-white" />
+                      ) : (
+                        <Download size={15} />
+                      )
+                    }
                   >
                     {isDownloading ? "Generando..." : "Generar con datos manuales"}
                   </Button>

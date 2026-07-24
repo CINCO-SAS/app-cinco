@@ -36,10 +36,13 @@ const ResizableComposer = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const dragStartRef = useRef<{ y: number; height: number } | null>(null);
   const [manualHeight, setManualHeight] = useState<number | null>(null);
-  const [autoHeight, setAutoHeight] = useState(minHeight);
-  const [viewportHeight, setViewportHeight] = useState<number>(() =>
-    typeof window !== "undefined" ? window.innerHeight : 900,
-  );
+  const [viewportHeight, setViewportHeight] = useState<number>(900);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setViewportHeight(window.innerHeight);
+    }
+  }, []);
 
   const dynamicMaxHeight = useMemo(
     () => clamp(Math.floor(viewportHeight * 0.4), minHeight, maxHeight),
