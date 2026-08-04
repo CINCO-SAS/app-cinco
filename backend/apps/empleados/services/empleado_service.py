@@ -19,6 +19,7 @@ class EmpleadoService:
     FOOTER_FILENAME = "gghh_certificado_laboral_footer.png"
     SELLO_FILENAME = "sello_cinco.png"
     FIRMA_FILENAME = "Firma-RRHH.png"
+    SMLV_VIGENTE = Decimal("1750905")
     ALLOWED_TEMPORAL_COLUMNS = {"fecha_ingreso", "fecha_egreso"}
     RESERVED_RUNTIME_PARAMS = {
         "estado",
@@ -846,6 +847,10 @@ class EmpleadoService:
             alignment=TA_LEFT,
         )
 
+        salario = context.get("salario", Decimal("0"))
+        tiene_auxilio = salario <= (2 * EmpleadoService.SMLV_VIGENTE)
+        auxilio_text = " más auxilio de transporte" if tiene_auxilio else ""
+
         nombre_completo = EmpleadoService._escape_pdf_text(context["nombre_completo"])
         cedula = EmpleadoService._escape_pdf_text(context["cedula"])
         document_type_label = EmpleadoService._escape_pdf_text(
@@ -893,8 +898,8 @@ class EmpleadoService:
                 f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
                 f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
                 f"<b>{fecha_ingreso_texto}</b>, desempeñándose como "
-                f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
-                f"más auxilio de transporte {contrato_phrase}"
+                f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b>"
+                f"{auxilio_text} {contrato_phrase}"
             )
             body = f"Esta certificación fue expedida a solicitud {art_interesado} a partir del <b>{fecha_expedicion_texto_largo}</b>."
         else:
@@ -909,7 +914,7 @@ class EmpleadoService:
                 f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
                 f"<b>{fecha_ingreso_texto}</b>, hasta el día <b>{fecha_egreso_texto}</b> "
                 f"desempeñándose como <b>{cargo}</b>, con un salario básico de "
-                f"<b>{salario_texto}</b> más auxilio de transporte {contrato_phrase}"
+                f"<b>{salario_texto}</b>{auxilio_text} {contrato_phrase}"
             )
             body = f"Esta certificación fue expedida a solicitud {art_interesado} a partir del <b>{fecha_expedicion_texto_largo}</b>."
 

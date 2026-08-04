@@ -40,9 +40,19 @@ const ResizableComposer = ({
   const [viewportHeight, setViewportHeight] = useState<number>(900);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window === "undefined") return;
+
+    const handleResize = () => {
       setViewportHeight(window.innerHeight);
-    }
+    };
+
+    const animId = requestAnimationFrame(handleResize);
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener("resize", handleResize);
+    };
   }, []);
 
   const dynamicMaxHeight = useMemo(
