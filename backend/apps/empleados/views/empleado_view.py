@@ -345,15 +345,22 @@ class EmpleadoViewSet(ModelViewSet):
         
         if firma_imagen:
             import os
-            import uuid
             from django.core.files.storage import FileSystemStorage
+            from django.utils.text import get_valid_filename
             
-            ext = os.path.splitext(firma_imagen.name)[1] or ".png"
-            filename = f"firma_rrhh_{uuid.uuid4().hex}{ext}"
+            filename = get_valid_filename(firma_imagen.name)
             
             # Guardar en directorio local
             local_dir = EmpleadoService.LOCAL_IMAGE_DIR
             local_dir.mkdir(parents=True, exist_ok=True)
+            
+            local_file_path = local_dir / filename
+            if local_file_path.exists():
+                try:
+                    local_file_path.unlink()
+                except Exception:
+                    pass
+                    
             fs_local = FileSystemStorage(location=str(local_dir))
             fs_local.save(filename, firma_imagen)
             
@@ -362,6 +369,13 @@ class EmpleadoViewSet(ModelViewSet):
             if server_dir.exists():
                 try:
                     server_dir.mkdir(parents=True, exist_ok=True)
+                    server_file_path = server_dir / filename
+                    if server_file_path.exists():
+                        try:
+                            server_file_path.unlink()
+                        except Exception:
+                            pass
+                    
                     fs_server = FileSystemStorage(location=str(server_dir))
                     firma_imagen.seek(0)
                     fs_server.save(filename, firma_imagen)
