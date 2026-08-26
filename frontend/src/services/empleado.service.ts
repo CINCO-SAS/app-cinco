@@ -142,3 +142,26 @@ export const clearEmpleadosCache = (): void => {
     }
   });
 };
+
+export interface CertificadoFirmaConfigData {
+  firmante_nombre: string;
+  firmante_cargo: string;
+  firma_imagen_nombre: string;
+  can_edit: boolean;
+}
+
+export const getCertificadoFirmaConfig = async (): Promise<CertificadoFirmaConfigData> => {
+  const res = await api.get("/empleados/empleados/certificado-config/");
+  return res.data;
+};
+
+export const updateCertificadoFirmaConfig = async (
+  formData: FormData,
+): Promise<CertificadoFirmaConfigData> => {
+  const res = await api.post("/empleados/empleados/certificado-config/update/", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+  return res.data;
+};
