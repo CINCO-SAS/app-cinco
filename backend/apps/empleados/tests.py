@@ -385,3 +385,40 @@ class EmpleadoViewSetTests(TestCase):
             document_type="CC",
             manual_data={"salario": "1800000", "tipo_contrato": "OBRA Y LABOR"},
         )
+
+    @patch("apps.security.models.CertificadoFirmaConfig.objects")
+    def test_certificado_config_endpoints_get(self, mock_config_objects):
+        mock_config = MagicMock(
+            firmante_nombre="JEFE PRUEBA",
+            firmante_cargo="CARGO PRUEBA",
+            firma_imagen_nombre="firma_prueba.png"
+        )
+        mock_config_objects.first.return_value = mock_config
+        
+        request = APIRequestFactory().get("/empleados/empleados/certificado-config/")
+        request.user = MagicMock(is_authenticated=True, is_superuser=True)
+        
+        view = EmpleadoViewSet()
+        response = view.get_certificado_config(request)
+        
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["firmante_nombre"], "JEFE PRUEBA")
+        self.assertEqual(response.data["firmante_cargo"], "CARGO PRUEBA")
+        self.assertEqual(response.data["firma_imagen_nombre"], "firma_prueba.png")
+        self.assertTrue(response.data["can_edit"])
+
+    @patch("apps.security.models.CertificadoFirmaConfig.objects")
+    def test_certificado_config_endpoints_update_forbidden(self, mock_config_objects):
+        request = APIRequestFactory().post("/empleados/empleados/certificado-config/update/", {
+            "firmante_nombre": "OTRO JEFE",
+            "firmante_cargo": "OTRO CARGO"
+        })
+        user = MagicMock(is_authenticated=True, is_superuser=False, username="user1")
+        request.user = user
+        
+        with patch("apps.empleados.views.empleado_view.Empleado.objects.filter") as mock_emp_filter:
+            mock_emp_filter.return_value.first.return_value = MagicMock(area="MANTENIMIENTO", carpeta="MANTENIMIENTO")
+            view = EmpleadoViewSet()
+            response = view.update_certificado_config(request)
+            
+        self.assertEqual(response.status_code, 403)

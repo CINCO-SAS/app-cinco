@@ -6,13 +6,20 @@ import { EmployeeSearchInput } from "@/components/form/EmployeeSearchInput";
 import Alert from "@/components/ui/alert/Alert";
 import Button from "@/components/ui/button/Button";
 import { getErrorMessage, classifyError } from "@/lib/errorHandler";
-import { downloadCertificadoLaboral, CertificadoLaboralManualData } from "@/services/empleado.service";
+import {
+  downloadCertificadoLaboral,
+  CertificadoLaboralManualData,
+  getCertificadoFirmaConfig,
+  updateCertificadoFirmaConfig,
+  CertificadoFirmaConfigData
+} from "@/services/empleado.service";
 import { Empleado } from "@/types/empleado";
-import { Download, FileText, Edit, UserX, Loader2 } from "lucide-react";
+import { Download, FileText, Edit, UserX, Loader2, Save, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/auth.store";
-import { hasCertificadosPermission } from "@/utils/permission";
+import { hasCertificadosPermission, hasFirmaConfigPermission } from "@/utils/permission";
 import { useRouter } from "next/navigation";
+import { API_BASE_URL } from "@/lib/apiConfig";
 
 type DocumentType = "CC" | "PT" | "TI" | "CE";
 
@@ -55,6 +62,69 @@ const CertificadosLaboralesModule = () => {
   const [fechaEgreso, setFechaEgreso] = useState("");
   const [estado, setEstado] = useState("ACTIVO");
   const [genero, setGenero] = useState("M");
+
+  // Signature management state
+  const hasFirmaPermission = hasFirmaConfigPermission(user);
+  const [firmaConfig, setFirmaConfig] = useState<CertificadoFirmaConfigData | null>(null);
+  const [firmanteNombre, setFirmanteNombre] = useState("");
+  const [firmanteCargo, setFirmanteCargo] = useState("");
+  const [firmaFile, setFirmaFile] = useState<File | null>(null);
+  const [isSavingFirma, setIsSavingFirma] = useState(false);
+  const [firmaPreviewUrl, setFirmaPreviewUrl] = useState("");
+  const [firmaMessage, setFirmaMessage] = useState("");
+  const [firmaError, setFirmaError] = useState("");
+  const [cacheBuster, setCacheBuster] = useState(0);
+
+  const loadFirmaConfig = async () => {
+    try {
+      const data = await getCertificadoFirmaConfig();
+      setFirmaConfig(data);
+      setFirmanteNombre(data.firmante_nombre);
+      setFirmanteCargo(data.firmante_cargo);
+      setFirmaPreviewUrl(`${API_BASE_URL}/empleados/empleados/certificado-firma-imagen/?t=${Date.now()}`);
+    } catch (err) {
+      console.error("Error al cargar la configuración de la firma", err);
+    }
+  };
+
+  useEffect(() => {
+    if (user && hasFirmaPermission) {
+      loadFirmaConfig();
+    }
+  }, [user, hasFirmaPermission]);
+
+  const handleSaveFirmaConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!firmanteNombre.trim() || !firmanteCargo.trim()) {
+      setFirmaError("El nombre y cargo son obligatorios.");
+      return;
+    }
+
+    setIsSavingFirma(true);
+    setFirmaError("");
+    setFirmaMessage("");
+
+    try {
+      const formData = new FormData();
+      formData.append("firmante_nombre", firmanteNombre.trim());
+      formData.append("firmante_cargo", firmanteCargo.trim());
+      if (firmaFile) {
+        formData.append("firma_imagen", firmaFile);
+      }
+
+      const updated = await updateCertificadoFirmaConfig(formData);
+      setFirmaConfig(updated);
+      setFirmaFile(null);
+      setCacheBuster((prev) => prev + 1);
+      setFirmaMessage("Configuración de firma actualizada exitosamente.");
+      setFirmaPreviewUrl(`${API_BASE_URL}/empleados/empleados/certificado-firma-imagen/?t=${Date.now()}`);
+    } catch (err: any) {
+      const msg = getErrorMessage(err);
+      setFirmaError(msg || "Ocurrió un error al guardar la configuración.");
+    } finally {
+      setIsSavingFirma(false);
+    }
+  };
 
   useEffect(() => {
     if (user && !hasPermission) {
@@ -464,6 +534,118 @@ const CertificadosLaboralesModule = () => {
           </div>
         </div>
       </ComponentCard>
+
+      {hasFirmaPermission && (
+        <div className="mt-6">
+          <ComponentCard title="Gestión de Firma del Certificado">
+            <form onSubmit={handleSaveFirmaConfig} className="space-y-6">
+              {firmaMessage && (
+                <Alert variant="success" title="Éxito" message={firmaMessage} />
+              )}
+              {firmaError && (
+                <Alert variant="error" title="Error" message={firmaError} />
+              )}
+
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Nombre del firmante
+                    </label>
+                    <input
+                      type="text"
+                      value={firmanteNombre}
+                      onChange={(e) => setFirmanteNombre(e.target.value)}
+                      placeholder="Ej. FARAY MONSALVE URREGO"
+                      className={inputClasses}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Cargo del firmante
+                    </label>
+                    <input
+                      type="text"
+                      value={firmanteCargo}
+                      onChange={(e) => setFirmanteCargo(e.target.value)}
+                      placeholder="Ej. Dirección Gestión Humana"
+                      className={inputClasses}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Nueva imagen de firma (PNG/JPG)
+                    </label>
+                    <div className="relative flex items-center justify-center rounded-lg border border-dashed border-gray-300 p-4 hover:bg-gray-50/50 dark:border-gray-700 dark:hover:bg-gray-800/50">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            setFirmaFile(e.target.files[0]);
+                          }
+                        }}
+                        className="absolute inset-0 cursor-pointer opacity-0"
+                      />
+                      <div className="flex flex-col items-center space-y-1 text-center">
+                        <Upload className="h-6 w-6 text-gray-400" />
+                        <span className="text-xs text-gray-600 dark:text-gray-400">
+                          {firmaFile ? firmaFile.name : "Subir imagen de firma"}
+                        </span>
+                        <span className="text-[10px] text-gray-400">
+                          Arrastra o selecciona un archivo
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-gray-50/50 p-6 dark:border-gray-800 dark:bg-gray-900/30">
+                  <span className="mb-3 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    Vista previa de firma actual
+                  </span>
+                  <div className="flex h-36 w-full max-w-60 items-center justify-center rounded-lg border border-gray-300 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-950">
+                    {firmaPreviewUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={firmaPreviewUrl}
+                        alt="Firma actual"
+                        className="max-h-full max-w-full object-contain"
+                        onError={(e) => {
+                          // No-op
+                        }}
+                      />
+                    ) : (
+                      <span className="text-xs text-gray-400">Sin firma configurada</span>
+                    )}
+                  </div>
+                  <span className="mt-2 text-[10px] text-gray-400 text-center">
+                    Esta firma se plasmará en todos los certificados generados
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-gray-200 dark:border-gray-800">
+                <Button
+                  type="submit"
+                  disabled={isSavingFirma}
+                  startIcon={
+                    isSavingFirma ? (
+                      <Loader2 size={15} className="animate-spin text-white" />
+                    ) : (
+                      <Save size={15} />
+                    )
+                  }
+                >
+                  {isSavingFirma ? "Guardando..." : "Guardar cambios"}
+                </Button>
+              </div>
+            </form>
+          </ComponentCard>
+        </div>
+      )}
     </div>
   );
 };
