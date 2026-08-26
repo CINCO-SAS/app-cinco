@@ -46,3 +46,28 @@ export const hasCertificadosPermission = (
   // Cumple la condición si pertenece estrictamente a AMBAS (área Y carpeta de Gestión Humana)
   return isGestionHumanaArea && isGestionHumanaCarpeta;
 };
+
+/**
+ * Evalúa si un usuario tiene permiso para gestionar/modificar la firma
+ * del certificado laboral.
+ *
+ * Condiciones:
+ * 1. Es superusuario (`is_superuser: true`).
+ * 2. O pertenece al área o carpeta 'PROGRAMACION' o 'ADMIN'.
+ */
+export const hasFirmaConfigPermission = (
+  user: AuthUser | null | undefined,
+): boolean => {
+  if (!user) return false;
+  if (user.is_superuser) return true;
+
+  const area = normalizeText(user.area);
+  const carpeta = normalizeText(user.carpeta);
+
+  return (
+    area.includes("PROGRAMACION") ||
+    area.includes("ADMIN") ||
+    carpeta.includes("PROGRAMACION") ||
+    carpeta.includes("ADMIN")
+  );
+};

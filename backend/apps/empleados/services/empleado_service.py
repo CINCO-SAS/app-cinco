@@ -426,6 +426,17 @@ class EmpleadoService:
             empleado=empleado,
             requested_type=document_type,
         )
+        firmante_nombre = "FARAY MONSALVE URREGO"
+        firmante_cargo = "Dirección Gestión Humana"
+        try:
+            from apps.security.models import CertificadoFirmaConfig
+            config = CertificadoFirmaConfig.objects.first()
+            if config:
+                firmante_nombre = config.firmante_nombre
+                firmante_cargo = config.firmante_cargo
+        except Exception:
+            pass
+
         return {
             "empleado_id": getattr(empleado, "id", None),
             "nombre_completo": EmpleadoService._resolve_full_name(empleado=empleado, siigo_data=siigo_data),
@@ -451,8 +462,8 @@ class EmpleadoService:
             "contrato": contrato,
             "company_name": "Compañía Integral Negocios de Colombia",
             "company_nit": "811042087-2",
-            "firmante_nombre": "FARAY MONSALVE URREGO",
-            "firmante_cargo": "Dirección Gestión Humana",
+            "firmante_nombre": firmante_nombre,
+            "firmante_cargo": firmante_cargo,
         }
 
     @staticmethod
@@ -930,8 +941,18 @@ class EmpleadoService:
             Spacer(1, 3.2 * cm),
         ]
 
+        firma_imagen_nombre = "Firma-RRHH.png"
+        try:
+            from apps.security.models import CertificadoFirmaConfig
+            config = CertificadoFirmaConfig.objects.first()
+            if config:
+                firma_imagen_nombre = config.firma_imagen_nombre
+        except Exception:
+            pass
+
         firma_path = (
-            EmpleadoService._resolve_certificate_image_path(EmpleadoService.FIRMA_FILENAME)
+            EmpleadoService._resolve_certificate_image_path(firma_imagen_nombre)
+            or EmpleadoService._resolve_certificate_image_path(EmpleadoService.FIRMA_FILENAME)
             or EmpleadoService._resolve_certificate_image_path("firma-rrhh.png")
             or EmpleadoService._resolve_certificate_image_path("firma_rrhh.png")
         )

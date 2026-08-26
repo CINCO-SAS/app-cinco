@@ -297,3 +297,120 @@ class EmpleadoViewSet(ModelViewSet):
         response = HttpResponse(result["content"], content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{result["filename"]}"'
         return response
+
+    @action(detail=False, methods=["get"], url_path="certificado-config")
+    def get_certificado_config(self, request, *args, **kwargs):
+        if not request.user or not request.user.is_authenticated:
+            return Response({"detail": "No autenticado"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+        from apps.security.models import CertificadoFirmaConfig
+        config = CertificadoFirmaConfig.objects.first()
+        
+        firmante_nombre = config.firmante_nombre if config else "FARAY MONSALVE URREGO"
+        firmante_cargo = config.firmante_cargo if config else "Dirección Gestión Humana"
+        firma_imagen_nombre = config.firma_imagen_nombre if config else "Firma-RRHH.png"
+        
+        can_edit = _is_admin_or_programacion(request.user)
+        
+        return Response({
+            "firmante_nombre": firmante_nombre,
+            "firmante_cargo": firmante_cargo,
+            "firma_imagen_nombre": firma_imagen_nombre,
+            "can_edit": can_edit
+        })
+
+    @action(detail=False, methods=["post"], url_path="certificado-config/update")
+    def update_certificado_config(self, request, *args, **kwargs):
+        if not request.user or not request.user.is_authenticated:
+            return Response({"detail": "No autenticado"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+        if not _is_admin_or_programacion(request.user):
+            return Response({"detail": "No tiene permisos para modificar el firmante de los certificados"}, status=status.HTTP_403_FORBIDDEN)
+            
+        firmante_nombre = request.data.get("firmante_nombre")
+        firmante_cargo = request.data.get("firmante_cargo")
+        firma_imagen = request.FILES.get("firma_imagen")
+        
+        if not firmante_nombre or not firmante_cargo:
+            return Response({"detail": "El nombre y el cargo son requeridos"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        from apps.security.models import CertificadoFirmaConfig
+        config = CertificadoFirmaConfig.objects.first()
+        if not config:
+            config = CertificadoFirmaConfig()
+            
+        config.firmante_nombre = firmante_nombre.strip()
+        config.firmante_cargo = firmante_cargo.strip()
+        
+        if firma_imagen:
+            import os
+            import uuid
+            from django.core.files.storage import FileSystemStorage
+            
+            ext = os.path.splitext(firma_imagen.name)[1] or ".png"
+            filename = f"firma_rrhh_{uuid.uuid4().hex}{ext}"
+            
+            # Guardar en directorio local
+            local_dir = EmpleadoService.LOCAL_IMAGE_DIR
+            local_dir.mkdir(parents=True, exist_ok=True)
+            fs_local = FileSystemStorage(location=str(local_dir))
+            fs_local.save(filename, firma_imagen)
+            
+            # Guardar en directorio servidor si existe
+            server_dir = EmpleadoService.SERVER_IMAGE_DIR
+            if server_dir.exists():
+                try:
+                    server_dir.mkdir(parents=True, exist_ok=True)
+                    fs_server = FileSystemStorage(location=str(server_dir))
+                    firma_imagen.seek(0)
+                    fs_server.save(filename, firma_imagen)
+                except Exception:
+                    pass
+                    
+            config.firma_imagen_nombre = filename
+            
+        config.save()
+        
+        return Response({
+            "firmante_nombre": config.firmante_nombre,
+            "firmante_cargo": config.firmante_cargo,
+            "firma_imagen_nombre": config.firma_imagen_nombre,
+            "can_edit": True
+        })
+
+    @action(detail=False, methods=["get"], url_path="certificado-firma-imagen")
+    def get_certificado_firma_imagen(self, request, *args, **kwargs):
+        from apps.security.models import CertificadoFirmaConfig
+        config = CertificadoFirmaConfig.objects.first()
+        filename = config.firma_imagen_nombre if config else "Firma-RRHH.png"
+        
+        path = EmpleadoService._resolve_certificate_image_path(filename)
+        if not path or not path.exists():
+            from django.http import Http404
+            raise Http404("Firma no encontrada")
+            
+        from django.http import FileResponse
+        content_type = "image/png"
+        if filename.lower().endswith(".jpg") or filename.lower().endswith(".jpeg"):
+            content_type = "image/jpeg"
+            
+        return FileResponse(open(path, "rb"), content_type=content_type)
+
+
+def _is_admin_or_programacion(user):
+    if not user or not user.is_authenticated:
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    try:
+        from apps.empleados.models import Empleado
+        from django.db.models import Q
+        empleado = Empleado.objects.filter(Q(cedula=user.username) | Q(id=user.id)).first()
+        if empleado:
+            area = (empleado.area or "").strip().upper()
+            carpeta = (empleado.carpeta or "").strip().upper()
+            if "PROGRAMACION" in area or "ADMIN" in area or "PROGRAMACION" in carpeta or "ADMIN" in carpeta:
+                return True
+    except Exception:
+        pass
+    return False

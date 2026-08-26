@@ -72,3 +72,14 @@ class APIKey(models.Model):
     def verify_key(self, key: str) -> bool:
         """Verifica si una key coincide con el hash almacenado"""
         return self.key_hash == self.hash_key(key)
+
+
+class CertificadoFirmaConfig(models.Model):
+    firmante_nombre = models.CharField(max_length=255, default="FARAY MONSALVE URREGO")
+    firmante_cargo = models.CharField(max_length=255, default="Dirección Gestión Humana")
+    firma_imagen_nombre = models.CharField(max_length=255, default="Firma-RRHH.png")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "certificado_firma_config"
+        app_label = "security"
