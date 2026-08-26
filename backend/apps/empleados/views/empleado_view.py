@@ -354,6 +354,24 @@ class EmpleadoViewSet(ModelViewSet):
             local_dir = EmpleadoService.LOCAL_IMAGE_DIR
             local_dir.mkdir(parents=True, exist_ok=True)
             
+            # Intentar eliminar la firma anterior si era personalizada para no acumular basura
+            old_filename = config.firma_imagen_nombre
+            server_dir = EmpleadoService.SERVER_IMAGE_DIR
+            if old_filename and old_filename not in ["Firma-RRHH.png", "firma-rrhh.png", "firma_rrhh.png"]:
+                old_local_path = local_dir / old_filename
+                if old_local_path.exists():
+                    try:
+                        old_local_path.unlink()
+                    except Exception:
+                        pass
+                if server_dir.exists():
+                    old_server_path = server_dir / old_filename
+                    if old_server_path.exists():
+                        try:
+                            old_server_path.unlink()
+                        except Exception:
+                            pass
+            
             local_file_path = local_dir / filename
             if local_file_path.exists():
                 try:
@@ -362,14 +380,13 @@ class EmpleadoViewSet(ModelViewSet):
                     pass
                     
             fs_local = FileSystemStorage(location=str(local_dir))
-            fs_local.save(filename, firma_imagen)
+            saved_filename = fs_local.save(filename, firma_imagen)
             
             # Guardar en directorio servidor si existe
-            server_dir = EmpleadoService.SERVER_IMAGE_DIR
             if server_dir.exists():
                 try:
                     server_dir.mkdir(parents=True, exist_ok=True)
-                    server_file_path = server_dir / filename
+                    server_file_path = server_dir / saved_filename
                     if server_file_path.exists():
                         try:
                             server_file_path.unlink()
@@ -378,11 +395,11 @@ class EmpleadoViewSet(ModelViewSet):
                     
                     fs_server = FileSystemStorage(location=str(server_dir))
                     firma_imagen.seek(0)
-                    fs_server.save(filename, firma_imagen)
+                    fs_server.save(saved_filename, firma_imagen)
                 except Exception:
                     pass
                     
-            config.firma_imagen_nombre = filename
+            config.firma_imagen_nombre = saved_filename
             
         config.save()
         
