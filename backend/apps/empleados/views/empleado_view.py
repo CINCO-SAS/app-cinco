@@ -8,6 +8,7 @@ from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiTypes
 from django.http import HttpResponse
 from apps.empleados.services import EmpleadoService
+from rest_framework.permissions import AllowAny
 
 
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
@@ -378,7 +379,7 @@ class EmpleadoViewSet(ModelViewSet):
             "can_edit": True
         })
 
-    @action(detail=False, methods=["get"], url_path="certificado-firma-imagen")
+    @action(detail=False, methods=["get"], url_path="certificado-firma-imagen", permission_classes=[AllowAny])
     def get_certificado_firma_imagen(self, request, *args, **kwargs):
         from apps.security.models import CertificadoFirmaConfig
         config = CertificadoFirmaConfig.objects.first()
