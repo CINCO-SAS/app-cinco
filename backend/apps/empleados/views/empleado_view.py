@@ -409,7 +409,11 @@ class EmpleadoViewSet(ModelViewSet):
         if filename.lower().endswith(".jpg") or filename.lower().endswith(".jpeg"):
             content_type = "image/jpeg"
             
-        return FileResponse(open(path, "rb"), content_type=content_type)
+        response = FileResponse(open(path, "rb"), content_type=content_type)
+        response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response["Pragma"] = "no-cache"
+        response["Expires"] = "0"
+        return response
 
 
 def _is_admin_or_programacion(user):
