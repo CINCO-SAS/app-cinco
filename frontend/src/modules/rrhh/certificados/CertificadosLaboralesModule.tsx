@@ -81,7 +81,8 @@ const CertificadosLaboralesModule = () => {
       setFirmaConfig(data);
       setFirmanteNombre(data.firmante_nombre);
       setFirmanteCargo(data.firmante_cargo);
-      setFirmaPreviewUrl(`${API_BASE_URL}/empleados/empleados/certificado-firma-imagen/?t=${Date.now()}`);
+      const cleanBaseUrl = API_BASE_URL.replace(/\/+$/, "");
+      setFirmaPreviewUrl(`${cleanBaseUrl}/empleados/empleados/certificado-firma-imagen/?t=${Date.now()}`);
     } catch (err) {
       console.error("Error al cargar la configuración de la firma", err);
     }
@@ -117,7 +118,8 @@ const CertificadosLaboralesModule = () => {
       setFirmaFile(null);
       setCacheBuster((prev) => prev + 1);
       setFirmaMessage("Configuración de firma actualizada exitosamente.");
-      setFirmaPreviewUrl(`${API_BASE_URL}/empleados/empleados/certificado-firma-imagen/?t=${Date.now()}`);
+      const cleanBaseUrl = API_BASE_URL.replace(/\/+$/, "");
+      setFirmaPreviewUrl(`${cleanBaseUrl}/empleados/empleados/certificado-firma-imagen/?t=${Date.now()}`);
     } catch (err: any) {
       const msg = getErrorMessage(err);
       setFirmaError(msg || "Ocurrió un error al guardar la configuración.");
@@ -606,7 +608,7 @@ const CertificadosLaboralesModule = () => {
                   <span className="mb-3 text-xs font-semibold text-gray-500 dark:text-gray-400">
                     Vista previa de firma actual
                   </span>
-                  <div className="flex h-36 w-full max-w-60 items-center justify-center rounded-lg border border-gray-300 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-950">
+                  <div className="flex h-36 w-full max-w-60 items-center justify-center rounded-lg border border-gray-300 bg-white p-3 shadow-sm dark:border-gray-800">
                     {firmaPreviewUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
