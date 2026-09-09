@@ -1041,15 +1041,14 @@ class EmpleadoService:
         if sello_path:
             sello = image_reader(str(sello_path))
             sello_w, sello_h = sello.getSize()
-            sello_draw_w = 6.8 * cm_unit
+            sello_draw_w = 5.2 * cm_unit
             sello_draw_h = sello_draw_w * sello_h / sello_w
 
-            center_x = 11.5 * cm_unit
-            center_y = 10.0 * cm_unit
+            center_x = 4.8 * cm_unit
+            center_y = 13.5 * cm_unit
 
             canvas.saveState()
             canvas.translate(center_x, center_y)
-            canvas.rotate(30)
             canvas.drawImage(
                 sello,
                 x=-sello_draw_w / 2,
