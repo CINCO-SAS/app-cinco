@@ -50,7 +50,7 @@ class APIKey(models.Model):
     def get_prefix_length(cls) -> int:
         """Retorna la longitud de prefijo configurada en el modelo."""
         field = cls._meta.get_field("prefix")
-        return field.max_length or 8
+        return getattr(field, "max_length", 8) or 8
 
     @staticmethod
     def generate_key():
