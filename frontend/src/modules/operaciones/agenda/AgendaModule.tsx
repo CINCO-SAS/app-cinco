@@ -77,8 +77,6 @@ export const AgendaModule: React.FC = () => {
               tipo_trabajo: tipoTrabajo,
               nombre: item.responsable_nombre || "",
               responsable_nombre: item.responsable_nombre || "",
-              responsable_link_foto: item.responsable_link_foto || item.link_foto || "",
-              link_foto: item.responsable_link_foto || item.link_foto || "",
               actividad: item.ot || "",
               ot: item.ot || "",
               estado: item.actividad_estado || "PROGRAMADO",
@@ -91,6 +89,8 @@ export const AgendaModule: React.FC = () => {
               nodo: item.nodo || "",
               latitud: item.latitud || "",
               longitud: item.longitud || "",
+              responsable_link_foto: item.responsable_link_foto || item.link_foto || "",
+              link_foto: item.responsable_link_foto || item.link_foto || "",
               detalle_descripcion: item.descripcion || item.observacion || "",
               observacion: item.observacion || item.descripcion || "",
               datos: {
@@ -217,7 +217,6 @@ export const AgendaModule: React.FC = () => {
           sede: a.sede || "",
           area: a.area || "",
           carpeta: a.carpeta || "",
-          link_foto: a.responsable_link_foto || a.link_foto || "",
         });
       }
     });

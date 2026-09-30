@@ -9,13 +9,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from apps.operaciones.models.actividad_model import (
-    Actividad,
-    ActividadDetalle,
-    ActividadOT,
-    ActividadResponsableSnapshot,
-    ActividadUbicacion,
-)
+from apps.operaciones.models.actividad_model import Actividad, ActividadOT
 from apps.operaciones.models.agenda_model import (
     Agenda,
     AgendaTecnicoRegistro,
@@ -147,7 +141,6 @@ class AgendaService:
                 cargo = emp_base.cargo or "TÉCNICO"
                 movil = emp_base.movil or ""
                 emp_sede = emp_base.sede or sede or "MEDELLIN"
-                link_foto = emp_base.link_foto or emp_base.img or ""
             else:
                 # 2. Si no, consultar en el snapshot de actividad
                 snapshot = (
@@ -163,20 +156,20 @@ class AgendaService:
                 cargo = resp_snapshot.cargo if resp_snapshot else "TÉCNICO"
                 movil = resp_snapshot.movil if resp_snapshot else ""
                 emp_sede = sede or "MEDELLIN"
-                link_foto = ""
 
             resultado.append({
                 "id": u.id,
                 "empleado_id": u.id,
                 "cedula": cedula_user,
                 "nombre": nombre,
+                "apellido": emp_base.apellido if emp_base else "",
                 "email": u.email,
                 "sede": emp_sede,
                 "area": area,
                 "carpeta": carpeta,
                 "cargo": cargo,
                 "movil": movil,
-                "link_foto": link_foto,
+                "link_foto": getattr(emp_base, "link_foto", "") if emp_base else "",
             })
 
         return resultado
@@ -224,9 +217,8 @@ class AgendaService:
         carpeta = responsable_snap.carpeta if (responsable_snap and responsable_snap.carpeta) else ""
         cargo = responsable_snap.cargo if (responsable_snap and responsable_snap.cargo) else ""
         movil = responsable_snap.movil if (responsable_snap and responsable_snap.movil) else ""
-        link_foto = ""
 
-        if usuario and usuario.username:
+        if (not area or not carpeta) and usuario and usuario.username:
             try:
                 from apps.empleados.models.empleado_model import Empleado
                 emp = Empleado.objects.filter(cedula=usuario.username).first()
@@ -239,7 +231,6 @@ class AgendaService:
                         cargo = emp.cargo
                     if not movil and emp.movil:
                         movil = emp.movil
-                    link_foto = emp.link_foto or emp.img or ""
             except Exception:
                 pass
 
@@ -263,7 +254,6 @@ class AgendaService:
             "responsable_carpeta": carpeta,
             "responsable_cargo": cargo,
             "responsable_movil": movil,
-            "responsable_link_foto": link_foto,
         }
 
     @staticmethod

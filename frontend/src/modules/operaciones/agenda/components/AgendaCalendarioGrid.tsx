@@ -29,6 +29,7 @@ import TextArea from "@/components/form/input/TextArea";
 import Button from "@/components/ui/button/Button";
 import EmployeeSearchInput from "@/components/form/EmployeeSearchInput";
 import DatePicker from "@/components/form/date-picker";
+import { getEmpleadoByCedula, getEmpleadoById } from "@/services/empleado.service";
 
 interface AgendaCalendarioGridProps {
   mes: string;
@@ -222,19 +223,24 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
 
     // Buscar técnico correspondiente
     const cedBuscada = String(actividadDetalle.cedula || actividadDetalle.empleado_id || "");
-    const tecMatch = tecnicos.find((t) => String(t.cedula) === cedBuscada || String(t.id) === cedBuscada);
+    const tecMatch = tecnicos.find(
+      (t) => String(t.cedula) === cedBuscada || String(t.id) === cedBuscada || String(t.empleado_id) === cedBuscada
+    );
+
+    const initialFoto = actividadDetalle.responsable_link_foto || actividadDetalle.link_foto || tecMatch?.link_foto || "";
 
     if (tecMatch) {
       setSelectedEmployee({
         id: tecMatch.id || tecMatch.empleado_id || 0,
         cedula: tecMatch.cedula,
         nombre: tecMatch.nombre,
-        apellido: "",
+        apellido: tecMatch.apellido || "",
         estado: "activo",
         area: tecMatch.area,
         carpeta: tecMatch.carpeta,
         cargo: tecMatch.cargo || "",
         movil: tecMatch.movil || "",
+        link_foto: initialFoto,
       } as unknown as Empleado);
     } else {
       setSelectedEmployee({
@@ -245,7 +251,28 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
         estado: "activo",
         area: actividadDetalle.area || "",
         carpeta: actividadDetalle.carpeta || "",
+        link_foto: initialFoto,
       } as unknown as Empleado);
+    }
+
+    // Consultar ficha completa del empleado para cargar foto y datos oficiales
+    if (cedBuscada) {
+      getEmpleadoByCedula(cedBuscada)
+        .then((emp) => {
+          if (emp) {
+            setSelectedEmployee(emp);
+          }
+        })
+        .catch(() => {
+          const numId = Number(actividadDetalle.empleado_id);
+          if (numId) {
+            getEmpleadoById(numId)
+              .then((emp) => {
+                if (emp) setSelectedEmployee(emp);
+              })
+              .catch(() => {});
+          }
+        });
     }
 
     const iniFormateada = formatYmd(actividadDetalle.fecha_inicio || actividadDetalle.fecha);

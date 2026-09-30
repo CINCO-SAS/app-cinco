@@ -45,8 +45,6 @@ export interface AgendaItem {
   nombre_act: string;
   nombre?: string;
   responsable_nombre?: string;
-  responsable_link_foto?: string;
-  link_foto?: string;
   tipo_trabajo?: string;
   actividad: string;
   actividad_id?: number;
@@ -70,6 +68,8 @@ export interface AgendaItem {
   nodo?: string;
   latitud?: string;
   longitud?: string;
+  responsable_link_foto?: string;
+  link_foto?: string;
   edit?: string;
   fecha_edit?: string;
 }
@@ -79,12 +79,13 @@ export interface TecnicoActivoAgenda {
   empleado_id?: number | null;
   cedula: string;
   nombre: string;
+  apellido?: string;
+  link_foto?: string;
   sede: string;
   area: string;
   carpeta: string;
   cargo?: string;
   movil?: string;
-  link_foto?: string | null;
 }
 
 export interface FiltrosAgendaState {
@@ -124,6 +125,7 @@ export interface ActividadOtConsulta {
   responsable_carpeta: string;
   responsable_movil: string;
   responsable_link_foto?: string;
+  link_foto?: string;
 }
 
 export interface FilaResultadoImportacion {

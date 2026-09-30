@@ -196,9 +196,7 @@ class AgendaReadSerializer(serializers.ModelSerializer):
 
     def get_responsable_link_foto(self, obj) -> str:
         emp = self._get_empleado_info(obj)
-        if emp and (emp.link_foto or emp.img):
-            return emp.link_foto or emp.img or ""
-        return ""
+        return getattr(emp, "link_foto", "") if emp else ""
 
 
 class AgendaGuardarSerializer(serializers.Serializer):

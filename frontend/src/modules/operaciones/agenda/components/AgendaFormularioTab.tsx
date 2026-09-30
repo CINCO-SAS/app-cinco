@@ -138,13 +138,13 @@ export const AgendaFormularioTab: React.FC<AgendaFormularioTabProps> = ({
               id: tecCoincidente.id || tecCoincidente.empleado_id || 0,
               cedula: tecCoincidente.cedula,
               nombre: tecCoincidente.nombre,
-              apellido: "",
+              apellido: tecCoincidente.apellido || "",
               estado: "activo",
               area: tecCoincidente.area,
               carpeta: tecCoincidente.carpeta,
               cargo: tecCoincidente.cargo || "",
               movil: tecCoincidente.movil || "",
-              link_foto: tecCoincidente.link_foto || res.data.responsable_link_foto || "",
+              link_foto: tecCoincidente.link_foto || "",
             } as unknown as Empleado);
           } else {
             getEmpleadoById(res.data.responsable_id)
