@@ -214,7 +214,7 @@ DATABASES = {
     },
     'azul': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ.get('DB_AZUL_NAME', 'cinco-api'),
+        'NAME': 'bd_c3nc4s1s' if os.environ.get('DB_AZUL_NAME') in (None, '', 'cinco-api') else os.environ.get('DB_AZUL_NAME'),
         'USER': os.environ.get('DB_AZUL_USER', 'root'),
         'PASSWORD': os.environ.get('DB_AZUL_PASSWORD', ''),
         'HOST': os.environ.get('DB_AZUL_HOST', '127.0.0.1'),

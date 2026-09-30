@@ -33,6 +33,10 @@ const defaultNavItems: NavItem[] = [
         name: "Gestion de Actividades",
         path: "/operaciones/gestion-actividades",
       },
+      {
+        name: "Agenda de Trabajos",
+        path: "/operaciones/agenda",
+      },
     ],
   },
   {
