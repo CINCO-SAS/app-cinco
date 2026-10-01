@@ -18,6 +18,9 @@ import {
   Loader2,
   Palette,
   Check,
+  Hourglass,
+  Info,
+  Tag,
 } from "lucide-react";
 import { toast } from "sonner";
 import { agendaService } from "@/services/agenda.service";
@@ -30,6 +33,7 @@ import Button from "@/components/ui/button/Button";
 import EmployeeSearchInput from "@/components/form/EmployeeSearchInput";
 import DatePicker from "@/components/form/date-picker";
 import { getEmpleadoByCedula, getEmpleadoById } from "@/services/empleado.service";
+import { getFestivoColombia } from "@/utils/festivos";
 
 interface AgendaCalendarioGridProps {
   mes: string;
@@ -92,6 +96,140 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
   const [editLatitud, setEditLatitud] = useState<string>("");
   const [hoveredActKey, setHoveredActKey] = useState<string | null>(null);
 
+  // Estado para el tooltip flotante estilizado
+  const [tooltipState, setTooltipState] = useState<{
+    act: AgendaItem;
+    tec: TecnicoActivoAgenda;
+    dia: {
+      numero: number;
+      diaSemana: string;
+      esFinDeSemana: boolean;
+      esFestivo: boolean;
+      nombreFestivo: string | null;
+      esNoHabil: boolean;
+      esHoy: boolean;
+      fechaYmd: string;
+    };
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const MESES_ABR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+  const calcularDiasDuracion = (fIniStr?: string | null, fFinStr?: string | null): number => {
+    if (!fIniStr || !fFinStr) return 1;
+    const s1 = String(fIniStr).split("T")[0].split(" ")[0];
+    const s2 = String(fFinStr).split("T")[0].split(" ")[0];
+    const d1 = new Date(s1);
+    const d2 = new Date(s2);
+    if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return 1;
+    const diffTime = Math.abs(d2.getTime() - d1.getTime());
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    return isNaN(diffDays) ? 1 : diffDays;
+  };
+
+  const formatFechaBonita = (dateStr?: string | null): string => {
+    if (!dateStr) return "";
+    const clean = String(dateStr).split("T")[0].split(" ")[0];
+    const parts = clean.split("-");
+    if (parts.length === 3) {
+      const dia = parseInt(parts[2], 10);
+      const mesIdx = parseInt(parts[1], 10) - 1;
+      if (mesIdx >= 0 && mesIdx < 12) {
+        return `${dia} ${MESES_ABR[mesIdx]}`;
+      }
+    }
+    return clean;
+  };
+
+  const formatPeriodoYDuracion = (fIniStr?: string | null, fFinStr?: string | null): string => {
+    const fIni = formatFechaBonita(fIniStr);
+    const fFin = formatFechaBonita(fFinStr);
+    const dias = calcularDiasDuracion(fIniStr, fFinStr);
+    const diasStr = dias > 1 ? ` (${dias} días)` : ` (1 día)`;
+
+    if (!fIni && !fFin) return "No registrado";
+    if (!fFin || fIni === fFin) return `${fIni || fFin}${diasStr}`;
+    return `${fIni} - ${fFin}${diasStr}`;
+  };
+
+  const getEstadoTextColor = (estado?: string | null): string => {
+    const est = (estado || "PENDIENTE").trim().toUpperCase();
+    if (est.includes("COMPLET") || est.includes("FINALIZ") || est.includes("REALIZ")) {
+      return "text-emerald-600 dark:text-emerald-400";
+    }
+    if (est.includes("CANCEL") || est.includes("ANULAD")) {
+      return "text-red-600 dark:text-red-400";
+    }
+    if (est.includes("PROGRES") || est.includes("PROCESO") || est.includes("INICIAD") || est.includes("EJECUC")) {
+      return "text-blue-600 dark:text-blue-400";
+    }
+    if (est.includes("PAUS") || est.includes("SUSPEND")) {
+      return "text-orange-600 dark:text-orange-400";
+    }
+    // PENDIENTE, AGENDADO, PROGRAMADO en amarillo / ámbar
+    return "text-amber-500 dark:text-amber-400";
+  };
+
+  const getEstadoBadgeClasses = (estado?: string | null): string => {
+    const est = (estado || "PENDIENTE").trim().toUpperCase();
+    if (est.includes("COMPLET") || est.includes("FINALIZ") || est.includes("REALIZ")) {
+      return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60";
+    }
+    if (est.includes("CANCEL") || est.includes("ANULAD")) {
+      return "bg-red-50 text-red-700 dark:bg-red-950/70 dark:text-red-300 border border-red-200/60 dark:border-red-800/60";
+    }
+    if (est.includes("PROGRES") || est.includes("PROCESO") || est.includes("INICIAD") || est.includes("EJECUC")) {
+      return "bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/60";
+    }
+    if (est.includes("PAUS") || est.includes("SUSPEND")) {
+      return "bg-orange-50 text-orange-700 dark:bg-orange-950/70 dark:text-orange-300 border border-orange-200/60 dark:border-orange-800/60";
+    }
+    // PENDIENTE, AGENDADO, PROGRAMADO
+    return "bg-amber-50 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60";
+  };
+
+  const handleMouseMoveBar = (
+    e: React.MouseEvent,
+    act: AgendaItem,
+    tec: TecnicoActivoAgenda,
+    dia: {
+      numero: number;
+      diaSemana: string;
+      esFinDeSemana: boolean;
+      esFestivo: boolean;
+      nombreFestivo: string | null;
+      esNoHabil: boolean;
+      esHoy: boolean;
+      fechaYmd: string;
+    }
+  ) => {
+    const mouseX = e.clientX;
+    const mouseY = e.clientY;
+    const tooltipWidth = 270;
+    const tooltipHeight = 220;
+
+    let posX = mouseX + 14;
+    let posY = mouseY + 14;
+
+    if (typeof window !== "undefined") {
+      if (posX + tooltipWidth > window.innerWidth - 12) {
+        posX = mouseX - tooltipWidth - 14;
+      }
+      if (posY + tooltipHeight > window.innerHeight - 12) {
+        posY = mouseY - tooltipHeight - 14;
+      }
+    }
+
+    setTooltipState({
+      act,
+      tec,
+      dia,
+      x: posX,
+      y: posY,
+    });
+  };
+
   // Calcular días del mes seleccionado
   const diasMes = useMemo(() => {
     const m = parseInt(mes, 10);
@@ -107,10 +245,17 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
       const fechaObj = new Date(y, m - 1, d);
       const diaSemanaNum = fechaObj.getDay();
       const fechaYmd = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const festivoInfo = getFestivoColombia(fechaYmd);
+      const esFestivoDia = festivoInfo !== null;
+      const esNoHabil = diaSemanaNum === 0 || esFestivoDia;
+
       lista.push({
         numero: d,
         diaSemana: DIAS_SEMANA[diaSemanaNum],
-        esFinDeSemana: diaSemanaNum === 0, // Solo el domingo es día no hábil; los sábados son días hábiles habilitados
+        esFinDeSemana: diaSemanaNum === 0, // Solo el domingo es fin de semana no hábil (sábados habilitados)
+        esFestivo: esFestivoDia,
+        nombreFestivo: festivoInfo?.nombre || null,
+        esNoHabil,
         fechaYmd,
         esHoy: fechaYmd === hoyYmd,
       });
@@ -463,10 +608,11 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
             {diasMes.map((dia) => (
               <th
                 key={dia.numero}
-                className={`p-1.5 text-center font-semibold min-w-[36px] w-10 border-r border-gray-200/70 dark:border-gray-700/70 ${
+                title={dia.esFestivo ? `Festivo: ${dia.nombreFestivo}` : dia.esFinDeSemana ? "Domingo (No hábil)" : undefined}
+                className={`p-1.5 text-center font-semibold min-w-[36px] w-10 border-r border-gray-200/70 dark:border-gray-700/70 transition-colors ${
                   dia.esHoy
                     ? "bg-brand-100 text-brand-900 dark:bg-brand-950 dark:text-brand-200 font-bold"
-                    : dia.esFinDeSemana
+                    : dia.esNoHabil
                     ? "bg-gray-100/70 text-gray-400 dark:bg-gray-800/40 dark:text-gray-500"
                     : "text-gray-700 dark:text-gray-300"
                 }`}
@@ -516,8 +662,8 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
                       className={`p-0 text-center relative border-r border-gray-100 dark:border-gray-800/70 ${
                         dia.esHoy
                           ? "bg-brand-50/40 dark:bg-brand-950/20"
-                          : dia.esFinDeSemana
-                          ? "bg-gray-50/40 dark:bg-gray-800/20"
+                          : dia.esNoHabil
+                          ? "bg-gray-50/60 dark:bg-gray-800/30"
                           : ""
                       }`}
                     >
@@ -562,9 +708,15 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
                           <div
                             key={actIdx}
                             onClick={() => handleAbrirDetalle(act)}
-                            onMouseEnter={() => setHoveredActKey(actIdKey)}
-                            onMouseLeave={() => setHoveredActKey(null)}
-                            title={`OT: ${act.ot || act.actividad}\nTipo: ${tituloVisual}\nPeriodo: ${fIni} al ${fFin}\nEstado: ${act.estado || "PROGRAMADO"}`}
+                            onMouseEnter={(e) => {
+                              setHoveredActKey(actIdKey);
+                              handleMouseMoveBar(e, act, tec, dia);
+                            }}
+                            onMouseMove={(e) => handleMouseMoveBar(e, act, tec, dia)}
+                            onMouseLeave={() => {
+                              setHoveredActKey(null);
+                              setTooltipState(null);
+                            }}
                             className={`h-6 my-0.5 flex items-center justify-start text-[10px] font-bold text-white cursor-pointer select-none transition-all ${roundedClass} ${
                               isHovered
                                 ? "brightness-110 shadow-sm ring-1 ring-white/60 scale-y-105 z-10"
@@ -591,6 +743,108 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
           })}
         </tbody>
       </table>
+
+      {/* Tooltip Flotante Minimalista con Jerarquía Optimizada Label vs. Valor */}
+      {tooltipState && (
+        <div
+          className="fixed z-50 pointer-events-none transition-all duration-75 ease-out shadow-xl shadow-gray-300/40 dark:shadow-2xl dark:shadow-black/70 rounded-xl border border-gray-200/90 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 p-3 text-xs backdrop-blur-md min-w-[240px] max-w-[280px] select-none space-y-2.5"
+          style={{
+            left: `${tooltipState.x}px`,
+            top: `${tooltipState.y}px`,
+          }}
+        >
+          {/* Header: Día y OT Badge */}
+          <div className="flex items-center justify-between gap-2 border-b border-gray-100 dark:border-gray-800 pb-2">
+            <span className="font-bold text-gray-900 dark:text-white text-xs tracking-tight">
+              Día {tooltipState.dia.numero} ({tooltipState.dia.diaSemana})
+            </span>
+            <span
+              className="px-2 py-0.5 rounded-full text-[10px] font-bold text-white shadow-xs"
+              style={{
+                backgroundColor:
+                  tooltipState.act.observaciones_dia?.color ||
+                  tooltipState.act.color ||
+                  tooltipState.act.datos?.color ||
+                  "#66bb6a",
+              }}
+            >
+              {tooltipState.act.ot || tooltipState.act.actividad || "OT"}
+            </span>
+          </div>
+
+          {/* Nombre / Tipo de Actividad */}
+          <div>
+            <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block uppercase tracking-wider mb-0.5">
+              Actividad
+            </span>
+            <span className="font-semibold text-gray-900 dark:text-white text-xs block truncate">
+              {tooltipState.act.nombre_act ||
+                tooltipState.act.tipo_trabajo ||
+                tooltipState.act.datos?.nombre_act ||
+                tooltipState.act.ot ||
+                "Sin Tipo"}
+            </span>
+          </div>
+
+          {/* Lista compacta Label y Valor alineados a la izquierda */}
+          <div className="space-y-1 text-[11px] text-left">
+            {/* Período y Duración Unificados */}
+            <div className="flex items-baseline gap-1.5 text-left">
+              <span className="text-slate-500 dark:text-slate-400 shrink-0">Período:</span>
+              <span className="font-medium text-gray-900 dark:text-white truncate">
+                {formatPeriodoYDuracion(
+                  tooltipState.act.fecha_inicio || tooltipState.act.fecha,
+                  tooltipState.act.fecha_fin || tooltipState.act.fecha_inicio || tooltipState.act.fecha
+                )}
+              </span>
+            </div>
+
+            {/* Técnico */}
+            <div className="flex items-baseline gap-1.5 text-left">
+              <span className="text-slate-500 dark:text-slate-400 shrink-0">Técnico:</span>
+              <span className="font-medium text-gray-900 dark:text-white truncate">
+                {tooltipState.act.nombre ||
+                  tooltipState.act.responsable_nombre ||
+                  tooltipState.tec.nombre ||
+                  `CC ${tooltipState.act.cedula}`}
+              </span>
+            </div>
+
+            {/* Ubicación si existe */}
+            {(tooltipState.act.ubicacion_direccion ||
+              tooltipState.act.direccion ||
+              tooltipState.act.ubicacion_zona ||
+              tooltipState.act.zona) && (
+              <div className="flex items-baseline gap-1.5 text-left">
+                <span className="text-slate-500 dark:text-slate-400 shrink-0">Ubicación:</span>
+                <span className="font-medium text-gray-900 dark:text-white truncate">
+                  {tooltipState.act.ubicacion_direccion || tooltipState.act.direccion || ""}
+                  {tooltipState.act.ubicacion_zona || tooltipState.act.zona
+                    ? ` • ${tooltipState.act.ubicacion_zona || tooltipState.act.zona}`
+                    : ""}
+                </span>
+              </div>
+            )}
+
+            {/* Estado */}
+            <div className="flex items-baseline gap-1.5 text-left">
+              <span className="text-slate-500 dark:text-slate-400 shrink-0">Estado:</span>
+              <span className={`font-semibold uppercase ${getEstadoTextColor(tooltipState.act.estado)}`}>
+                {tooltipState.act.estado || "PENDIENTE"}
+              </span>
+            </div>
+          </div>
+
+          {/* Observación / Detalle si existe */}
+          {(tooltipState.act.detalle_descripcion || tooltipState.act.observacion) && (
+            <div className="border-t border-gray-100 dark:border-gray-800 pt-1.5 text-gray-500 dark:text-gray-400 text-[10px] italic">
+              <span className="line-clamp-2">
+                {tooltipState.act.detalle_descripcion || tooltipState.act.observacion}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Modal Reutilizable con el Sistema de Diseño Oficial de Actividades */}
       {actividadDetalle && (
@@ -985,15 +1239,11 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
                     Estado de la Actividad
                   </span>
                   <span
-                    className={`inline-block px-2.5 py-1 rounded-md font-bold uppercase text-xs w-fit ${
-                      actividadDetalle.estado?.toUpperCase() === "COMPLETADA"
-                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
-                        : actividadDetalle.estado?.toUpperCase() === "CANCELADA"
-                        ? "bg-red-100 text-red-800 dark:bg-red-950/70 dark:text-red-300"
-                        : "bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300"
-                    }`}
+                    className={`inline-block px-2.5 py-1 rounded-md font-bold uppercase text-xs w-fit ${getEstadoBadgeClasses(
+                      actividadDetalle.estado
+                    )}`}
                   >
-                    {actividadDetalle.estado || "AGENDADO"}
+                    {actividadDetalle.estado || "PENDIENTE"}
                   </span>
                 </div>
               </div>
