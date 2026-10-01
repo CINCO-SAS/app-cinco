@@ -47,16 +47,21 @@ const Avatar: React.FC<AvatarProps> = ({
   size = "medium",
   status = "none",
 }) => {
-  const [imgSrc, setImgSrc] = React.useState(src || "/images/user/owner.png");
+  const [hasError, setHasError] = React.useState(false);
+  const [prevSrc, setPrevSrc] = React.useState(src);
 
-  // Si cambia el src prop, actualizar el estado
-  React.useEffect(() => {
-    setImgSrc(src || "/images/user/owner.png");
-  }, [src]);
+  // Si cambia el src prop durante renderizado, resetear error
+  if (src !== prevSrc) {
+    setPrevSrc(src);
+    setHasError(false);
+  }
+
+  const defaultAvatar = "/images/user/owner.png";
+  const displaySrc = hasError || !src ? defaultAvatar : src;
 
   // Handler para errores de carga de imagen
   const handleError = () => {
-    setImgSrc("/images/user/owner.png");
+    setHasError(true);
   };
 
   return (
@@ -67,7 +72,7 @@ const Avatar: React.FC<AvatarProps> = ({
       <Image
         fill
         sizes={imageSizes[size]}
-        src={imgSrc}
+        src={displaySrc}
         alt={alt}
         className="h-full w-full rounded-full object-cover"
         onError={handleError}
