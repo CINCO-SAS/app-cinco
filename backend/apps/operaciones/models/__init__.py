@@ -6,3 +6,9 @@ from .actividad_model import (
     ActividadUbicacion,
     normalize_ot_values,
 )
+from .agenda_model import (
+    Agenda,
+    AgendaTrabajo,
+    AgendaTecnicoRegistro,
+    InfraestructuraParametros,
+)

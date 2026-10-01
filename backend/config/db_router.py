@@ -11,9 +11,13 @@ class MultiDBRouter:
     }
 
     def db_for_read(self, model, **hints):
+        if hasattr(model, "_database") and model._database:
+            return model._database
         return self.APP_DB_MAP.get(model._meta.app_label)
 
     def db_for_write(self, model, **hints):
+        if hasattr(model, "_database") and model._database:
+            return model._database
         return self.APP_DB_MAP.get(model._meta.app_label)
 
     def allow_migrate(self, db, app_label, model_name=None, **hints):

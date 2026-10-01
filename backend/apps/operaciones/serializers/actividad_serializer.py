@@ -15,8 +15,9 @@ class OptionalDateField(serializers.DateField):
         if isinstance(value, str):
             value = value.strip()
         if value in ("", None, "null", "undefined"):
-            value = None
+            return None
         return super().to_internal_value(value)
+
 
 
 class ActividadDetalleSerializer(serializers.ModelSerializer):

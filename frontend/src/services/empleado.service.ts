@@ -43,21 +43,23 @@ export const searchEmpleados = async (
 export const getEmpleadoByCedula = async (
   cedula: string,
 ): Promise<Empleado> => {
-  const cacheKey = `empleados:cedula:${cedula}`;
+  const cleanCedula = String(cedula).trim();
+  const cacheKey = `empleados:cedula:${cleanCedula}`;
 
   return cache.getOrFetch(
     cacheKey,
     async () => {
       // Buscar empleado por cédula usando el endpoint de búsqueda
       const res = await api.get("/empleados/empleados/", {
-        params: { search: cedula },
+        params: { search: cleanCedula },
       });
       
+      const items: Empleado[] = Array.isArray(res.data) ? res.data : res.data?.results || [];
       // Buscar el empleado que coincida exactamente con la cédula
-      const empleado = res.data.find((emp: Empleado) => emp.cedula === cedula);
+      const empleado = items.find((emp: Empleado) => String(emp.cedula).trim() === cleanCedula) || items[0];
       
       if (!empleado) {
-        throw new Error(`Empleado con cédula ${cedula} no encontrado`);
+        throw new Error(`Empleado con cédula ${cleanCedula} no encontrado`);
       }
       
       return empleado;
@@ -165,3 +167,4 @@ export const updateCertificadoFirmaConfig = async (
   });
   return res.data;
 };
+

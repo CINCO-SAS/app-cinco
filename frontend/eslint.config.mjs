@@ -10,4 +10,13 @@ export default defineConfig([
     'build/**',
     'next-env.d.ts'
   ]),
+  {
+    rules: {
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/purity': 'warn',
+      'react-hooks/incompatible-library': 'warn',
+      'react-hooks/exhaustive-deps': 'warn',
+    },
+  },
 ])
+
