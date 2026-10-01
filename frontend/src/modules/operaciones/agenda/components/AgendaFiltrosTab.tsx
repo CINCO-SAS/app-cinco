@@ -5,7 +5,7 @@ import { Search, Eraser, MapPin, Calendar, Briefcase, Folder } from "lucide-reac
 import { FiltrosAgendaState, SedeOption, TecnicoActivoAgenda } from "@/types/agenda.types";
 import EmployeeSearchInput from "@/components/form/EmployeeSearchInput";
 import { Empleado } from "@/types/empleado";
-import { getEmpleadoByCedula } from "@/services/empleado.service";
+import { getEmpleadoByCedula, getEmpleadoById } from "@/services/empleado.service";
 
 interface AgendaFiltrosTabProps {
   filtros: FiltrosAgendaState;
@@ -56,30 +56,43 @@ export const AgendaFiltrosTab: React.FC<AgendaFiltrosTabProps> = ({
       setSelectedEmployee(null);
       return;
     }
-    if (selectedEmployee && String(selectedEmployee.cedula) === String(filtros.cedula)) {
+    if (selectedEmployee && String(selectedEmployee.cedula) === String(filtros.cedula) && selectedEmployee.link_foto) {
       return;
     }
-    const tec = tecnicos.find((t) => t.cedula === filtros.cedula);
+    const tec = tecnicos.find((t) => String(t.cedula).trim() === String(filtros.cedula).trim());
+    const initialFoto = tec?.link_foto || "";
+
     if (tec) {
       setSelectedEmployee({
         id: tec.id || tec.empleado_id || 0,
         cedula: tec.cedula,
         nombre: tec.nombre,
-        apellido: "",
+        apellido: tec.apellido || "",
         estado: "activo",
         area: tec.area,
         carpeta: tec.carpeta,
         cargo: tec.cargo || "",
         movil: tec.movil || "",
+        link_foto: initialFoto,
       } as unknown as Empleado);
-    } else {
-      getEmpleadoByCedula(filtros.cedula)
-        .then((emp) => {
-          if (emp) setSelectedEmployee(emp);
-        })
-        .catch(() => {});
     }
-  }, [filtros.cedula, tecnicos, selectedEmployee]);
+
+    // Consultar ficha completa para cargar la foto oficial
+    getEmpleadoByCedula(filtros.cedula)
+      .then((emp) => {
+        if (emp) setSelectedEmployee(emp);
+      })
+      .catch(() => {
+        if (tec?.id || tec?.empleado_id) {
+          const numId = Number(tec.id || tec.empleado_id);
+          getEmpleadoById(numId)
+            .then((emp) => {
+              if (emp) setSelectedEmployee(emp);
+            })
+            .catch(() => {});
+        }
+      });
+  }, [filtros.cedula, tecnicos]);
 
   const handleEmployeeFilterChange = (emp: Empleado | null) => {
     setSelectedEmployee(emp);

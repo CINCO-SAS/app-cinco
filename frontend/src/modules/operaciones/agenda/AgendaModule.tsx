@@ -141,20 +141,51 @@ export const AgendaModule: React.FC = () => {
     cargarAgendasMes(filtros.mes, filtros.yyyy);
   }, [cargarTecnicos, cargarAgendasMes, filtros.mes, filtros.yyyy]);
 
-  // Áreas y Carpetas disponibles en base a los agendamientos y técnicos cargados
+  // Obtener únicamente los técnicos que tienen agendamientos en el mes y año consultados
+  const tecnicosConAgendaEnMes = useMemo(() => {
+    const mapaTec = new Map<string, TecnicoActivoAgenda>();
+
+    agendamientosAll.forEach((a) => {
+      const cedKey = String(a.cedula || "").trim();
+      if (!cedKey) return;
+
+      if (!mapaTec.has(cedKey)) {
+        // Enlazar con datos de la plantilla de técnicos si existe
+        const tecBase = tecnicos.find((t) => String(t.cedula).trim() === cedKey);
+        const numId = typeof a.id === "number" ? a.id : Number(a.id) || tecBase?.id || null;
+        const numEmpId = typeof a.empleado_id === "number" ? a.empleado_id : Number(a.empleado_id) || tecBase?.empleado_id || null;
+
+        mapaTec.set(cedKey, {
+          id: numId,
+          empleado_id: numEmpId,
+          cedula: cedKey,
+          nombre: a.nombre || a.responsable_nombre || tecBase?.nombre || `Técnico ${cedKey}`,
+          apellido: tecBase?.apellido || "",
+          link_foto: a.responsable_link_foto || a.link_foto || tecBase?.link_foto || "",
+          sede: a.sede || tecBase?.sede || "",
+          area: a.area || tecBase?.area || "",
+          carpeta: a.carpeta || tecBase?.carpeta || "",
+          cargo: tecBase?.cargo || "",
+          movil: tecBase?.movil || "",
+        });
+      }
+    });
+
+    return Array.from(mapaTec.values());
+  }, [agendamientosAll, tecnicos]);
+
+  // Áreas y Carpetas disponibles solo de los técnicos que tienen agenda en el mes consultado
   const areasDisponibles = useMemo(() => {
     const setAreas = new Set<string>();
-    tecnicos.forEach((t) => t.area && setAreas.add(t.area));
-    agendamientosAll.forEach((a) => a.area && setAreas.add(a.area));
+    tecnicosConAgendaEnMes.forEach((t) => t.area && setAreas.add(t.area));
     return Array.from(setAreas).sort();
-  }, [tecnicos, agendamientosAll]);
+  }, [tecnicosConAgendaEnMes]);
 
   const carpetasDisponibles = useMemo(() => {
     const setCarpetas = new Set<string>();
-    tecnicos.forEach((t) => t.carpeta && setCarpetas.add(t.carpeta));
-    agendamientosAll.forEach((a) => a.carpeta && setCarpetas.add(a.carpeta));
+    tecnicosConAgendaEnMes.forEach((t) => t.carpeta && setCarpetas.add(t.carpeta));
     return Array.from(setCarpetas).sort();
-  }, [tecnicos, agendamientosAll]);
+  }, [tecnicosConAgendaEnMes]);
 
   // Filtrar los agendamientos según los filtros activos
   const agendamientosFiltrados = useMemo(() => {
@@ -195,34 +226,19 @@ export const AgendaModule: React.FC = () => {
     });
   }, [agendamientosAll, filtros]);
 
+  // Técnicos a mostrar en el panel lateral (solo los que tienen agenda en el mes, filtrados por sede si aplica)
+  const tecnicosPanelLateral = useMemo(() => {
+    return tecnicosConAgendaEnMes.filter((t) => {
+      if (filtros.sede && t.sede && t.sede.toLowerCase() !== filtros.sede.toLowerCase()) {
+        return false;
+      }
+      return true;
+    });
+  }, [tecnicosConAgendaEnMes, filtros.sede]);
+
   // Filtrar técnicos a mostrar en las filas del cronograma
   const tecnicosParaCalendario = useMemo(() => {
-    // Mapa base con los técnicos obtenidos del servicio
-    const mapaTec = new Map<string, TecnicoActivoAgenda>();
-    tecnicos.forEach((t) => {
-      if (t.cedula) mapaTec.set(String(t.cedula), t);
-    });
-
-    // Añadir técnicos que tengan agendamientos en el mes actual si no estaban en la lista
-    agendamientosAll.forEach((a) => {
-      const cedKey = String(a.cedula || "");
-      if (cedKey && !mapaTec.has(cedKey)) {
-        const numId = typeof a.id === "number" ? a.id : Number(a.id) || null;
-        const numEmpId = typeof a.empleado_id === "number" ? a.empleado_id : Number(a.empleado_id) || null;
-        mapaTec.set(cedKey, {
-          id: numId,
-          empleado_id: numEmpId,
-          cedula: cedKey,
-          nombre: a.nombre || a.datos?.legacy_responsable_nombre || `Técnico ${cedKey}`,
-          sede: a.sede || "",
-          area: a.area || "",
-          carpeta: a.carpeta || "",
-        });
-      }
-    });
-
-    const listaUnificada = Array.from(mapaTec.values());
-    return listaUnificada.filter((t) => {
+    return tecnicosConAgendaEnMes.filter((t) => {
       if (filtros.sede && t.sede && t.sede.toLowerCase() !== filtros.sede.toLowerCase()) {
         return false;
       }
@@ -243,7 +259,7 @@ export const AgendaModule: React.FC = () => {
       }
       return true;
     });
-  }, [tecnicos, agendamientosAll, filtros]);
+  }, [tecnicosConAgendaEnMes, filtros]);
 
   const handleLimpiarFiltros = () => {
     setFiltros((prev) => ({
@@ -284,7 +300,7 @@ export const AgendaModule: React.FC = () => {
           <AgendaFiltrosTab
             filtros={filtros}
             setFiltros={setFiltros}
-            tecnicos={tecnicos}
+            tecnicos={tecnicosPanelLateral}
             areasDisponibles={areasDisponibles}
             carpetasDisponibles={carpetasDisponibles}
             onBuscar={() => cargarAgendasMes(filtros.mes, filtros.yyyy)}
@@ -310,7 +326,7 @@ export const AgendaModule: React.FC = () => {
         {/* Área Principal: Panel Lateral de Técnicos + Calendario Grid */}
         <div className="flex flex-1 overflow-hidden">
           <AgendaPanelTecnicos
-            tecnicos={tecnicos}
+            tecnicos={tecnicosPanelLateral}
             filtroArea={filtros.area}
             filtroCarpeta={filtros.carpeta}
             cedulaSeleccionada={filtros.cedula}
