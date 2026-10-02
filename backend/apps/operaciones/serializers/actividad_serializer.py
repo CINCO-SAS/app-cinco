@@ -181,6 +181,7 @@ class ActividadWriteSerializer(serializers.ModelSerializer):
         )
 
 class ActividadSerializer(serializers.ModelSerializer):
+    responsable_id = serializers.IntegerField(read_only=True)
     detalle = ActividadDetalleSerializer(read_only=True)
     ubicacion = ActividadUbicacionSerializer(read_only=True)
     responsable_snapshot = serializers.SerializerMethodField()

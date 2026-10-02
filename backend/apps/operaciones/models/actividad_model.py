@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -39,21 +40,57 @@ class Actividad(models.Model):
     ot = models.CharField(max_length=100, blank=True, default="")
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='pendiente')
 
-    responsable_id = models.IntegerField()
+    responsable = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="actividades_asignadas",
+        db_column="responsable_id",
+        help_text="Usuario / Técnico asignado para ejecutar la actividad",
+    )
 
     fecha_inicio = models.DateField(blank=True, null=True)
     fecha_fin_estimado = models.DateField(blank=True, null=True)
     fecha_fin_real = models.DateField(blank=True, null=True)
 
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sub_actividades",
+        db_column="parent_id",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
-    created_by = models.IntegerField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="actividades_creadas",
+        db_column="created_by",
+    )
     
     updated_at = models.DateTimeField(auto_now=True)
-    updated_by = models.IntegerField(null=True, blank=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="actividades_actualizadas",
+        db_column="updated_by",
+    )
 
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
-    deleted_by = models.IntegerField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="actividades_eliminadas",
+        db_column="deleted_by",
+    )
 
     class Meta:
         db_table = 'operaciones_actividades'
