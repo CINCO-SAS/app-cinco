@@ -206,18 +206,18 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
   ) => {
     const mouseX = e.clientX;
     const mouseY = e.clientY;
-    const tooltipWidth = 270;
-    const tooltipHeight = 220;
+    const tooltipWidth = 350;
+    const tooltipHeight = 280;
 
     let posX = mouseX + 14;
     let posY = mouseY + 14;
 
     if (typeof window !== "undefined") {
       if (posX + tooltipWidth > window.innerWidth - 12) {
-        posX = mouseX - tooltipWidth - 14;
+        posX = Math.max(12, mouseX - tooltipWidth - 14);
       }
       if (posY + tooltipHeight > window.innerHeight - 12) {
-        posY = mouseY - tooltipHeight - 14;
+        posY = Math.max(12, mouseY - tooltipHeight - 14);
       }
     }
 
@@ -597,19 +597,19 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
   }
 
   return (
-    <div className="flex-1 overflow-auto bg-white dark:bg-gray-900 relative">
-      <table className="w-full border-collapse text-xs select-none">
+    <div className="flex-1 overflow-auto bg-white dark:bg-gray-900 relative min-w-0">
+      <table className="w-full border-collapse text-xs select-none table-fixed">
         {/* Encabezado del calendario con días */}
         <thead className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-xs">
           <tr>
-            <th className="p-2.5 text-left font-bold text-gray-700 dark:text-gray-300 min-w-[200px] w-64 border-r border-gray-200 dark:border-gray-700 sticky left-0 bg-gray-100 dark:bg-gray-800 z-30">
+            <th className="p-2.5 text-left font-bold text-gray-700 dark:text-gray-300 w-64 min-w-[240px] max-w-[260px] border-r border-gray-200 dark:border-gray-700 sticky left-0 bg-gray-100 dark:bg-gray-800 z-30">
               Técnico / Responsable
             </th>
             {diasMes.map((dia) => (
               <th
                 key={dia.numero}
                 title={dia.esFestivo ? `Festivo: ${dia.nombreFestivo}` : dia.esFinDeSemana ? "Domingo (No hábil)" : undefined}
-                className={`p-1.5 text-center font-semibold min-w-[36px] w-10 border-r border-gray-200/70 dark:border-gray-700/70 transition-colors ${
+                className={`p-1 text-center font-semibold w-12 min-w-[48px] max-w-[48px] border-r border-gray-200/70 dark:border-gray-700/70 transition-colors ${
                   dia.esHoy
                     ? "bg-brand-100 text-brand-900 dark:bg-brand-950 dark:text-brand-200 font-bold"
                     : dia.esNoHabil
@@ -633,12 +633,53 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
                 ...(tec.empleado_id ? agendaPorTecnico.get(String(tec.empleado_id).trim()) || [] : []),
                 ...(tec.id ? agendaPorTecnico.get(String(tec.id).trim()) || [] : []),
               ])
-            );
+            ).sort((a, b) => {
+              const fIniA = formatYmd(a.fecha_inicio || a.fecha);
+              const fIniB = formatYmd(b.fecha_inicio || b.fecha);
+              if (fIniA !== fIniB) return fIniA.localeCompare(fIniB);
+
+              const fFinA = formatYmd(a.fecha_fin || a.fecha_inicio || a.fecha);
+              const fFinB = formatYmd(b.fecha_fin || b.fecha_inicio || b.fecha);
+              if (fFinA !== fFinB) return fFinB.localeCompare(fFinA); // Mayor duración arriba
+
+              return String(a.id || a.actividad_id || a.ot || "").localeCompare(
+                String(b.id || b.actividad_id || b.ot || "")
+              );
+            });
+
+            // Asignador de carriles fijos (Gantt Track Allocator) para línea horizontal recta continua
+            const trackEnds: string[] = [];
+            const itemTrackMap = new Map<string, number>();
+
+            itemsTec.forEach((act, actIdx) => {
+              const actKey = String(act.id || act.actividad_id || `${act.ot}-${act.fecha_inicio || act.fecha}-${actIdx}`);
+              const fIni = formatYmd(act.fecha_inicio || act.fecha);
+              const fFin = formatYmd(act.fecha_fin || act.fecha_inicio || act.fecha);
+
+              let assignedTrack = -1;
+              for (let t = 0; t < trackEnds.length; t++) {
+                if (trackEnds[t] < fIni) {
+                  assignedTrack = t;
+                  trackEnds[t] = fFin;
+                  break;
+                }
+              }
+
+              if (assignedTrack === -1) {
+                assignedTrack = trackEnds.length;
+                trackEnds.push(fFin);
+              }
+
+              itemTrackMap.set(actKey, assignedTrack);
+            });
+
+            const totalTracks = Math.max(1, trackEnds.length);
+            const trackIndexes = Array.from({ length: totalTracks }, (_, i) => i);
 
             return (
               <tr key={tec.cedula || tec.id} className="hover:bg-gray-50/70 dark:hover:bg-gray-800/40 transition-colors">
                 {/* Columna fija: Nombre del técnico */}
-                <td className="p-2.5 border-r border-gray-200 dark:border-gray-800 sticky left-0 bg-white dark:bg-gray-900 z-10">
+                <td className="p-2.5 border-r border-gray-200 dark:border-gray-800 sticky left-0 bg-white dark:bg-gray-900 z-10 w-64 min-w-[240px] max-w-[260px] align-middle">
                   <div className="font-bold text-gray-900 dark:text-gray-100 truncate max-w-[200px]" title={tec.nombre}>
                     {tec.nombre || `Técnico ${tec.cedula}`}
                   </div>
@@ -648,18 +689,12 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
                   </div>
                 </td>
 
-                {/* Celdas de días del mes */}
+                {/* Celdas de días del mes con carriles fijos continuos */}
                 {diasMes.map((dia) => {
-                  const actividadesDia = itemsTec.filter((item) => {
-                    const fIni = formatYmd(item.fecha_inicio || item.fecha);
-                    const fFin = formatYmd(item.fecha_fin || item.fecha_inicio || item.fecha);
-                    return dia.fechaYmd >= fIni && dia.fechaYmd <= fFin;
-                  });
-
                   return (
                     <td
                       key={dia.numero}
-                      className={`p-0 text-center relative border-r border-gray-100 dark:border-gray-800/70 ${
+                      className={`p-0 text-center relative border-r border-gray-100 dark:border-gray-800/70 w-12 min-w-[48px] max-w-[48px] overflow-hidden align-top ${
                         dia.esHoy
                           ? "bg-brand-50/40 dark:bg-brand-950/20"
                           : dia.esNoHabil
@@ -667,7 +702,25 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
                           : ""
                       }`}
                     >
-                      {actividadesDia.map((act, actIdx) => {
+                      {trackIndexes.map((trackIdx) => {
+                        const act = itemsTec.find((item, itemIdx) => {
+                          const actKey = String(item.id || item.actividad_id || `${item.ot}-${item.fecha_inicio || item.fecha}-${itemIdx}`);
+                          if (itemTrackMap.get(actKey) !== trackIdx) return false;
+                          const fIni = formatYmd(item.fecha_inicio || item.fecha);
+                          const fFin = formatYmd(item.fecha_fin || item.fecha_inicio || item.fecha);
+                          return dia.fechaYmd >= fIni && dia.fechaYmd <= fFin;
+                        });
+
+                        if (!act) {
+                          return (
+                            <div
+                              key={`empty-${trackIdx}`}
+                              className="h-6 my-0.5 w-full opacity-0 pointer-events-none select-none"
+                              aria-hidden="true"
+                            />
+                          );
+                        }
+
                         const bgCol =
                           act.observaciones_dia?.color ||
                           act.color ||
@@ -685,28 +738,24 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
                         const fIni = formatYmd(act.fecha_inicio || act.fecha);
                         const fFin = formatYmd(act.fecha_fin || act.fecha_inicio || act.fecha);
 
-                        const primerDiaMesYmd = diasMes[0]?.fechaYmd || "";
-                        const ultimoDiaMesYmd = diasMes[diasMes.length - 1]?.fechaYmd || "";
-
-                        const esInicio = dia.fechaYmd === fIni || dia.fechaYmd === primerDiaMesYmd;
-                        const esFin = dia.fechaYmd === fFin || dia.fechaYmd === ultimoDiaMesYmd;
-                        const esUnicoDia = (dia.fechaYmd === fIni && dia.fechaYmd === fFin) || (fIni === fFin);
+                        const esMismoDia = !fFin || fIni === fFin || (dia.fechaYmd === fIni && dia.fechaYmd === fFin);
+                        const esInicio = dia.fechaYmd === fIni;
+                        const esFin = dia.fechaYmd === fFin;
 
                         const actIdKey = String(act.id || act.actividad_id || `${act.ot}-${fIni}`);
                         const isHovered = hoveredActKey === actIdKey;
 
-                        // Estilos de bordes para crear el efecto de barra continua Gantt / Timeline
-                        const roundedClass = esUnicoDia
+                        const roundedClass = esMismoDia || (esInicio && esFin)
                           ? "rounded-md mx-0.5"
                           : esInicio
                           ? "rounded-l-md ml-0.5 mr-0"
                           : esFin
-                          ? "rounded-r-md mr-0.5 ml-0"
+                          ? "rounded-r-md ml-0 mr-0.5"
                           : "rounded-none mx-0";
 
                         return (
                           <div
-                            key={actIdx}
+                            key={`act-${trackIdx}-${actIdKey}`}
                             onClick={() => handleAbrirDetalle(act)}
                             onMouseEnter={(e) => {
                               setHoveredActKey(actIdKey);
@@ -717,16 +766,15 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
                               setHoveredActKey(null);
                               setTooltipState(null);
                             }}
-                            className={`h-6 my-0.5 flex items-center justify-start text-[10px] font-bold text-white cursor-pointer select-none transition-all ${roundedClass} ${
+                            className={`h-6 my-0.5 w-auto overflow-hidden flex items-center justify-start text-[10px] font-bold text-white cursor-pointer select-none transition-all ${roundedClass} ${
                               isHovered
                                 ? "brightness-110 shadow-sm ring-1 ring-white/60 scale-y-105 z-10"
                                 : "hover:brightness-105 shadow-2xs"
                             }`}
                             style={{ backgroundColor: bgCol }}
                           >
-                            {/* El título se muestra en el primer día o si es día único */}
-                            {esInicio || esUnicoDia ? (
-                              <span className="truncate px-1.5 whitespace-nowrap text-left font-semibold tracking-tight">
+                            {esInicio || esMismoDia ? (
+                              <span className="block w-full max-w-full truncate px-1 whitespace-nowrap text-left font-semibold tracking-tight overflow-hidden text-ellipsis">
                                 {tituloVisual}
                               </span>
                             ) : (
@@ -747,7 +795,7 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
       {/* Tooltip Flotante Minimalista con Jerarquía Optimizada Label vs. Valor */}
       {tooltipState && (
         <div
-          className="fixed z-50 pointer-events-none transition-all duration-75 ease-out shadow-xl shadow-gray-300/40 dark:shadow-2xl dark:shadow-black/70 rounded-xl border border-gray-200/90 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 p-3 text-xs backdrop-blur-md min-w-[240px] max-w-[280px] select-none space-y-2.5"
+          className="fixed z-50 pointer-events-none transition-all duration-75 ease-out shadow-xl shadow-gray-300/40 dark:shadow-2xl dark:shadow-black/70 rounded-xl border border-gray-200/90 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 p-3.5 text-xs backdrop-blur-md min-w-[280px] max-w-[360px] select-none space-y-2.5"
           style={{
             left: `${tooltipState.x}px`,
             top: `${tooltipState.y}px`,
@@ -759,7 +807,7 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
               Día {tooltipState.dia.numero} ({tooltipState.dia.diaSemana})
             </span>
             <span
-              className="px-2 py-0.5 rounded-full text-[10px] font-bold text-white shadow-xs"
+              className="px-2 py-0.5 rounded-full text-[10px] font-bold text-white shadow-xs shrink-0"
               style={{
                 backgroundColor:
                   tooltipState.act.observaciones_dia?.color ||
@@ -772,12 +820,12 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
             </span>
           </div>
 
-          {/* Nombre / Tipo de Actividad */}
+          {/* Nombre / Tipo de Actividad (Completo sin cortes) */}
           <div>
             <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block uppercase tracking-wider mb-0.5">
               Actividad
             </span>
-            <span className="font-semibold text-gray-900 dark:text-white text-xs block truncate">
+            <span className="font-bold text-gray-900 dark:text-white text-xs block break-words whitespace-normal leading-snug">
               {tooltipState.act.nombre_act ||
                 tooltipState.act.tipo_trabajo ||
                 tooltipState.act.datos?.nombre_act ||
@@ -787,11 +835,11 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
           </div>
 
           {/* Lista compacta Label y Valor alineados a la izquierda */}
-          <div className="space-y-1 text-[11px] text-left">
+          <div className="space-y-1.5 text-[11px] text-left">
             {/* Período y Duración Unificados */}
-            <div className="flex items-baseline gap-1.5 text-left">
+            <div className="flex items-start gap-1.5 text-left">
               <span className="text-slate-500 dark:text-slate-400 shrink-0">Período:</span>
-              <span className="font-medium text-gray-900 dark:text-white truncate">
+              <span className="font-medium text-gray-900 dark:text-white break-words">
                 {formatPeriodoYDuracion(
                   tooltipState.act.fecha_inicio || tooltipState.act.fecha,
                   tooltipState.act.fecha_fin || tooltipState.act.fecha_inicio || tooltipState.act.fecha
@@ -800,9 +848,9 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
             </div>
 
             {/* Técnico */}
-            <div className="flex items-baseline gap-1.5 text-left">
+            <div className="flex items-start gap-1.5 text-left">
               <span className="text-slate-500 dark:text-slate-400 shrink-0">Técnico:</span>
-              <span className="font-medium text-gray-900 dark:text-white truncate">
+              <span className="font-medium text-gray-900 dark:text-white break-words whitespace-normal leading-tight">
                 {tooltipState.act.nombre ||
                   tooltipState.act.responsable_nombre ||
                   tooltipState.tec.nombre ||
@@ -815,9 +863,9 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
               tooltipState.act.direccion ||
               tooltipState.act.ubicacion_zona ||
               tooltipState.act.zona) && (
-              <div className="flex items-baseline gap-1.5 text-left">
+              <div className="flex items-start gap-1.5 text-left">
                 <span className="text-slate-500 dark:text-slate-400 shrink-0">Ubicación:</span>
-                <span className="font-medium text-gray-900 dark:text-white truncate">
+                <span className="font-medium text-gray-900 dark:text-white break-words whitespace-normal leading-tight">
                   {tooltipState.act.ubicacion_direccion || tooltipState.act.direccion || ""}
                   {tooltipState.act.ubicacion_zona || tooltipState.act.zona
                     ? ` • ${tooltipState.act.ubicacion_zona || tooltipState.act.zona}`
@@ -827,7 +875,7 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
             )}
 
             {/* Estado */}
-            <div className="flex items-baseline gap-1.5 text-left">
+            <div className="flex items-center gap-1.5 text-left">
               <span className="text-slate-500 dark:text-slate-400 shrink-0">Estado:</span>
               <span className={`font-semibold uppercase ${getEstadoTextColor(tooltipState.act.estado)}`}>
                 {tooltipState.act.estado || "PENDIENTE"}
@@ -835,12 +883,10 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
             </div>
           </div>
 
-          {/* Observación / Detalle si existe */}
+          {/* Observación / Detalle Completo si existe */}
           {(tooltipState.act.detalle_descripcion || tooltipState.act.observacion) && (
-            <div className="border-t border-gray-100 dark:border-gray-800 pt-1.5 text-gray-500 dark:text-gray-400 text-[10px] italic">
-              <span className="line-clamp-2">
-                {tooltipState.act.detalle_descripcion || tooltipState.act.observacion}
-              </span>
+            <div className="border-t border-gray-100 dark:border-gray-800 pt-1.5 text-gray-600 dark:text-gray-300 text-[10.5px] italic break-words whitespace-normal leading-snug">
+              {tooltipState.act.detalle_descripcion || tooltipState.act.observacion}
             </div>
           )}
         </div>
