@@ -14,26 +14,43 @@ import {
   TecnicoActivoAgenda,
 } from "@/types/agenda.types";
 import { agendaService } from "@/services/agenda.service";
+import { useAuthStore } from "@/store/auth.store";
 
 export const AgendaModule: React.FC = () => {
   const hoy = new Date();
   const mesActual = String(hoy.getMonth() + 1).padStart(2, "0");
   const anioActual = String(hoy.getFullYear());
 
+  const user = useAuthStore((state) => state.user);
+  const userAreaInitRef = React.useRef<boolean>(false);
+
   const [activeTab, setActiveTab] = useState<AgendaActiveTab>("filtro");
   const [panelTecnicosCollapsed, setPanelTecnicosCollapsed] = useState<boolean>(false);
 
-  // Estado de Filtros
-  const [filtros, setFiltros] = useState<FiltrosAgendaState>({
+  // Estado de Filtros (inicializado con el área del usuario autenticado si existe)
+  const [filtros, setFiltros] = useState<FiltrosAgendaState>(() => ({
     sede: "",
     mes: mesActual,
     yyyy: anioActual,
     cedula: "",
     actividad: "",
     nombre: "",
-    area: "",
+    area: user?.area || "",
     carpeta: "",
-  });
+  }));
+
+  // Sincronizar el área de la sesión en el primer montaje o cuando el usuario se termine de hidratar
+  useEffect(() => {
+    if (user?.area && !userAreaInitRef.current) {
+      userAreaInitRef.current = true;
+      setFiltros((prev) => {
+        if (!prev.area) {
+          return { ...prev, area: user.area || "" };
+        }
+        return prev;
+      });
+    }
+  }, [user?.area]);
 
   // Datos
   const [agendamientosAll, setAgendamientosAll] = useState<AgendaItem[]>([]);

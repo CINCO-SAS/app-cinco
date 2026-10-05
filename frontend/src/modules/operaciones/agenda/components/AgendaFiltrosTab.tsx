@@ -259,6 +259,9 @@ export const AgendaFiltrosTab: React.FC<AgendaFiltrosTabProps> = ({
               className="w-full text-xs py-2 px-3 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:ring-1 focus:ring-brand-500"
             >
               <option value="">Todas las áreas</option>
+              {filtros.area && !areasDisponibles.includes(filtros.area) && (
+                <option value={filtros.area}>{filtros.area}</option>
+              )}
               {areasDisponibles.map((area) => (
                 <option key={area} value={area}>
                   {area}
