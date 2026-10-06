@@ -56,10 +56,25 @@ class ActividadServiceTests(TestCase):
 
 		self.assertTrue(result)
 		self.assertTrue(instance.is_deleted)
-		self.assertEqual(instance.deleted_by, 99)
+		self.assertEqual(instance.deleted_by_id, 99)
 		instance.save.assert_called_once_with(
 			update_fields=['is_deleted', 'deleted_at', 'deleted_by', 'updated_at']
 		)
+
+	def test_actualizar_asigna_updated_by_id_correctamente(self):
+		instance = MagicMock()
+		instance.id = 10
+		validated_data = {"estado": "en_progreso"}
+
+		ActividadService.actualizar(
+			instance,
+			validated_data,
+			actor_user_id=45,
+		)
+
+		self.assertEqual(instance.estado, "en_progreso")
+		self.assertEqual(instance.updated_by_id, 45)
+		instance.save.assert_called_once()
 
 	@patch('apps.operaciones.services.actividad_service.Actividad.objects')
 	def test_listar_applies_default_base_filter(self, actividad_objects):
@@ -191,6 +206,7 @@ class ActividadWriteSerializerValidationTests(TestCase):
 			 patch('apps.operaciones.serializers.actividad_serializer.ActividadService.validar_ots_unicas'):
 			serializer = ActividadWriteSerializer(data=payload)
 			self.assertTrue(serializer.is_valid(), serializer.errors)
+			self.assertEqual(serializer.validated_data.get('responsable_id'), 1)
 
 	def test_acepta_ubicacion_con_campos_opcionales_vacios(self):
 		payload = {
