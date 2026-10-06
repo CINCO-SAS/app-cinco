@@ -3,6 +3,7 @@
 import { ActividadFormData } from "@/schemas/actividades.schema";
 import { useFormSubmit } from "@/hooks/useFormSubmit";
 import { useActividadStore } from "@/store/actividad.store";
+import { getErrorMessage } from "@/lib/errorHandler";
 import { toast } from "sonner";
 
 const toNullableDate = (value?: string | null) => {
@@ -59,7 +60,7 @@ export const useActividadSubmit = () => {
       },
       onError: (err) => {
         toast.error(
-          err.message ||
+          getErrorMessage(err) ||
             "No se pudo realizar la operación. Por favor, intenta nuevamente.",
         );
       },

@@ -119,8 +119,9 @@ class ActividadService:
             ot_codes = [item['ot'] for item in ots if item.get('ot')] if ots else []
             ActividadService.validar_ots_unicas(ot_codes)
 
-            payload['created_by'] = actor_user_id
-            payload['updated_by'] = actor_user_id
+            if actor_user_id is not None:
+                payload['created_by_id'] = actor_user_id
+                payload['updated_by_id'] = actor_user_id
             payload['ot'] = ot_codes[0] if ot_codes else ""
 
             actividad = Actividad.objects.create(**payload)
@@ -168,7 +169,7 @@ class ActividadService:
                 setattr(instance, field, value)
 
             if actor_user_id is not None:
-                instance.updated_by = actor_user_id
+                instance.updated_by_id = actor_user_id
 
             instance.save()
 
@@ -288,9 +289,11 @@ class ActividadService:
             instance.delete()
             return True
 
-        deleted_by = actor_user.id if actor_user and actor_user.is_authenticated else None
+        deleted_by_id = actor_user.id if actor_user and actor_user.is_authenticated else None
         instance.is_deleted = True
         instance.deleted_at = timezone.now()
-        instance.deleted_by = deleted_by
+        instance.deleted_by_id = deleted_by_id
+        if deleted_by_id is not None:
+            instance.updated_by_id = deleted_by_id
         instance.save(update_fields=['is_deleted', 'deleted_at', 'deleted_by', 'updated_at'])
         return True

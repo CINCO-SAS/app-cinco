@@ -70,6 +70,7 @@ class ActividadOTWriteSerializer(serializers.Serializer):
 
 
 class ActividadWriteSerializer(serializers.ModelSerializer):
+    responsable_id = serializers.IntegerField(required=False)
     detalle = ActividadDetalleSerializer()
     ubicacion = ActividadUbicacionSerializer()
     ots = ActividadOTWriteSerializer(many=True, required=True)
