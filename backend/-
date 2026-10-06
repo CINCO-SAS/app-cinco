@@ -1,0 +1,3862 @@
+
+openapi: 3.0.3
+info:
+  title: App Cinco API
+  version: 1.0.0
+  description: Documentación de endpoints - App Cinco
+paths:
+  /auth/csrf/:
+    get:
+      operationId: auth_csrf_retrieve
+      description: Establece la cookie CSRF para el frontend
+      summary: Obtener CSRF token
+      tags:
+      - auth
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                detail: CSRF cookie set
+          description: ''
+  /auth/health/:
+    get:
+      operationId: auth_health_retrieve
+      description: Verifica el estado del backend y conexiones a bases de datos
+      summary: Health Check
+      tags:
+      - auth
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                description: Sistema saludable
+                example:
+                  status: healthy
+                  service: app-cinco-backend
+                  databases:
+                    default: connected
+                    azul: connected
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                description: Sistema no disponible
+                example:
+                  status: unhealthy
+                  service: app-cinco-backend
+                  error: Database connection failed
+          description: ''
+  /auth/legacy/exchange/:
+    post:
+      operationId: auth_legacy_exchange_create
+      description: Valida un `legacy_token` firmado por el sistema externo y emite
+        `access_token` y `refresh_token` del backend.
+      summary: Intercambio legacy sin contraseña
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LegacyExchangeRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LegacyExchangeRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LegacyExchangeRequest'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyLoginResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                detail: legacy_token inválido o API Key inválida
+          description: ''
+  /auth/legacy/login/:
+    post:
+      operationId: auth_legacy_login_create
+      description: Autentica un usuario real para una integración legacy. Requiere
+        `X-API-Key` y retorna `access_token` y `refresh_token` en JSON.
+      summary: Login legacy con API Key
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyLoginResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                detail: Credenciales inválidas o API Key inválida
+          description: ''
+  /auth/legacy/refresh/:
+    post:
+      operationId: auth_legacy_refresh_create
+      description: Renueva tokens para una integración legacy. Requiere `X-API-Key`
+        y `refresh_token` en el body.
+      summary: Refresh legacy con API Key
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyRefreshTokenResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                detail: Refresh token inválido o API Key inválida
+          description: ''
+  /auth/login/:
+    post:
+      operationId: auth_login_create
+      description: Autenticación de usuario y generación de tokens JWT
+      summary: Login de usuario
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                detail: Usuario y contraseña requeridos
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                detail: Credenciales inválidas
+          description: ''
+  /auth/logout/:
+    post:
+      operationId: auth_logout_create
+      description: Revoca el refresh token y limpia las cookies de autenticación
+      summary: Cerrar sesión
+      tags:
+      - auth
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                detail: Logout successful
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                detail: No refresh token found
+          description: ''
+  /auth/refresh/:
+    post:
+      operationId: auth_refresh_create
+      description: Genera un nuevo access token rotando el refresh token
+      summary: Renovar token de acceso
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshTokenResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                detail: refresh_token is required
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                detail: Invalid or expired refresh token
+          description: ''
+  /auth/session/:
+    get:
+      operationId: auth_session_retrieve
+      description: Retorna los datos del usuario autenticado según el access token
+        en cookie httpOnly.
+      summary: Validar sesión actual
+      tags:
+      - auth
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                detail: No autenticado o token inválido
+          description: ''
+  /empleados/empleados/:
+    get:
+      operationId: empleados_empleados_list
+      description: "\n        Obtiene un listado de empleados con filtros avanzados.\n
+        \       \n        **Filtrado automático por estado:**\n        - Si no envías
+        `estado`, retorna solo empleados `ACTIVO`\n        - Si envías `estado`, filtra
+        por ese valor (`ACTIVO`, `INACTIVO`, `SUSPENDIDO`)\n        \n        **Parámetros
+        de filtro disponibles:**\n        - `search`: Búsqueda general en cédula,
+        nombre, apellido, cargo, móvil\n        - `cedula`, `nombre`, `apellido`,
+        `area`, `carpeta`, `cargo`, `movil`\n        - `supervisor`, `sede`, `codigo_sap`,
+        `estado`\n        \n        **Campos incluidos:**\n        - id, cédula, nombre,
+        apellido, área, carpeta, cargo, móvil, estado, etc.\n        "
+      summary: Listar empleados activos
+      parameters:
+      - in: query
+        name: apellido
+        schema:
+          type: string
+        description: Filtra por apellido (búsqueda parcial)
+      - in: query
+        name: area
+        schema:
+          type: string
+        description: Filtra por área (búsqueda parcial)
+      - in: query
+        name: cargo
+        schema:
+          type: string
+        description: Filtra por cargo (búsqueda parcial)
+      - in: query
+        name: carpeta
+        schema:
+          type: string
+        description: Filtra por carpeta (búsqueda parcial)
+      - in: query
+        name: cedula
+        schema:
+          type: string
+        description: Filtra por cédula (búsqueda parcial)
+      - in: query
+        name: codigo_sap
+        schema:
+          type: string
+        description: Filtra por código SAP (búsqueda parcial)
+      - in: query
+        name: estado
+        schema:
+          type: string
+          enum:
+          - ACTIVO
+          - INACTIVO
+          - SUSPENDIDO
+        description: 'Filtra por estado. Valores: ACTIVO, INACTIVO, SUSPENDIDO'
+      - in: query
+        name: movil
+        schema:
+          type: string
+        description: Filtra por móvil (búsqueda parcial)
+      - in: query
+        name: nombre
+        schema:
+          type: string
+        description: Filtra por nombre (búsqueda parcial)
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Búsqueda en cédula, nombre, apellido, cargo o móvil (búsqueda
+          parcial, insensible a mayúsculas)
+      - in: query
+        name: sede
+        schema:
+          type: string
+        description: Filtra por sede (búsqueda parcial)
+      - in: query
+        name: supervisor
+        schema:
+          type: string
+        description: Filtra por supervisor (búsqueda parcial)
+      tags:
+      - empleados
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Empleado'
+          description: ''
+    post:
+      operationId: empleados_empleados_create
+      description: "\n        Crea un nuevo empleado.\n        \n        **Campos
+        requeridos:**\n        - cedula: Cédula única\n        - nombre: Nombre del
+        empleado\n        - apellido: Apellido del empleado\n        - cargo: Cargo
+        del empleado\n        - area: Área a la que pertenece\n        - carpeta:
+        Carpeta asignada\n        - movil: Número de móvil\n        \n        **Campos
+        opcionales:**\n        - estado: Estado del empleado (por defecto ACTIVO)\n
+        \       - email: Correo electrónico\n        "
+      summary: Crear un nuevo empleado
+      tags:
+      - empleados
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empleado'
+          description: ''
+  /empleados/empleados/{id}/:
+    get:
+      operationId: empleados_empleados_retrieve
+      description: Obtiene toda la información de un empleado específico
+      summary: Obtener detalles de un empleado
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este empleado.
+        required: true
+      tags:
+      - empleados
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empleado'
+          description: ''
+    put:
+      operationId: empleados_empleados_update
+      description: Actualiza todos los campos de un empleado. Se requieren todos los
+        campos requeridos.
+      summary: Actualizar un empleado completamente
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este empleado.
+        required: true
+      tags:
+      - empleados
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empleado'
+          description: ''
+    patch:
+      operationId: empleados_empleados_partial_update
+      description: Actualiza solo los campos proporcionados de un empleado.
+      summary: Actualizar parcialmente un empleado
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este empleado.
+        required: true
+      tags:
+      - empleados
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedEmpleado'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedEmpleado'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedEmpleado'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empleado'
+          description: ''
+    delete:
+      operationId: empleados_empleados_destroy
+      description: "\n        Realiza soft delete por defecto cambiando `estado` a
+        `INACTIVO`.\n\n        **Eliminación física (caso específico):**\n        -
+        Enviar `?hard_delete=true`\n        - Requiere una cuenta administradora (`is_superuser`)\n
+        \       "
+      summary: Eliminar un empleado
+      parameters:
+      - in: query
+        name: hard_delete
+        schema:
+          type: boolean
+        description: Si es true y la cuenta es superusuaria, elimina físicamente el
+          registro
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este empleado.
+        required: true
+      tags:
+      - empleados
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '204':
+          description: No response body
+  /empleados/empleados/{id}/certificado-laboral/:
+    get:
+      operationId: empleados_empleados_certificado_laboral_retrieve
+      description: "\n        Genera un certificado laboral en PDF a partir de la
+        información del empleado y\n        del complemento en `cinco_base_de_personal_siigo`.\n\n
+        \       **Fuente principal de datos:**\n        - `cinco_base_de_personal`:
+        nombre, cédula, cargo base, fecha ingreso\n        - `cinco_base_de_personal_siigo`:
+        salario, tipo contrato, cargo SIIGO y extras JSON\n\n        **Parámetros
+        opcionales:**\n        - `document_type`: fuerza el tipo de documento (`CC`,
+        `PT`, `TI`, `CE`)\n        "
+      summary: Generar certificado laboral en PDF
+      parameters:
+      - in: query
+        name: document_type
+        schema:
+          type: string
+          enum:
+          - CC
+          - CE
+          - PT
+          - TI
+        description: Tipo de documento a marcar en el certificado
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este empleado.
+        required: true
+      tags:
+      - empleados
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+          description: Archivo PDF del certificado laboral.
+    post:
+      operationId: empleados_empleados_certificado_laboral_create
+      description: "\n        Genera un certificado laboral en PDF a partir de la
+        información del empleado y\n        del complemento en `cinco_base_de_personal_siigo`.\n\n
+        \       **Fuente principal de datos:**\n        - `cinco_base_de_personal`:
+        nombre, cédula, cargo base, fecha ingreso\n        - `cinco_base_de_personal_siigo`:
+        salario, tipo contrato, cargo SIIGO y extras JSON\n\n        **Parámetros
+        opcionales:**\n        - `document_type`: fuerza el tipo de documento (`CC`,
+        `PT`, `TI`, `CE`)\n        "
+      summary: Generar certificado laboral en PDF
+      parameters:
+      - in: query
+        name: document_type
+        schema:
+          type: string
+          enum:
+          - CC
+          - CE
+          - PT
+          - TI
+        description: Tipo de documento a marcar en el certificado
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este empleado.
+        required: true
+      tags:
+      - empleados
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+          description: Archivo PDF del certificado laboral.
+  /empleados/empleados/certificado-config/:
+    get:
+      operationId: empleados_empleados_certificado_config_retrieve
+      description: |-
+        ViewSet para gestionar empleados.
+
+        Proporciona listar, crear, actualizar y eliminar empleados.
+        Filtra automáticamente solo empleados activos.
+        Soporta búsqueda en: cédula, nombre, apellido, cargo, móvil.
+
+        Autenticación requerida: Token Bearer o API Key
+      tags:
+      - empleados
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empleado'
+          description: ''
+  /empleados/empleados/certificado-config/update/:
+    post:
+      operationId: empleados_empleados_certificado_config_update_create
+      description: |-
+        ViewSet para gestionar empleados.
+
+        Proporciona listar, crear, actualizar y eliminar empleados.
+        Filtra automáticamente solo empleados activos.
+        Soporta búsqueda en: cédula, nombre, apellido, cargo, móvil.
+
+        Autenticación requerida: Token Bearer o API Key
+      tags:
+      - empleados
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Empleado'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empleado'
+          description: ''
+  /empleados/empleados/certificado-firma-imagen/:
+    get:
+      operationId: empleados_empleados_certificado_firma_imagen_retrieve
+      description: |-
+        ViewSet para gestionar empleados.
+
+        Proporciona listar, crear, actualizar y eliminar empleados.
+        Filtra automáticamente solo empleados activos.
+        Soporta búsqueda en: cédula, nombre, apellido, cargo, móvil.
+
+        Autenticación requerida: Token Bearer o API Key
+      tags:
+      - empleados
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empleado'
+          description: ''
+  /ia-dev/async/jobs/:
+    get:
+      operationId: ia_dev_async_jobs_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/attendance/period/resolve/:
+    get:
+      operationId: ia_dev_attendance_period_resolve_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: ia_dev_attendance_period_resolve_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/chat/:
+    post:
+      operationId: ia_dev_chat_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/chat/task-status/:
+    get:
+      operationId: ia_dev_chat_task_status_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/health/:
+    get:
+      operationId: ia_dev_health_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/knowledge/proposals/:
+    get:
+      operationId: ia_dev_knowledge_proposals_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: ia_dev_knowledge_proposals_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/knowledge/proposals/approve/:
+    post:
+      operationId: ia_dev_knowledge_proposals_approve_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/knowledge/proposals/reject/:
+    post:
+      operationId: ia_dev_knowledge_proposals_reject_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/memory/audit/:
+    get:
+      operationId: ia_dev_memory_audit_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/memory/proposals/:
+    get:
+      operationId: ia_dev_memory_proposals_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: ia_dev_memory_proposals_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/memory/proposals/approve/:
+    post:
+      operationId: ia_dev_memory_proposals_approve_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/memory/proposals/reject/:
+    post:
+      operationId: ia_dev_memory_proposals_reject_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/memory/reset/:
+    post:
+      operationId: ia_dev_memory_reset_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/memory/user/:
+    get:
+      operationId: ia_dev_memory_user_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: ia_dev_memory_user_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/observability/summary/:
+    get:
+      operationId: ia_dev_observability_summary_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/runtime/artifacts/provider-serial-validation/:
+    get:
+      operationId: ia_dev_runtime_artifacts_provider_serial_validation_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/runtime/governance/health/:
+    get:
+      operationId: ia_dev_runtime_governance_health_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/runtime/operations/summary/:
+    get:
+      operationId: ia_dev_runtime_operations_summary_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/runtime/semantic-gaps/:
+    get:
+      operationId: ia_dev_runtime_semantic_gaps_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: ia_dev_runtime_semantic_gaps_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/runtime/tasks/explorer/:
+    get:
+      operationId: ia_dev_runtime_tasks_explorer_retrieve
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /ia-dev/tickets/:
+    post:
+      operationId: ia_dev_tickets_create
+      tags:
+      - ia-dev
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          description: No response body
+  /operaciones/actividades/:
+    get:
+      operationId: operaciones_actividades_list
+      description: "\n        Obtiene un listado de actividades filtradas según el
+        perfil del usuario actual.\n        \n        **Comportamiento de filtrado
+        por perfil:**\n        - Por defecto, solo muestra actividades que el usuario
+        creó (created_by) \n          O donde es el responsable (responsable_snapshot.empleado_id)\n
+        \       \n        **Parámetros de filtrado disponibles:**\n        - `ot`:
+        Filtra por alguna OT relacionada (búsqueda parcial)\n        - `estado`: Filtra
+        por estado (pendiente, en_progreso, completada, cancelada, pausada, reprogramada)\n
+        \       - `area`: Filtra por área del responsable (búsqueda parcial)\n        -
+        `carpeta`: Filtra por carpeta del responsable (búsqueda parcial)\n        -
+        `responsable_id`: Filtra por ID del empleado responsable\n        - `buscar`:
+        Búsqueda general en descripción, tipo de trabajo, OT y nombre del responsable\n
+        \       - `zona`: Filtra por zona de ubicación (búsqueda parcial)\n        -
+        `nodo`: Filtra por nodo de ubicación (búsqueda parcial)\n        - `fecha_inicio_desde`:
+        Filtra actividades con fecha de inicio >= a esta fecha (YYYY-MM-DD)\n        -
+        `fecha_inicio_hasta`: Filtra actividades con fecha de inicio <= a esta fecha
+        (YYYY-MM-DD)\n        "
+      summary: Listar actividades/solicitudes
+      parameters:
+      - in: query
+        name: area
+        schema:
+          type: string
+        description: Filtra por área del responsable (búsqueda parcial)
+      - in: query
+        name: buscar
+        schema:
+          type: string
+        description: Búsqueda general en descripción, tipo de trabajo, OT y nombre
+          del responsable
+      - in: query
+        name: carpeta
+        schema:
+          type: string
+        description: Filtra por carpeta del responsable (búsqueda parcial)
+      - in: query
+        name: estado
+        schema:
+          type: string
+          enum:
+          - cancelada
+          - completada
+          - en_progreso
+          - pausada
+          - pendiente
+          - reprogramada
+        description: 'Filtra por estado de la actividad. Valores: pendiente, en_progreso,
+          completada, cancelada, pausada, reprogramada'
+      - in: query
+        name: fecha_inicio_desde
+        schema:
+          type: string
+          format: date
+        description: Filtra actividades con fecha de inicio >= a esta fecha (YYYY-MM-DD)
+      - in: query
+        name: fecha_inicio_hasta
+        schema:
+          type: string
+          format: date
+        description: Filtra actividades con fecha de inicio <= a esta fecha (YYYY-MM-DD)
+      - in: query
+        name: nodo
+        schema:
+          type: string
+        description: Filtra por nodo de ubicación (búsqueda parcial)
+      - in: query
+        name: ot
+        schema:
+          type: string
+        description: 'Filtra por alguna OT relacionada (búsqueda parcial). Ej: OT-2024-001'
+      - in: query
+        name: responsable_id
+        schema:
+          type: integer
+        description: Filtra por ID del empleado responsable
+      - in: query
+        name: zona
+        schema:
+          type: string
+        description: Filtra por zona de ubicación (búsqueda parcial)
+      tags:
+      - operaciones
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Actividad'
+          description: ''
+    post:
+      operationId: operaciones_actividades_create
+      description: "\n        Crea una nueva actividad con sus detalles de ubicación.\n
+        \       \n        **Nota:** La actividad será creada por el usuario autenticado
+        (created_by).\n        El responsable debe ser un empleado válido existente
+        en la base de datos de empleados.\n        \n        **Campos requeridos:**\n
+        \       - `ots`: Lista de OTs relacionadas. Debe incluir al menos una.\n        -
+        `responsable_id`: ID del empleado responsable\n        - `detalle`: Objeto
+        con descripción y tipo de trabajo\n        - `ubicacion`: Objeto con datos
+        de ubicación\n        \n        **Campos opcionales:**\n        - `fecha_inicio`:
+        Fecha de inicio (YYYY-MM-DD)\n        - `fecha_fin_estimado`: Fecha fin estimada
+        (YYYY-MM-DD)\n        - `fecha_fin_real`: Fecha fin real (YYYY-MM-DD)\n        "
+      summary: Crear una nueva actividad/solicitud
+      tags:
+      - operaciones
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActividadWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ActividadWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ActividadWrite'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Actividad'
+          description: ''
+  /operaciones/actividades/{id}/:
+    get:
+      operationId: operaciones_actividades_retrieve
+      description: Obtiene toda la información de una actividad específica incluyendo
+        detalles, ubicación y snapshot del responsable.
+      summary: Obtener detalles de una actividad
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este actividad.
+        required: true
+      tags:
+      - operaciones
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Actividad'
+          description: ''
+    put:
+      operationId: operaciones_actividades_update
+      description: Actualiza todos los campos de una actividad. Se requieren todos
+        los campos requeridos.
+      summary: Actualizar una actividad completamente
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este actividad.
+        required: true
+      tags:
+      - operaciones
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActividadWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ActividadWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ActividadWrite'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Actividad'
+          description: ''
+    patch:
+      operationId: operaciones_actividades_partial_update
+      description: Actualiza solo los campos proporcionados de una actividad.
+      summary: Actualizar parcialmente una actividad
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este actividad.
+        required: true
+      tags:
+      - operaciones
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedActividadWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedActividadWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedActividadWrite'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Actividad'
+          description: ''
+    delete:
+      operationId: operaciones_actividades_destroy
+      description: "\n        Realiza soft delete por defecto: marca la actividad
+        como eliminada (`is_deleted=true`) sin borrarla físicamente.\n\n        **Eliminación
+        física (caso específico):**\n        - Enviar `?hard_delete=true`\n        -
+        Requiere usuario administrador (`is_superuser`)\n        "
+      summary: Eliminar una actividad
+      parameters:
+      - in: query
+        name: hard_delete
+        schema:
+          type: boolean
+        description: Si es true y el usuario es superusuario, elimina físicamente
+          el registro
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este actividad.
+        required: true
+      tags:
+      - operaciones
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '204':
+          description: No response body
+  /security/menu/:
+    get:
+      operationId: security_menu_retrieve
+      description: Retorna el menú dinámico según los permisos del usuario autenticado
+      summary: Obtener menú del usuario
+      tags:
+      - security
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                detail: No se proporcionaron credenciales de autenticación.
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                detail: No tiene permiso para realizar esta acción.
+          description: ''
+  /smu/actividades/:
+    get:
+      operationId: smu_actividades_list
+      description: Devuelve el historial paginado de actividades registradas. Soporta
+        búsqueda por estación, OT, cédula y nombre del responsable. Filtros adicionales
+        por categoría y tipo de formulario.
+      summary: Listar actividades SMU (historial)
+      parameters:
+      - in: query
+        name: categoria
+        schema:
+          type: string
+        description: Filtro por categoría (preventivos, correctivos_capex…)
+      - in: query
+        name: estado
+        schema:
+          type: string
+        description: Filtro por estado (enviado, aprobado…)
+      - name: ordering
+        required: false
+        in: query
+        description: Qué campo usar para ordenar los resultados.
+        schema:
+          type: string
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: Número de página
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Filas por página (máx. 100)
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Busca en estación, OT, responsable
+      - in: query
+        name: tipo_formulario
+        schema:
+          type: string
+        description: Filtro por tipo (planta, tipologia1…)
+      tags:
+      - smu
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSmuActividadListList'
+          description: ''
+    post:
+      operationId: smu_actividades_create
+      description: Único punto de entrada de creación. Crea una actividad cabecera
+        con sus subtablas asociadas (técnicos, materiales, evidencias, transportes,
+        detalle AA/Planta/Falla/CAPEX) en una transacción atómica.
+      summary: Crear reporte de actividad SMU
+      tags:
+      - smu
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmuActividad'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SmuActividad'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SmuActividad'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmuActividad'
+          description: ''
+  /smu/actividades/{id}/:
+    get:
+      operationId: smu_actividades_retrieve
+      description: |-
+        API del módulo SMU.
+
+        - ``POST /smu/actividades/`` — crea una actividad con todas sus subtablas.
+        - ``GET  /smu/actividades/`` — listado paginado con filtros (historial).
+        - ``GET  /smu/actividades/<id>/`` — detalle completo de una actividad.
+        - ``GET  /smu/actividades/<id>/export/`` — descarga el formulario en Excel.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este smu actividad.
+        required: true
+      tags:
+      - smu
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmuActividad'
+          description: ''
+  /smu/actividades/{id}/export/:
+    get:
+      operationId: smu_actividades_export_retrieve
+      description: 'Descarga la actividad en el formato (estilo) de su formulario.
+        El contenido se adapta a los datos guardados: una fila por material, un bloque
+        de fotos por cada dos evidencias y bloques de texto con la altura del contenido.
+        Los tipos de formulario sin plantilla devuelven 400.'
+      summary: Exportar el formulario a Excel
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este smu actividad.
+        required: true
+      tags:
+      - smu
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+          description: ''
+  /smu/estaciones/:
+    get:
+      operationId: smu_estaciones_list
+      description: Consulta paginada del catálogo de sitios con soporte para búsqueda
+        y filtrado.
+      summary: Listar catálogo de estaciones / sitios SMU
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Qué campo usar para ordenar los resultados.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: Un número de página dentro del conjunto de resultados paginado.
+        schema:
+          type: integer
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Tamaño de página (máximo 500)
+      - in: query
+        name: regional
+        schema:
+          type: string
+        description: Filtrar por regional exacta (ej. NOROCCIDENTE, CENTRO)
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Búsqueda por nombre de sitio, regional, departamento o municipio
+      - in: query
+        name: tipo_estacion
+        schema:
+          type: string
+        description: Filtrar por tipo de estación (ej. NODO, REPETIDOR)
+      tags:
+      - smu-maestras
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSmuEstacionList'
+          description: ''
+  /smu/estaciones/{id}/:
+    get:
+      operationId: smu_estaciones_retrieve
+      description: Consulta los atributos geográficos y técnicos normalizados de una
+        estación por su ID.
+      summary: Obtener detalle de una estación
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este smu estacion.
+        required: true
+      tags:
+      - smu-maestras
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmuEstacion'
+          description: ''
+  /smu/evidencias/:
+    post:
+      operationId: smu_evidencias_create
+      description: Guarda la foto en el servidor (validación por magic bytes, tope
+        de 5 MB, nombre `uuid4` y conversión a WebP calidad 80, como el `saveFiles()`
+        del PHP legado) y devuelve `ruta_archivo` para incluirlo en `evidencias[]`
+        al crear la actividad. Recibe `multipart/form-data` con el campo `archivo`.
+      summary: Subir evidencia fotográfica
+      tags:
+      - smu
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SmuEvidenciaUpload'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmuEvidenciaUploadResponse'
+          description: ''
+  /smu/materiales-lpu/:
+    get:
+      operationId: smu_materiales_lpu_list
+      description: Consulta paginada del catálogo maestro de ítems LPU y mano de obra
+        con valores monetarios oficiales.
+      summary: Listar catálogo de materiales y tarifas LPU
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Qué campo usar para ordenar los resultados.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: Un número de página dentro del conjunto de resultados paginado.
+        schema:
+          type: integer
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Tamaño de página (máximo 500)
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Búsqueda por código SAP, código liquidación o descripción
+      - in: query
+        name: tipo_registro
+        schema:
+          type: string
+        description: Filtrar por tipo de registro (ej. material_correctivo, inventario_capex)
+      tags:
+      - smu-maestras
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSmuMatrizLpuList'
+          description: ''
+  /smu/materiales-lpu/{id}/:
+    get:
+      operationId: smu_materiales_lpu_retrieve
+      description: Consulta información detallada y tarifas de un material LPU por
+        su ID.
+      summary: Obtener detalle de un ítem LPU
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: Un valor de entero único que identifique este smu matriz lpu.
+        required: true
+      tags:
+      - smu-maestras
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmuMatrizLpu'
+          description: ''
+components:
+  schemas:
+    Actividad:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        detalle:
+          allOf:
+          - $ref: '#/components/schemas/ActividadDetalle'
+          readOnly: true
+        ubicacion:
+          allOf:
+          - $ref: '#/components/schemas/ActividadUbicacion'
+          readOnly: true
+        responsable_snapshot:
+          type: string
+          readOnly: true
+        ots:
+          type: string
+          readOnly: true
+        ot_items:
+          type: string
+          readOnly: true
+        ot:
+          type: string
+          maxLength: 100
+        estado:
+          $ref: '#/components/schemas/EstadoA20Enum'
+        responsable_id:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        fecha_inicio:
+          type: string
+          format: date
+          nullable: true
+        fecha_fin_estimado:
+          type: string
+          format: date
+          nullable: true
+        fecha_fin_real:
+          type: string
+          format: date
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_by:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          nullable: true
+        is_deleted:
+          type: boolean
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+        deleted_by:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          nullable: true
+      required:
+      - created_at
+      - detalle
+      - id
+      - ot_items
+      - ots
+      - responsable_id
+      - responsable_snapshot
+      - ubicacion
+      - updated_at
+    ActividadDetalle:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        descripcion:
+          type: string
+        tipo_trabajo:
+          type: string
+          maxLength: 100
+        extra:
+          nullable: true
+      required:
+      - id
+      - tipo_trabajo
+    ActividadOTWrite:
+      type: object
+      properties:
+        ot:
+          type: string
+          maxLength: 100
+        fecha_inicio:
+          type: string
+          format: date
+          nullable: true
+        fecha_fin:
+          type: string
+          format: date
+          nullable: true
+      required:
+      - ot
+    ActividadUbicacion:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        coordenada_x:
+          type: string
+        coordenada_y:
+          type: string
+        zona:
+          type: string
+        nodo:
+          type: string
+        direccion:
+          type: string
+          maxLength: 255
+      required:
+      - direccion
+      - id
+    ActividadWrite:
+      type: object
+      properties:
+        ot:
+          type: string
+          writeOnly: true
+        ots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActividadOTWrite'
+        estado:
+          $ref: '#/components/schemas/EstadoA20Enum'
+        responsable_id:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        fecha_inicio:
+          type: string
+          format: date
+          nullable: true
+        fecha_fin_estimado:
+          type: string
+          format: date
+          nullable: true
+        fecha_fin_real:
+          type: string
+          format: date
+          nullable: true
+        detalle:
+          $ref: '#/components/schemas/ActividadDetalle'
+        ubicacion:
+          $ref: '#/components/schemas/ActividadUbicacion'
+      required:
+      - detalle
+      - ots
+      - responsable_id
+      - ubicacion
+    AuthUser:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        nombre:
+          type: string
+        apellido:
+          type: string
+        email:
+          type: string
+          format: email
+        is_superuser:
+          type: boolean
+        area:
+          type: string
+        carpeta:
+          type: string
+      required:
+      - apellido
+      - email
+      - id
+      - is_superuser
+      - nombre
+      - username
+    BlankEnum:
+      enum:
+      - ''
+    CambioBateriasEnum:
+      enum:
+      - SÍ
+      - 'NO'
+      - N/A
+      type: string
+      description: |-
+        * `SÍ` - SÍ
+        * `NO` - NO
+        * `N/A` - N/A
+    CategoriaEnum:
+      enum:
+      - preventivos
+      - correctivos
+      - emergencias
+      - correctivos_capex
+      type: string
+      description: |-
+        * `preventivos` - Preventivos
+        * `correctivos` - Correctivos
+        * `emergencias` - Emergencias
+        * `correctivos_capex` - Correctivos CAPEX
+    Empleado:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        cedula:
+          type: string
+          maxLength: 50
+        nombre:
+          type: string
+          maxLength: 100
+        apellido:
+          type: string
+          maxLength: 100
+        area:
+          type: string
+          nullable: true
+          maxLength: 100
+        carpeta:
+          type: string
+          nullable: true
+          maxLength: 100
+        cargo:
+          type: string
+          nullable: true
+          maxLength: 100
+        movil:
+          type: string
+          nullable: true
+          maxLength: 100
+        supervisor:
+          type: string
+          nullable: true
+          maxLength: 100
+        estado:
+          oneOf:
+          - $ref: '#/components/schemas/EmpleadoEstadoEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        link_foto:
+          type: string
+          nullable: true
+          maxLength: 255
+      required:
+      - apellido
+      - cedula
+      - id
+      - nombre
+    EmpleadoEstadoEnum:
+      enum:
+      - ACTIVO
+      - INACTIVO
+      - SUSPENDIDO
+      type: string
+      description: |-
+        * `ACTIVO` - Activo
+        * `INACTIVO` - Inactivo
+        * `SUSPENDIDO` - Suspendido
+    EstadoA20Enum:
+      enum:
+      - pendiente
+      - en_progreso
+      - completada
+      - cancelada
+      - pausada
+      - reprogramada
+      type: string
+      description: |-
+        * `pendiente` - Pendiente
+        * `en_progreso` - En Progreso
+        * `completada` - Completada
+        * `cancelada` - Cancelada
+        * `pausada` - Pausada
+        * `reprogramada` - Reprogramada
+    EstadoB44Enum:
+      enum:
+      - borrador
+      - enviado
+      - aprobado
+      - rechazado
+      type: string
+      description: |-
+        * `borrador` - Borrador
+        * `enviado` - Enviado
+        * `aprobado` - Aprobado
+        * `rechazado` - Rechazado
+    LegacyExchangeRequest:
+      type: object
+      properties:
+        legacy_token:
+          type: string
+      required:
+      - legacy_token
+    LegacyLoginResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        user:
+          type: object
+          additionalProperties: {}
+        api_client:
+          type: object
+          additionalProperties: {}
+      required:
+      - access_token
+      - api_client
+      - refresh_token
+      - user
+    LegacyRefreshTokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+      required:
+      - access_token
+      - refresh_token
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required:
+      - password
+      - username
+    LoginResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+      required:
+      - user
+    MenuItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+        nombre:
+          type: string
+        area:
+          type: string
+        carpeta:
+          type: string
+        permisos:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: boolean
+      required:
+      - area
+      - carpeta
+      - id
+      - nombre
+      - permisos
+      - url
+    MenuResponse:
+      type: object
+      properties:
+        menu:
+          type: array
+          items:
+            $ref: '#/components/schemas/MenuItem'
+      required:
+      - menu
+    NullEnum:
+      enum:
+      - null
+    PaginatedSmuActividadListList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuActividadList'
+    PaginatedSmuEstacionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuEstacion'
+    PaginatedSmuMatrizLpuList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuMatrizLpu'
+    PatchedActividadWrite:
+      type: object
+      properties:
+        ot:
+          type: string
+          writeOnly: true
+        ots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActividadOTWrite'
+        estado:
+          $ref: '#/components/schemas/EstadoA20Enum'
+        responsable_id:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        fecha_inicio:
+          type: string
+          format: date
+          nullable: true
+        fecha_fin_estimado:
+          type: string
+          format: date
+          nullable: true
+        fecha_fin_real:
+          type: string
+          format: date
+          nullable: true
+        detalle:
+          $ref: '#/components/schemas/ActividadDetalle'
+        ubicacion:
+          $ref: '#/components/schemas/ActividadUbicacion'
+    PatchedEmpleado:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        cedula:
+          type: string
+          maxLength: 50
+        nombre:
+          type: string
+          maxLength: 100
+        apellido:
+          type: string
+          maxLength: 100
+        area:
+          type: string
+          nullable: true
+          maxLength: 100
+        carpeta:
+          type: string
+          nullable: true
+          maxLength: 100
+        cargo:
+          type: string
+          nullable: true
+          maxLength: 100
+        movil:
+          type: string
+          nullable: true
+          maxLength: 100
+        supervisor:
+          type: string
+          nullable: true
+          maxLength: 100
+        estado:
+          oneOf:
+          - $ref: '#/components/schemas/EmpleadoEstadoEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        link_foto:
+          type: string
+          nullable: true
+          maxLength: 255
+    PruebaConCargaEnum:
+      enum:
+      - OK
+      - NO OK
+      - N/A
+      type: string
+      description: |-
+        * `OK` - OK
+        * `NO OK` - NO OK
+        * `N/A` - N/A
+    PruebaPlantaForzadaEnum:
+      enum:
+      - OK
+      - NO OK
+      - N/A
+      type: string
+      description: |-
+        * `OK` - OK
+        * `NO OK` - NO OK
+        * `N/A` - N/A
+    PruebaTransferenciaAutomaticaEnum:
+      enum:
+      - OK
+      - NO OK
+      - N/A
+      type: string
+      description: |-
+        * `OK` - OK
+        * `NO OK` - NO OK
+        * `N/A` - N/A
+    PruebaVacioEnum:
+      enum:
+      - OK
+      - NO OK
+      - N/A
+      type: string
+      description: |-
+        * `OK` - OK
+        * `NO OK` - NO OK
+        * `N/A` - N/A
+    RefreshTokenRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+      required:
+      - refresh_token
+    RefreshTokenResponse:
+      type: object
+      properties:
+        access:
+          type: string
+        refresh:
+          type: string
+      required:
+      - access
+      - refresh
+    RolEnum:
+      enum:
+      - tecnico
+      - revisor
+      - entrega
+      - aprobador
+      type: string
+      description: |-
+        * `tecnico` - Técnico
+        * `revisor` - Revisor
+        * `entrega` - Responsable de entrega
+        * `aprobador` - Aprobador
+    SessionResponse:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        user:
+          $ref: '#/components/schemas/AuthUser'
+      required:
+      - authenticated
+      - user
+    SmuActividad:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        categoria:
+          $ref: '#/components/schemas/CategoriaEnum'
+        tipo_formulario:
+          $ref: '#/components/schemas/TipoFormularioEnum'
+        codigo_ot:
+          type: string
+          nullable: true
+          maxLength: 60
+        actividad_operaciones:
+          type: integer
+          nullable: true
+          description: Vínculo con la orden de trabajo de operaciones central
+        numero_inc:
+          type: string
+          nullable: true
+          description: Numero de Incidente (Correctivos y Emergencias)
+          maxLength: 60
+        numero_tas:
+          type: string
+          nullable: true
+          description: Numero TAS
+          maxLength: 60
+        estacion:
+          type: integer
+          nullable: true
+          description: Clave foránea con la tabla maestra de estaciones
+        nombre_estacion:
+          type: string
+          description: Snapshot histórico / nombre de estación
+          maxLength: 150
+        tipo_estacion:
+          type: string
+          nullable: true
+          maxLength: 80
+        tipo_sitio:
+          type: string
+          nullable: true
+          maxLength: 80
+        categoria_criticidad:
+          type: string
+          nullable: true
+          description: 'Criticidad del reporte (ej: 1. ALTA) - formulario estándar'
+          maxLength: 50
+        site_owner:
+          type: string
+          nullable: true
+          maxLength: 100
+        regional:
+          type: string
+          nullable: true
+          maxLength: 80
+        departamento:
+          type: string
+          nullable: true
+          maxLength: 80
+        direccion:
+          type: string
+          nullable: true
+          maxLength: 255
+        fecha_inicio:
+          type: string
+          format: date-time
+          nullable: true
+        fecha_fin:
+          type: string
+          format: date-time
+          nullable: true
+        responsable:
+          type: integer
+          nullable: true
+          description: Usuario central autenticado responsable del reporte
+        responsable_cedula:
+          type: string
+          description: Cedula del usuario que documenta en sistema
+          maxLength: 30
+        responsable_nombre:
+          type: string
+          nullable: true
+          maxLength: 150
+        coordinador_aliado:
+          type: string
+          nullable: true
+          maxLength: 150
+        empresa:
+          type: string
+          nullable: true
+          description: Empresa aliada/contratista que ejecuta la actividad
+          maxLength: 150
+        implica_exclusion:
+          type: boolean
+        observaciones:
+          type: string
+          nullable: true
+        hallazgos:
+          type: string
+          nullable: true
+        recomendaciones:
+          type: string
+          nullable: true
+        estado:
+          $ref: '#/components/schemas/EstadoB44Enum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        tecnicos:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuActividadTecnico'
+        materiales:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuActividadMaterial'
+        evidencias:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuActividadEvidencia'
+        transportes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuActividadTransporte'
+        detalle_preventivo_aa:
+          allOf:
+          - $ref: '#/components/schemas/SmuDetallePreventivoAa'
+          nullable: true
+        checklist_aa:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuDetallePreventivoAaChecklist'
+        detalle_preventivo_planta:
+          allOf:
+          - $ref: '#/components/schemas/SmuDetallePreventivoPlanta'
+          nullable: true
+        checklist_planta:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuDetallePreventivoPlantaChecklist'
+        detalle_falla_intervencion:
+          allOf:
+          - $ref: '#/components/schemas/SmuDetalleFallaIntervencion'
+          nullable: true
+        detalle_capex:
+          allOf:
+          - $ref: '#/components/schemas/SmuDetalleCapex'
+          nullable: true
+        firmas_cierre:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuActividadCierreFirma'
+        certificados:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuActividadCertificado'
+        aa_compresores:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuPreventivoAaCompresor'
+        aa_condensadoras:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuPreventivoAaCondensadora'
+        aa_manejadoras:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuPreventivoAaManejadora'
+        aa_acciones:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuPreventivoAaAccion'
+        plantas:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuPreventivoPlanta'
+        hallazgos_planta:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuPreventivoPlantaHallazgo'
+        spt_filas:
+          type: array
+          items:
+            $ref: '#/components/schemas/SmuDetalleCapexSptFila'
+      required:
+      - categoria
+      - created_at
+      - id
+      - nombre_estacion
+      - responsable_cedula
+      - tipo_formulario
+      - updated_at
+    SmuActividadCertificado:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        tipo:
+          type: string
+          nullable: true
+          maxLength: 120
+        categoria:
+          type: string
+          nullable: true
+          maxLength: 120
+        ruta_certificado:
+          type: string
+          nullable: true
+          maxLength: 350
+        ruta_foto_sitio:
+          type: string
+          nullable: true
+          description: Foto del certificado en sitio
+          maxLength: 350
+        orden:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - created_at
+      - id
+    SmuActividadCierreFirma:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        rol:
+          $ref: '#/components/schemas/RolEnum'
+        nombre:
+          type: string
+          maxLength: 150
+        cedula:
+          type: string
+          nullable: true
+          maxLength: 30
+        cargo:
+          type: string
+          nullable: true
+          maxLength: 120
+        fecha:
+          type: string
+          format: date
+          nullable: true
+        ruta_firma:
+          type: string
+          nullable: true
+          description: Ruta de la imagen de la firma
+          maxLength: 350
+        orden:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - created_at
+      - id
+      - nombre
+      - rol
+    SmuActividadEvidencia:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        seccion:
+          type: string
+          description: inventario, antes, durante, despues, transporte, spt, panoramica,
+            refrigeracion, etc.
+          maxLength: 60
+        campo_origen:
+          type: string
+          description: 'Nombre del input file (ej: t1_fotos_antes, paa_foto_condensadora,
+            cor_evidencia_1)'
+          maxLength: 80
+        material:
+          type: integer
+          nullable: true
+          description: Vinculo opcional si la foto corresponde a un insumo especifico
+        ruta_archivo:
+          type: string
+          maxLength: 350
+        nombre_original:
+          type: string
+          nullable: true
+          maxLength: 255
+        descripcion:
+          type: string
+          nullable: true
+          description: Descripción o comentario que el usuario escribe sobre la foto
+        orden:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - campo_origen
+      - created_at
+      - id
+      - ruta_archivo
+      - seccion
+    SmuActividadList:
+      type: object
+      description: |-
+        Serializer ligero para el listado paginado de actividades SMU.
+
+        Solo expone los campos que muestra la tabla de historial; el detalle
+        completo (técnicos, materiales, evidencias…) se obtiene con el
+        SmuActividadSerializer estándar cuando se necesite el exportable.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        categoria:
+          allOf:
+          - $ref: '#/components/schemas/CategoriaEnum'
+          readOnly: true
+        categoria_display:
+          type: string
+          readOnly: true
+        tipo_formulario:
+          type: string
+          readOnly: true
+          description: planta, aire_acondicionado, tipologia1, tipologia3, tipologia5,
+            estandar
+        tipo_formulario_display:
+          type: string
+          readOnly: true
+        tipo_estacion:
+          type: string
+          readOnly: true
+          nullable: true
+        nombre_estacion:
+          type: string
+          readOnly: true
+          description: Snapshot histórico / nombre de estación
+        codigo_ot:
+          type: string
+          readOnly: true
+          nullable: true
+        responsable_cedula:
+          type: string
+          readOnly: true
+          description: Cedula del usuario que documenta en sistema
+        responsable_nombre:
+          type: string
+          readOnly: true
+          nullable: true
+        estado:
+          allOf:
+          - $ref: '#/components/schemas/EstadoB44Enum'
+          readOnly: true
+        estado_display:
+          type: string
+          readOnly: true
+        fecha_inicio:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - categoria
+      - categoria_display
+      - codigo_ot
+      - created_at
+      - estado
+      - estado_display
+      - fecha_inicio
+      - id
+      - nombre_estacion
+      - responsable_cedula
+      - responsable_nombre
+      - tipo_estacion
+      - tipo_formulario
+      - tipo_formulario_display
+    SmuActividadMaterial:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        material_lpu:
+          type: integer
+          nullable: true
+          description: Vínculo con el catálogo oficial maestro LPU
+        tipo_registro:
+          $ref: '#/components/schemas/TipoRegistroEnum'
+        origen_material:
+          type: string
+          nullable: true
+          description: 'Proveedor/origen del material (ej: CINCO SAS) - formulario
+            estándar'
+          maxLength: 120
+        codigo_sap:
+          type: string
+          nullable: true
+          maxLength: 50
+        texto_sap:
+          type: string
+          nullable: true
+          maxLength: 255
+        alcance:
+          type: string
+          nullable: true
+        comentarios:
+          type: string
+          nullable: true
+          description: Comentarios de proceso del ítem (CAPEX insumos)
+        descripcion:
+          type: string
+          nullable: true
+          description: Descripción de la actividad de mano de obra (CAPEX tipología
+            3 y 5)
+        cantidad_estandar:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+        cantidad_real:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+        unidad_medida:
+          type: string
+          nullable: true
+          maxLength: 30
+        comprado_operario:
+          type: boolean
+          description: 1 si fue comprado directamente en campo (fuera de catálogo)
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - created_at
+      - id
+      - tipo_registro
+    SmuActividadTecnico:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        usuario:
+          type: integer
+          nullable: true
+          description: Usuario central del técnico
+        cedula:
+          type: string
+          maxLength: 30
+        nombre:
+          type: string
+          maxLength: 150
+        es_principal:
+          type: boolean
+          description: 1 para el técnico principal, 0 para auxiliares/apoyos
+        ruta_firma:
+          type: string
+          nullable: true
+          description: Ruta de la imagen con la firma del técnico
+          maxLength: 350
+        ruta_certificado:
+          type: string
+          nullable: true
+          description: Ruta del documento/certificado (ej. CONTE, Alturas)
+          maxLength: 350
+        ruta_foto:
+          type: string
+          nullable: true
+          description: Ruta de la foto del técnico en sitio
+          maxLength: 350
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - cedula
+      - created_at
+      - id
+      - nombre
+    SmuActividadTransporte:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        codigo_sap:
+          type: string
+          nullable: true
+          maxLength: 50
+        tipo_transporte:
+          type: string
+          nullable: true
+          maxLength: 80
+        distancia_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        tiempo_traslado:
+          type: string
+          nullable: true
+          maxLength: 50
+        descripcion:
+          type: string
+          nullable: true
+        observacion:
+          type: string
+          nullable: true
+      required:
+      - actividad
+      - id
+    SmuDetalleCapex:
+      type: object
+      properties:
+        actividad:
+          type: integer
+          readOnly: true
+        tipologia:
+          $ref: '#/components/schemas/TipologiaEnum'
+        descripcion_general_actividades:
+          type: string
+          nullable: true
+        spt_naturaleza:
+          type: string
+          nullable: true
+          maxLength: 150
+        spt_recomendacion:
+          type: string
+          nullable: true
+        panoramica_recomendacion:
+          type: string
+          nullable: true
+        otras_actividades_1:
+          type: string
+          nullable: true
+          maxLength: 255
+        otras_actividades_2:
+          type: string
+          nullable: true
+          maxLength: 255
+        otras_actividades_3:
+          type: string
+          nullable: true
+          maxLength: 255
+        texto_justificacion_otras_actividades:
+          type: string
+          nullable: true
+        matricula_nombre:
+          type: string
+          nullable: true
+          maxLength: 150
+        matricula_numero:
+          type: string
+          nullable: true
+          maxLength: 60
+        matricula_fecha:
+          type: string
+          format: date
+          nullable: true
+        recomendaciones_aliado:
+          type: string
+          nullable: true
+        recomendacion_final:
+          type: string
+          nullable: true
+      required:
+      - actividad
+      - tipologia
+    SmuDetalleCapexSptFila:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        orden:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        distancia:
+          type: string
+          nullable: true
+          maxLength: 60
+        medida_ohmio:
+          type: string
+          nullable: true
+          maxLength: 60
+        resistividad:
+          type: string
+          nullable: true
+          maxLength: 60
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - created_at
+      - id
+    SmuDetalleFallaIntervencion:
+      type: object
+      properties:
+        actividad:
+          type: integer
+          readOnly: true
+        tipo_actividad:
+          type: string
+          nullable: true
+          maxLength: 100
+        tipo_equipo_falla:
+          type: string
+          nullable: true
+          maxLength: 100
+        marca:
+          type: string
+          nullable: true
+          maxLength: 100
+        modelo:
+          type: string
+          nullable: true
+          maxLength: 100
+        afectacion_servicios:
+          type: string
+          nullable: true
+          maxLength: 100
+        tipo_intervencion:
+          type: string
+          nullable: true
+          description: reinstalacion, cambio, reparacion
+          maxLength: 100
+        reinstalacion:
+          type: string
+          nullable: true
+          maxLength: 20
+        cambio:
+          type: string
+          nullable: true
+          maxLength: 20
+        reparacion:
+          type: string
+          nullable: true
+          maxLength: 20
+        descripcion_falla:
+          type: string
+          nullable: true
+        descripcion_solucion:
+          type: string
+          nullable: true
+        descripcion_fallas_componentes:
+          type: string
+          nullable: true
+        descripcion_generales:
+          type: string
+          nullable: true
+        detalles_plano:
+          type: string
+          nullable: true
+          description: Detalles del plano / croquis de la intervención - formulario
+            estándar
+      required:
+      - actividad
+    SmuDetallePreventivoAa:
+      type: object
+      properties:
+        actividad:
+          type: integer
+          readOnly: true
+        marca:
+          type: string
+          nullable: true
+          maxLength: 100
+        modelo:
+          type: string
+          nullable: true
+          maxLength: 100
+        serial:
+          type: string
+          nullable: true
+          maxLength: 100
+        id_activo:
+          type: string
+          nullable: true
+          maxLength: 80
+        estado_equipo:
+          type: string
+          nullable: true
+          maxLength: 50
+        tipo_aire:
+          type: string
+          nullable: true
+          maxLength: 80
+        alimentacion_ac:
+          type: string
+          nullable: true
+          maxLength: 50
+        voltaje_entrada:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        corriente:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        capacidad_btu:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+        gestion_remota_ip:
+          type: string
+          nullable: true
+          maxLength: 60
+        cantidad_compresores:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        temp_cuarto:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        temp_entrada:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        temp_salida:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        temp_display:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        mp_termostato:
+          type: string
+          nullable: true
+          maxLength: 100
+        ajuste_termostato:
+          type: string
+          nullable: true
+          maxLength: 100
+        mp_termostato_post:
+          type: string
+          nullable: true
+          maxLength: 100
+        acciones_observaciones:
+          type: string
+          nullable: true
+        plan_mejora:
+          type: string
+          nullable: true
+      required:
+      - actividad
+    SmuDetallePreventivoAaChecklist:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        item_numero:
+          type: integer
+          maximum: 39
+          minimum: 1
+        estado:
+          type: string
+          description: Bueno, Regular, Malo, NA, etc.
+          maxLength: 30
+      required:
+      - actividad
+      - estado
+      - id
+      - item_numero
+    SmuDetallePreventivoPlanta:
+      type: object
+      properties:
+        actividad:
+          type: integer
+          readOnly: true
+        jefatura:
+          type: string
+          nullable: true
+          maxLength: 80
+        zona_om:
+          type: string
+          nullable: true
+          maxLength: 80
+        modalidad:
+          type: string
+          nullable: true
+          maxLength: 80
+        cantidad_plantas:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        estructura:
+          type: string
+          nullable: true
+          maxLength: 120
+        orden_trabajo_tas:
+          type: string
+          nullable: true
+          maxLength: 60
+        plan_mejora_estado:
+          type: string
+          nullable: true
+        fecha_elaboracion_informe:
+          type: string
+          format: date
+          nullable: true
+        prueba_vacio:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/PruebaVacioEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        prueba_con_carga:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/PruebaConCargaEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        prueba_transferencia_automatica:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/PruebaTransferenciaAutomaticaEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        prueba_planta_forzada:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/PruebaPlantaForzadaEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        observaciones_pruebas:
+          type: string
+          nullable: true
+        cambio_aceite:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/CambioBateriasEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        cambio_filtros_aire:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/CambioBateriasEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        cambio_filtros_combustible:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/CambioBateriasEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        cambio_filtros_aceite:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/CambioBateriasEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        cambio_mangueras_precalentador:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/CambioBateriasEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        cambio_refrigerante:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/CambioBateriasEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        cambio_baterias:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/CambioBateriasEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        observaciones_filtracion:
+          type: string
+          nullable: true
+      required:
+      - actividad
+    SmuDetallePreventivoPlantaChecklist:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        sistema:
+          type: string
+          description: combustible, lubricacion, aspiracion, refrigeracion, escape,
+            electrico, transferencia
+          maxLength: 50
+        componente:
+          type: string
+          description: conexiones, abrazaderas, tanque, nivel_aceite, etc. (se usa
+            el texto completo de la ficha oficial)
+          maxLength: 255
+        estado:
+          type: string
+          nullable: true
+          maxLength: 50
+        causa:
+          type: string
+          nullable: true
+        detectar:
+          type: string
+          nullable: true
+        corregir:
+          type: string
+          nullable: true
+      required:
+      - actividad
+      - componente
+      - id
+      - sistema
+    SmuEstacion:
+      type: object
+      description: |-
+        Serializer para la tabla maestra de estaciones / sitios SMU.
+        Permite consulta, autocompletado y validación de atributos geográficos y técnicos en 1FN.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        nombre_sitio:
+          type: string
+          description: Nombre único oficial del sitio / estación
+          maxLength: 150
+        regional:
+          type: string
+          nullable: true
+          maxLength: 80
+        departamento:
+          type: string
+          nullable: true
+          maxLength: 80
+        municipio:
+          type: string
+          nullable: true
+          maxLength: 80
+        zona:
+          type: string
+          nullable: true
+          maxLength: 80
+        direccion:
+          type: string
+          nullable: true
+          maxLength: 255
+        latitud:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        longitud:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,7})?$
+          nullable: true
+        tipo_estacion:
+          type: string
+          nullable: true
+          maxLength: 80
+        tipo_sitio:
+          type: string
+          nullable: true
+          maxLength: 80
+        site_owner:
+          type: string
+          nullable: true
+          maxLength: 100
+        categoria_criticidad:
+          type: string
+          nullable: true
+          description: 'Criticidad de la estación (ej: 1. ALTA, 2. MEDIA, 3. BAJA)'
+          maxLength: 50
+        activo:
+          type: boolean
+          description: Estado de disponibilidad operativa de la estación
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - nombre_sitio
+      - updated_at
+    SmuEvidenciaUpload:
+      type: object
+      description: Entrada de ``POST /smu/evidencias/`` (``multipart/form-data``).
+      properties:
+        archivo:
+          type: string
+          format: uri
+        seccion:
+          type: string
+          maxLength: 60
+        campo_origen:
+          type: string
+          default: campo
+          maxLength: 80
+        actividad_id:
+          type: integer
+          minimum: 1
+          nullable: true
+        orden:
+          type: integer
+          minimum: 0
+          nullable: true
+        descripcion:
+          type: string
+          nullable: true
+          default: ''
+      required:
+      - archivo
+      - seccion
+    SmuEvidenciaUploadResponse:
+      type: object
+      description: Salida de ``POST /smu/evidencias/``.
+      properties:
+        ruta_archivo:
+          type: string
+          description: Ruta relativa a MEDIA_URL, para meterla en `evidencias[].ruta_archivo`
+            al crear la actividad.
+        url:
+          type: string
+          description: URL para mostrar la foto en el navegador.
+        nombre:
+          type: string
+          description: Nombre único generado en disco.
+        bytes:
+          type: integer
+          description: Tamaño del archivo guardado.
+      required:
+      - bytes
+      - nombre
+      - ruta_archivo
+      - url
+    SmuMatrizLpu:
+      type: object
+      description: |-
+        Serializer para el catálogo oficial de materiales y mano de obra (LPU).
+        Entrega códigos oficiales, descripción y tarifas decimales vigentes.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        codigo_sap:
+          type: string
+          description: Código SAP oficial único del material / ítem
+          maxLength: 60
+        codigo_liquidacion:
+          type: string
+          nullable: true
+          description: Código auxiliar para procesos de liquidación
+          maxLength: 60
+        texto_sap:
+          type: string
+          description: Descripción o texto oficial del ítem según SAP
+          maxLength: 255
+        descripcion:
+          type: string
+          nullable: true
+          description: Detalle o alcance extendido del ítem
+        unidad_medida:
+          type: string
+          nullable: true
+          description: 'Unidad de medida (ej: UN, M, GL, HORA)'
+          maxLength: 30
+        valor_unitario:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          description: Precio o valor unitario vigente
+        tipo_registro:
+          type: string
+          nullable: true
+          description: 'Clasificación LPU (ej: inventario_capex, mano_obra, preventivo,
+            etc.)'
+          maxLength: 50
+        fecha_vigencia_inicio:
+          type: string
+          format: date
+          nullable: true
+          description: Fecha inicial de validez del precio/tarifa
+        fecha_vigencia_fin:
+          type: string
+          format: date
+          nullable: true
+          description: Fecha final de validez del precio/tarifa
+        activo:
+          type: boolean
+          description: Indica si el ítem está activo en el catálogo vigente
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - codigo_sap
+      - created_at
+      - id
+      - texto_sap
+      - updated_at
+    SmuPreventivoAaAccion:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        clave:
+          type: string
+          description: limpieza_serpentines, ajuste_elementos_control, adicion_refrigerante,
+            estado_drenajes, lubricacion_componentes, cambio_filtros_secado, alineacion_poleas,
+            cambio_componentes_electronicos, cambio_compresor, cambio_correas_filtros,
+            otras_reparaciones
+          maxLength: 60
+        valor:
+          $ref: '#/components/schemas/ValorEnum'
+        orden:
+          type: integer
+          maximum: 65535
+          minimum: 0
+          description: Fila del formulario (1 por unidad AA registrada)
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - clave
+      - created_at
+      - id
+      - valor
+    SmuPreventivoAaCompresor:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        orden:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        marca:
+          type: string
+          nullable: true
+          maxLength: 100
+        serial:
+          type: string
+          nullable: true
+          maxLength: 100
+        tipo:
+          type: string
+          nullable: true
+          maxLength: 80
+        refrigerante:
+          type: string
+          nullable: true
+          maxLength: 50
+        modelo:
+          type: string
+          nullable: true
+          maxLength: 100
+        aislamiento_electrico:
+          type: string
+          nullable: true
+          maxLength: 50
+        presion_succion:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        presion_descarga:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        nivel_aceite:
+          type: string
+          nullable: true
+          maxLength: 50
+        vl1:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        vl2:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        vl3:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        amp_l1:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        amp_l2:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        amp_l3:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - created_at
+      - id
+    SmuPreventivoAaCondensadora:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        orden:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        marca:
+          type: string
+          nullable: true
+          maxLength: 100
+        modelo:
+          type: string
+          nullable: true
+          maxLength: 100
+        serial:
+          type: string
+          nullable: true
+          maxLength: 100
+        temperatura_entrada:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        temperatura_salida:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        diametro_eje:
+          type: string
+          nullable: true
+          maxLength: 50
+        diametro_aspas:
+          type: string
+          nullable: true
+          maxLength: 50
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - created_at
+      - id
+    SmuPreventivoAaManejadora:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        orden:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        marca:
+          type: string
+          nullable: true
+          maxLength: 100
+        modelo:
+          type: string
+          nullable: true
+          maxLength: 100
+        tipo:
+          type: string
+          nullable: true
+          maxLength: 80
+        tipo_filtro:
+          type: string
+          nullable: true
+          maxLength: 80
+        tipo_correa:
+          type: string
+          nullable: true
+          maxLength: 80
+        marca_motor:
+          type: string
+          nullable: true
+          maxLength: 100
+        alimentacion_ac:
+          type: string
+          nullable: true
+          maxLength: 50
+        voltaje:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        corriente:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        aislamiento:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        serial_motor:
+          type: string
+          nullable: true
+          maxLength: 100
+        dimensiones_blower:
+          type: string
+          nullable: true
+          maxLength: 80
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - created_at
+      - id
+    SmuPreventivoPlanta:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        orden:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        nombre_unidad:
+          type: string
+          nullable: true
+          maxLength: 120
+        equipo_marca:
+          type: string
+          nullable: true
+          maxLength: 100
+        equipo_modelo:
+          type: string
+          nullable: true
+          maxLength: 100
+        equipo_serial:
+          type: string
+          nullable: true
+          maxLength: 100
+        equipo_velocidad_motor:
+          type: string
+          nullable: true
+          maxLength: 80
+        equipo_admision_aire:
+          type: string
+          nullable: true
+          maxLength: 80
+        equipo_rpm:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+        equipo_horas_trabajo:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        equipo_frecuencia_hz:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        equipo_capacidad_kva:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        equipo_capacidad_kw:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        equipo_derrateo:
+          type: string
+          nullable: true
+          maxLength: 80
+        equipo_capacidad_derrateo:
+          type: string
+          nullable: true
+          maxLength: 80
+        motor_marca:
+          type: string
+          nullable: true
+          maxLength: 100
+        motor_modelo:
+          type: string
+          nullable: true
+          maxLength: 100
+        motor_serial:
+          type: string
+          nullable: true
+          maxLength: 100
+        motor_presion_aceite:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        motor_temp_aceite:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        motor_temp_refrigerante:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        generador_marca:
+          type: string
+          nullable: true
+          maxLength: 100
+        generador_modelo:
+          type: string
+          nullable: true
+          maxLength: 100
+        generador_serial:
+          type: string
+          nullable: true
+          maxLength: 100
+        generador_temp_ambiente:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        bateria_tipo:
+          type: string
+          nullable: true
+          maxLength: 80
+        bateria_estado:
+          type: string
+          nullable: true
+          maxLength: 50
+        bateria_estado_cargador:
+          type: string
+          nullable: true
+          maxLength: 50
+        bateria_voltaje:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        bateria_capacidad:
+          type: string
+          nullable: true
+          maxLength: 50
+        bateria_cantidad:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        param_vac_l1_l2:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        param_vac_l1_l3:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        param_vac_l2_l3:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        param_amp_l1:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        param_amp_l2:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        param_amp_l3:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        dimensionamiento_capacidad_amp:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        dimensionamiento_carga_demanda:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+        dimensionamiento_porc_carga:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+      required:
+      - actividad
+      - created_at
+      - id
+    SmuPreventivoPlantaHallazgo:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        actividad:
+          type: integer
+          readOnly: true
+        orden:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        descripcion:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actividad
+      - created_at
+      - id
+    TipoFormularioEnum:
+      enum:
+      - aire_acondicionado
+      - planta
+      - estandar
+      - tipologia1
+      - tipologia3
+      - tipologia5
+      type: string
+      description: |-
+        * `aire_acondicionado` - Aire acondicionado
+        * `planta` - Planta eléctrica
+        * `estandar` - Estándar
+        * `tipologia1` - Tipología 1
+        * `tipologia3` - Tipología 3
+        * `tipologia5` - Tipología 5
+    TipoRegistroEnum:
+      enum:
+      - inventario_capex
+      - material_emergencia
+      - material_correctivo
+      - mano_obra_capex
+      - inventario_preventivo
+      - mano_obra_preventivo
+      type: string
+      description: |-
+        * `inventario_capex` - Inventario CAPEX
+        * `material_emergencia` - Material Emergencia
+        * `material_correctivo` - Material Correctivo
+        * `mano_obra_capex` - Mano de Obra CAPEX
+        * `inventario_preventivo` - Inventario Preventivo
+        * `mano_obra_preventivo` - Mano de Obra Preventiva
+    TipologiaEnum:
+      enum:
+      - tipologia1
+      - tipologia3
+      - tipologia5
+      type: string
+      description: |-
+        * `tipologia1` - Tipología 1
+        * `tipologia3` - Tipología 3
+        * `tipologia5` - Tipología 5
+    ValorEnum:
+      enum:
+      - SI
+      - 'NO'
+      - NA
+      - BUENO
+      - REGULAR
+      - MALO
+      type: string
+      description: |-
+        * `SI` - SÍ
+        * `NO` - NO
+        * `NA` - N/A
+        * `BUENO` - Bueno
+        * `REGULAR` - Regular
+        * `MALO` - Malo

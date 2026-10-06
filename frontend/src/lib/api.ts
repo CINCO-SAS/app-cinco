@@ -7,9 +7,14 @@ import {
   persistSessionProtectionEvent,
 } from "@/lib/sessionProtection";
 
+// A4: con 10 s se caían los guardados grandes (105 ítems de checklist +
+// firmas + certificados). Las peticiones normales tienen 30 s; la subida de
+// fotos (FormData) define su propio timeout en smu.service.ts.
+const TIMEOUT_MS = 30000;
+
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: TIMEOUT_MS,
   withCredentials: true,
   headers: {
     "Content-Type": "application/json",
@@ -18,7 +23,7 @@ const api = axios.create({
 
 const refreshApi = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: TIMEOUT_MS,
   withCredentials: true,
   headers: {
     "Content-Type": "application/json",
@@ -27,7 +32,7 @@ const refreshApi = axios.create({
 
 const csrfApi = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: TIMEOUT_MS,
   withCredentials: true,
   headers: {
     "Content-Type": "application/json",
@@ -122,6 +127,14 @@ api.interceptors.request.use(
   async (config) => {
     if (config.url) {
       config.url = normalizeUrl(config.url);
+    }
+
+    // Con FormData, axios debe generar el Content-Type multipart/form-data con
+    // su boundary automáticamente. Si el header está fijo como application/json
+    // (defecto de la instancia), lo pisa sin añadir el boundary → Django
+    // rechaza el archivo con "La información enviada no era un archivo".
+    if (config.data instanceof FormData) {
+      delete config.headers["Content-Type"];
     }
 
     const method = (config.method || "get").toLowerCase();

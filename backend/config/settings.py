@@ -40,7 +40,13 @@ if not SECRET_KEY:
     )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = bool( os.environ.get('DJANGO_DEBUG', True) )
+# Ojo: `bool("False")` es True, así que hay que interpretar el texto del env.
+# Un valor no reconocido se considera DEBUG=True (fail-safe de desarrollo).
+DEBUG = str(os.environ.get('DJANGO_DEBUG', 'True')).strip().lower() in {
+    '1', 'true', 'yes', 'on',
+}
+# En local, backend/.env.local (prioritario sobre .env) fija DJANGO_DEBUG=True
+# para no heredar el modo producción de backend/.env. Ver detalle ahí mismo.
 
 ALLOWED_HOSTS = [
     'api.cincosas.com', 
@@ -72,10 +78,18 @@ CSRF_TRUSTED_ORIGINS = [
     "https://www.frontend.cincosas.com",
 ]
 
+# TLS/cookies: en producción se asume HTTPS. Si el API también se expone por
+# HTTP plano en LAN (p.ej. http://192.168.79.11), define DJANGO_TLS=0 para no
+# romper ese acceso (desactiva HSTS, redirect y cookies secure).
+_TLS_ENABLED = (
+    not DEBUG
+    and str(os.environ.get('DJANGO_TLS', '1')).strip().lower() in {'1', 'true', 'yes', 'on'}
+)
+
 # Configuración de cookies seguras
-SECURE_COOKIE = not DEBUG  # Solo HTTPS en producción
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
+SECURE_COOKIE = _TLS_ENABLED  # Solo HTTPS cuando TLS está activo
+SESSION_COOKIE_SECURE = _TLS_ENABLED
+CSRF_COOKIE_SECURE = _TLS_ENABLED
 SESSION_COOKIE_HTTPONLY = True  # Protección XSS
 CSRF_COOKIE_HTTPONLY = False  # Necesario para leer el token en el frontend
 
@@ -85,13 +99,15 @@ CSRF_COOKIE_SAMESITE = 'Lax'  # Lax para CSRF token (necesita ser leído por JS)
 
 # Content Security Policy y security headers
 if not DEBUG:
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
+
+if _TLS_ENABLED:
     SECURE_HSTS_SECONDS = 31536000  # 1 año
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
     SECURE_SSL_REDIRECT = True
-    SECURE_BROWSER_XSS_FILTER = True
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    X_FRAME_OPTIONS = 'DENY'
 
 # Application definition
 INSTALLED_APPS = [
@@ -114,6 +130,7 @@ INSTALLED_APPS = [
     'apps.operaciones',
     'apps.empleados',
     'apps.ia_dev',
+    'apps.smu',
 ]
 
 MIDDLEWARE = [
@@ -272,6 +289,18 @@ USE_TZ = True
 STATIC_URL = os.getenv('BASE_PATH', '') + 'static/'
 # STATIC_ROOT = '/home/admcinco/app_cinco/backend/static'
 STATIC_ROOT = os.getenv('BASE_PATH', '') + 'static/'
+
+# Media — fotos / evidencias del módulo SMU (A1).
+# MEDIA_URL con barra inicial para que las URLs de las fotos queden absolutas;
+# MEDIA_ROOT es la carpeta física `media/` (ignorada por git).
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Límites de subida. Django por defecto rechaza cualquier petición mayor a
+# 2,5 MB (DATA_UPLOAD_MAX_MEMORY_SIZE), lo que tumbaría una foto de hasta 5 MB
+# antes de que la vista pudiera validarla.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024    # 6 MB en memoria; después, disco temporal
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024   # 10 MB por petición
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

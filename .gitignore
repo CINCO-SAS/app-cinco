@@ -22,6 +22,9 @@ migrations/
 !backend/apps/security/migrations/
 !backend/apps/security/migrations/__init__.py
 !backend/apps/security/migrations/*.py
+!backend/apps/smu/migrations/
+!backend/apps/smu/migrations/__init__.py
+!backend/apps/smu/migrations/*.py
 
 # If you're using Django's static files (collectstatic)
 staticfiles/
@@ -129,3 +132,9 @@ shared/
 !backend/apps/ia_dev/domains/shared/__init__.py
 backups/
 backend/.venv/
+
+# Documentación local del módulo SMU (no se commitea)
+backend/apps/smu/API_REST_REFERENCE.md
+
+# Fotos / evidencias SMU (A1): binarios subidos a media/, nunca se commitean
+media/

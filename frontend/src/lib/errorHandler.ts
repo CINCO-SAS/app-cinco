@@ -136,10 +136,10 @@ export function classifyError(error: any): ApiErrorDetail {
     error instanceof ZodError
       ? "Se recibieron actividades con un formato inesperado del backend."
       : type === ApiErrorType.NETWORK_ERROR ||
-    rawMessage === "Network Error" ||
-    rawMessage === "Failed to fetch"
-      ? getNetworkErrorMessage()
-      : rawMessage;
+          rawMessage === "Network Error" ||
+          rawMessage === "Failed to fetch"
+        ? getNetworkErrorMessage()
+        : rawMessage;
 
   return {
     type,
@@ -205,6 +205,73 @@ export function getErrorMessage(errorDetail: ApiErrorDetail): string {
     default:
       return "Ocurrio un error inesperado";
   }
+}
+
+// Textos que no le sirven al usuario final: ruido técnico de axios/fetch o
+// serializaciones rotas de un error sin `message`.
+const TECHNICAL_MESSAGE =
+  /^(Request failed|Network Error|Failed to fetch|TypeError|timeout of |canceled|\[object Object\])/i;
+
+/**
+ * Mensaje listo para mostrar en un `toast.error(...)`.
+ *
+ * Orden de preferencia:
+ * 1. Errores por campo de DRF, listados como `campo: mensaje`.
+ * 2. `detail` explícito del backend (permisos, conflictos, etc.).
+ * 3. El mensaje capturado, salvo que sea ruido técnico de axios/red.
+ * 4. El mensaje genérico correspondiente al tipo de error; si el tipo no se
+ *    pudo determinar, `fallback`.
+ *
+ * A diferencia de `errorDetail.message` —que puede ser el primer mensaje
+ * suelto de DRF o un texto técnico de axios— siempre devuelve algo que se
+ * le puede mostrar al usuario.
+ *
+ * @param fallback Texto cuando el tipo de error no se pudo determinar.
+ */
+export function getToastErrorMessage(
+  errorDetail: ApiErrorDetail,
+  fallback = "Ocurrio un error inesperado",
+): string {
+  // 1) Errores por campo (DRF): {"fecha_fin": ["La fecha de fin no puede..."]}
+  const errores = errorDetail.errors;
+  if (errores && typeof errores === "object" && !Array.isArray(errores)) {
+    const lineas = Object.entries(errores)
+      .map(([campo, mensajes]) => {
+        const texto = getFirstNestedMessage(mensajes)?.trim() ?? "";
+        if (!texto) return "";
+        // `non_field_errors`/`detail` no son campos del formulario: solo el texto.
+        if (campo === "non_field_errors" || campo === "detail") return texto;
+        return `${campo}: ${texto}`;
+      })
+      .filter((linea) => linea.length > 0);
+
+    if (lineas.length > 0) {
+      // Máximo 3 entradas para que el toast no tape el formulario.
+      const visibles = lineas.slice(0, 3);
+      const resto = lineas.length - visibles.length;
+      return visibles.join(" · ") + (resto > 0 ? ` · (y ${resto} más)` : "");
+    }
+  }
+
+  // 2) Detalle explícito del backend
+  const detail = errorDetail.detail?.trim();
+  if (detail) return detail;
+
+  // 3) Mensaje capturado, si no es ruido técnico
+  const mensaje = errorDetail.message?.trim();
+  if (
+    mensaje &&
+    mensaje !== "Error desconocido" &&
+    !TECHNICAL_MESSAGE.test(mensaje)
+  ) {
+    return mensaje;
+  }
+
+  // 4) Genérico por tipo (timeout, red, 500...); sin tipo, el fallback
+  if (errorDetail.type !== ApiErrorType.UNKNOWN) {
+    return getErrorMessage({ ...errorDetail, message: "", detail: undefined });
+  }
+  return fallback;
 }
 
 /**

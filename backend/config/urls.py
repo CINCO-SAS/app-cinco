@@ -16,6 +16,8 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
@@ -34,4 +36,9 @@ urlpatterns = [
     path("operaciones/", include("apps.operaciones.urls")),
     path("empleados/", include("apps.empleados.urls")),
     path("ia-dev/", include("apps.ia_dev.urls")),
+    path("smu/", include("apps.smu.urls")),
 ]
+
+# Fotos / evidencias SMU (A1). `static()` solo añade rutas si DEBUG=True:
+# en producción las sirve el servidor web (nginx/apache) desde MEDIA_ROOT.
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

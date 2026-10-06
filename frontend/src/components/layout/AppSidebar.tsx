@@ -10,7 +10,7 @@ import { House } from "lucide-react";
 import { ChevronDownIcon, HorizontaLDots } from "../../icons/index";
 import { IconMessageChatbot } from '@tabler/icons-react';
 import { useAuthStore } from "@/store/auth.store";
-import { hasCertificadosPermission } from "@/utils/permission";
+import { hasCertificadosPermission, hasGestionSmuPermission } from "@/utils/permission";
 
 type NavItem = {
   name: string;
@@ -45,6 +45,19 @@ const defaultNavItems: NavItem[] = [
     ],
   },
   {
+    name: "SMU",
+    subItems: [
+      {
+        name: "Inicio SMU",
+        path: "/smu",
+      },
+      {
+        name: "Gestión SMU",
+        path: "/smu/gestion_smu",
+      },
+    ],
+  },
+  {
     name: "Agente IA",
     icon: <IconMessageChatbot className="h-5 w-5" />,
     path: "/agente-ia",
@@ -75,6 +88,10 @@ const AppSidebar: React.FC = () => {
     () => hasCertificadosPermission(user),
     [user],
   );
+  const canGestionSmu = useMemo(
+    () => hasGestionSmuPermission(user),
+    [user],
+  );
 
   const navItems = useMemo(
     () =>
@@ -91,6 +108,9 @@ const AppSidebar: React.FC = () => {
           if (subItem.path === "/rrhh/certificados-laborales") {
             return canAccessCertificados;
           }
+          if (subItem.path === "/smu/gestion_smu") {
+            return canGestionSmu;
+          }
           return !subItem.requiresSuperuser || isSuperuser;
         });
 
@@ -104,7 +124,7 @@ const AppSidebar: React.FC = () => {
         });
         return allowedItems;
       }, []),
-    [isSuperuser, canAccessCertificados],
+    [isSuperuser, canAccessCertificados, canGestionSmu],
   );
   const isSidebarOpen = isExpanded || isMobileOpen;
   const asideRef = useRef<HTMLElement | null>(null);

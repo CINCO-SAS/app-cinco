@@ -71,3 +71,37 @@ export const hasFirmaConfigPermission = (
     carpeta.includes("ADMIN")
   );
 };
+
+/**
+ * Áreas/carpetas que pueden entrar a **Gestión SMU** (supervisión de los
+ * formularios): el equipo de programación y el equipo SMU.
+ *
+ * Los valores son los que existen en el directorio (`Empleado.area` /
+ * `Empleado.carpeta`): `PROGRAMACION` y `SMU` aparecen como carpeta y
+ * `PROGRAMACION` también como área. Se comparan sin tildes ni mayúsculas,
+ * así que si el directorio incorpora un nombre nuevo, se agrega aquí.
+ */
+const GESTION_SMU_CLAVES = ["PROGRAMACION", "SMU"];
+
+/**
+ * Evalúa si un usuario puede ver el módulo de gestión y supervisión SMU
+ * (`/smu/gestion_smu`).
+ *
+ * Condiciones:
+ * 1. Es superusuario.
+ * 2. O su área **o** su carpeta contiene alguna clave de `GESTION_SMU_CLAVES`
+ *    (programadores y equipo SMU).
+ */
+export const hasGestionSmuPermission = (
+  user: AuthUser | null | undefined,
+): boolean => {
+  if (!user) return false;
+  if (user.is_superuser) return true;
+
+  const area = normalizeText(user.area);
+  const carpeta = normalizeText(user.carpeta);
+
+  return GESTION_SMU_CLAVES.some(
+    (clave) => area.includes(clave) || carpeta.includes(clave),
+  );
+};
