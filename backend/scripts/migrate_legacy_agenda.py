@@ -308,10 +308,10 @@ def main() -> int:
                         actividad = Actividad.objects.create(
                             ot=ot_final,
                             estado="pendiente",
-                            responsable_id=user.id,
+                            responsable=user,
                             fecha_inicio=f_ini,
                             fecha_fin_estimado=f_fin,
-                            created_by=user.id,
+                            created_by=user,
                         )
                         ActividadOT.objects.create(
                             actividad=actividad,

@@ -158,6 +158,7 @@ REST_FRAMEWORK = {
         "apps.security.throttling.api_throttling.APIKeyRateThrottle",
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",
 }
 
 LEGACY_JWT_SHARED_SECRET = os.environ.get('LEGACY_JWT_SHARED_SECRET', '')
