@@ -71,13 +71,87 @@ export const useGestionActividadesData = () => {
     return () => clearTimeout(timer);
   }, [showAlert]);
 
+  const [fechaDesde, setFechaDesde] = useState<string>(() => {
+    const hoy = new Date();
+    const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    const y = primerDia.getFullYear();
+    const m = String(primerDia.getMonth() + 1).padStart(2, "0");
+    const d = String(primerDia.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  });
+
+  const [fechaHasta, setFechaHasta] = useState<string>(() => {
+    const hoy = new Date();
+    const ultimoDia = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+    const y = ultimoDia.getFullYear();
+    const m = String(ultimoDia.getMonth() + 1).padStart(2, "0");
+    const d = String(ultimoDia.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  });
+
+  const handleFechaDesdeChange = (fecha: string) => {
+    setFechaDesde(fecha);
+    setPageIndex(0);
+  };
+
+  const handleFechaHastaChange = (fecha: string) => {
+    setFechaHasta(fecha);
+    setPageIndex(0);
+  };
+
+  const handleLimpiarFiltroFecha = () => {
+    setFechaDesde("");
+    setFechaHasta("");
+    setPageIndex(0);
+  };
+
+  // Filtrar actividades por rango de fechas
+  const actividadesFiltradas = useMemo(() => {
+    if (!fechaDesde && !fechaHasta) {
+      return actividades;
+    }
+
+    return actividades.filter((act: ActividadRecord) => {
+      const fIni = act.fecha_inicio ? act.fecha_inicio.substring(0, 10) : "";
+      const fFin = act.fecha_fin_estimado ? act.fecha_fin_estimado.substring(0, 10) : fIni;
+      const fItem = fIni || fFin;
+
+      if (!fItem) return false;
+
+      if (fechaDesde && fechaHasta) {
+        return (
+          (fIni >= fechaDesde && fIni <= fechaHasta) ||
+          (fFin >= fechaDesde && fFin <= fechaHasta) ||
+          (fIni <= fechaDesde && fFin >= fechaHasta)
+        );
+      }
+
+      if (fechaDesde) {
+        return (fFin || fIni) >= fechaDesde;
+      }
+
+      if (fechaHasta) {
+        return (fIni || fFin) <= fechaHasta;
+      }
+
+      return true;
+    });
+  }, [actividades, fechaDesde, fechaHasta]);
+
   const columns: ColumnDef<ActividadRecord>[] = useMemo(
     () => getActividadesColumns(),
     [],
   );
 
   return {
-    actividades,
+    actividades: actividadesFiltradas,
+    totalActividades: actividades.length,
+    actividadesFiltradasCount: actividadesFiltradas.length,
+    fechaDesde,
+    fechaHasta,
+    setFechaDesde: handleFechaDesdeChange,
+    setFechaHasta: handleFechaHastaChange,
+    handleLimpiarFiltroFecha,
     columns,
     globalFilter,
     setGlobalFilter,
