@@ -58,7 +58,7 @@ export default function AdminLayout({ children }: RootLayoutProps) {
             className={
               isWideWorkspaceView
                 ? "flex-1 w-full min-w-0 max-w-none overflow-y-auto overflow-x-hidden p-0"
-                : "flex-1 w-full min-w-0 max-w-(--breakpoint-2xl) mx-auto overflow-y-auto overflow-x-hidden p-4 md:p-6"
+                : "flex-1 w-full min-w-0 max-w-none overflow-y-auto overflow-x-hidden p-4 md:p-6"
             }
           >
             {children}

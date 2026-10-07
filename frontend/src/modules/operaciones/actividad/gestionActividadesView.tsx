@@ -8,10 +8,18 @@ import { useGestionActividadesData } from "./gestionActividadesView.hooks";
 import { GESTION_ACTIVIDADES_CONFIG } from "./gestionActividadesView.utils";
 import { GestionActividadesTable } from "./components/GestionActividadesTable";
 import { GestionActividadesToolbar } from "./components/GestionActividadesToolbar";
+import { DateRangeFilter } from "@/components/common/DateRangeFilter";
 
 const GestionActividadesView = () => {
   const {
     actividades,
+    totalActividades,
+    actividadesFiltradasCount,
+    fechaDesde,
+    fechaHasta,
+    setFechaDesde,
+    setFechaHasta,
+    handleLimpiarFiltroFecha,
     columns,
     globalFilter,
     setGlobalFilter,
@@ -120,7 +128,17 @@ const GestionActividadesView = () => {
           </div>
         )}
 
-        <div className="mt-8 min-h-0 min-w-0 overflow-x-hidden md:h-112">
+        <div className="mt-8 min-h-0 min-w-0 w-full overflow-x-auto">
+          <DateRangeFilter
+            fechaDesde={fechaDesde}
+            fechaHasta={fechaHasta}
+            onFechaDesdeChange={setFechaDesde}
+            onFechaHastaChange={setFechaHasta}
+            onLimpiar={handleLimpiarFiltroFecha}
+            totalRegistros={totalActividades}
+            registrosFiltrados={actividadesFiltradasCount}
+          />
+
           <GestionActividadesTable
             actividades={actividades}
             columns={columns}
