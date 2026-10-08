@@ -8,6 +8,7 @@ from apps.authentication.views import (
     LogoutView,
     CsrfTokenView,
     SessionView,
+    ChangePasswordView,
 )
 from apps.authentication.views.health_view import HealthCheckView
 
@@ -20,5 +21,6 @@ urlpatterns = [
     path("logout/", LogoutView.as_view(), name="logout"),
     path("csrf/", CsrfTokenView.as_view(), name="csrf"),
     path("session/", SessionView.as_view(), name="session"),
+    path("change-password/", ChangePasswordView.as_view(), name="change-password"),
     path("health/", HealthCheckView.as_view(), name="health"),
 ]

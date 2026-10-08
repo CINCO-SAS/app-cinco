@@ -13,3 +13,6 @@ from .refresh_serializer import (
     RefreshTokenResponseSerializer,
     LegacyRefreshTokenResponseSerializer,
 )
+
+from .password_serializer import ChangePasswordRequestSerializer
+

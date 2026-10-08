@@ -1,7 +1,10 @@
 import logging
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connections
 from django.conf import settings
+from django.utils import timezone
 
 from apps.authentication.models import RefreshToken
 from .jwt_service import generate_access_token
@@ -83,6 +86,7 @@ class AuthenticationService:
         """
         area = ""
         carpeta = ""
+        foto = ""
         try:
             from django.db.models import Q
             from apps.empleados.models import Empleado
@@ -92,6 +96,7 @@ class AuthenticationService:
             if empleado:
                 area = empleado.area or ""
                 carpeta = empleado.carpeta or ""
+                foto = empleado.link_foto or ""
         except Exception:
             pass
 
@@ -104,7 +109,9 @@ class AuthenticationService:
             "is_superuser": user.is_superuser,
             "area": area,
             "carpeta": carpeta,
+            "foto": foto,
         }
+
 
     @staticmethod
     def refresh_tokens(refresh_token_str, request):
@@ -176,6 +183,96 @@ class AuthenticationService:
         return {"detail": "Logout successful"}
 
     @staticmethod
+    def change_password(user, current_password, new_password, current_refresh_token=None):
+        """
+        Valida la contraseña actual y actualiza a la nueva contraseña
+        aplicando los validadores de seguridad configurados en Django (AUTH_PASSWORD_VALIDATORS).
+
+        Al finalizar revoca los refresh tokens activos del usuario para que
+        ningún otro dispositivo siga autenticado, conservando únicamente el de
+        la sesión desde la que se hizo el cambio (`current_refresh_token`).
+
+        Args:
+            user: Usuario autenticado
+            current_password: Contraseña actual (para validar)
+            new_password: Contraseña nueva
+            current_refresh_token: Refresh token de la sesión actual (cookie), opcional
+
+        Raises:
+            ValueError: Si la contraseña actual es incorrecta o la nueva no
+                cumple la política de contraseñas.
+        """
+        if not user or not user.is_authenticated:
+            raise ValueError("Usuario no autenticado")
+
+        if not user.check_password(current_password):
+            security_logger.warning(
+                f"Failed password change attempt (wrong current password) for user: {user.username} (ID: {user.id})"
+            )
+            raise ValueError("La contraseña actual es incorrecta.")
+
+        if current_password == new_password:
+            raise ValueError("La nueva contraseña debe ser diferente a la actual.")
+
+        # Validar la nueva contraseña con las directivas de seguridad de Django
+        try:
+            validate_password(new_password, user=user)
+        except DjangoValidationError as error:
+            security_logger.warning(
+                f"Password validation failed for user {user.username} (ID: {user.id}): {error.messages}"
+            )
+            raise ValueError(" ".join(error.messages))
+
+        user.set_password(new_password)
+        user.save()
+
+        revoked_sessions = AuthenticationService._revoke_other_sessions(
+            user, current_refresh_token
+        )
+
+        security_logger.info(
+            f"Password changed successfully for user: {user.username} (ID: {user.id}). "
+            f"Revoked sessions: {revoked_sessions}"
+        )
+
+        message = "Contraseña actualizada exitosamente."
+        if revoked_sessions:
+            devices = "dispositivo" if revoked_sessions == 1 else "dispositivos"
+            message += (
+                f" Se cerró la sesión en {revoked_sessions} {devices} "
+                "adicional por seguridad."
+            )
+
+        return {
+            "success": True,
+            "message": message,
+        }
+
+    @staticmethod
+    def _revoke_other_sessions(user, current_refresh_token=None):
+        """
+        Revoca todos los refresh tokens activos del usuario salvo el de la
+        sesión actual.
+
+        Returns:
+            int: cantidad de sesiones revocadas
+        """
+        active_tokens = RefreshToken.objects.filter(
+            user=user,
+            revoked_at__isnull=True,
+            expires_at__gt=timezone.now(),
+        )
+
+        revoked = 0
+        for token_obj in active_tokens:
+            if current_refresh_token and token_obj.token == current_refresh_token:
+                continue
+            token_obj.revoke()
+            revoked += 1
+
+        return revoked
+
+    @staticmethod
     def health_check():
         """
         Verifica estado del sistema (conexiones a BDs).
@@ -228,7 +325,6 @@ class AuthenticationService:
         Método privado auxiliar.
         """
         from datetime import timedelta
-        from django.utils import timezone
 
         refresh_token = RefreshToken.objects.create(
             user=user,
