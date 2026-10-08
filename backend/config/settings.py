@@ -174,6 +174,9 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": [
         "apps.security.throttling.api_throttling.APIKeyRateThrottle",
     ],
+    "DEFAULT_THROTTLE_RATES": {
+        "password_change": "5/min",
+    },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
@@ -264,12 +267,21 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 8,
+        },
     },
     {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
     },
     {
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+    },
+    {
+        # Mayúscula + minúscula + número + carácter especial.
+        # Debe mantenerse en espejo con el checklist del módulo de
+        # configuraciones (frontend/src/modules/configuraciones).
+        'NAME': 'apps.authentication.password_validators.ComplexityPasswordValidator',
     },
 ]
 

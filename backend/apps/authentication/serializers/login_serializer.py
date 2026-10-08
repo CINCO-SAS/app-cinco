@@ -35,6 +35,8 @@ class AuthUserSerializer(serializers.Serializer):
     is_superuser = serializers.BooleanField()
     area = serializers.CharField(allow_blank=True, required=False)
     carpeta = serializers.CharField(allow_blank=True, required=False)
+    foto = serializers.CharField(allow_blank=True, required=False, allow_null=True)
+
 
 
 class LoginResponseSerializer(serializers.Serializer):

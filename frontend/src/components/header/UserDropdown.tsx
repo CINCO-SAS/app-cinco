@@ -1,11 +1,11 @@
 "use client";
-import Image from "next/image";
 import Link from "next/link";
 import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
 import { useAuthStore } from "@/store/auth.store";
+import { getAvatarUrl } from "@/utils/avatar";
 
 export default function UserDropdown() {
   const router = useRouter();
@@ -24,7 +24,13 @@ export default function UserDropdown() {
     return user?.email || user?.username || "";
   }, [user]);
 
-  const avatarSrc = user?.foto || "/images/user/owner.png";
+  const avatarUrl = getAvatarUrl(user?.foto);
+
+  // Iniciales para fallback si la foto no carga
+  const initials = (
+    (user?.nombre?.[0] || user?.username?.[0] || "U").toUpperCase() +
+    (user?.apellido?.[0] || "").toUpperCase()
+  );
 
   function toggleDropdown(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
     e.stopPropagation();
@@ -40,8 +46,21 @@ export default function UserDropdown() {
         onClick={toggleDropdown}
         className="dropdown-toggle flex items-center text-gray-700 dark:text-gray-400"
       >
-        <span className="mr-3 h-11 w-11 overflow-hidden rounded-full">
-          <Image width={44} height={44} src={avatarSrc} alt={displayName} />
+        <span className="mr-3 h-11 w-11 overflow-hidden rounded-full bg-gradient-to-tr from-brand-600 to-brand-400 flex items-center justify-center text-white text-sm font-bold shrink-0">
+          {avatarUrl ? (
+            <img
+              width={44}
+              height={44}
+              src={avatarUrl}
+              alt={displayName}
+              className="h-full w-full object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+                (e.currentTarget.nextSibling as HTMLElement | null)?.removeAttribute("hidden");
+              }}
+            />
+          ) : null}
+          <span hidden={!!avatarUrl}>{initials}</span>
         </span>
 
         <span className="text-theme-sm mr-1 block font-medium">
@@ -89,7 +108,7 @@ export default function UserDropdown() {
             <DropdownItem
               onItemClick={closeDropdown}
               tag="a"
-              href="/profile"
+              href="/configuraciones"
               className="group text-theme-sm flex items-center gap-3 rounded-lg px-3 py-2 font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-300"
             >
               <svg

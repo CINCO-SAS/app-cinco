@@ -133,19 +133,32 @@ class AuthenticationServiceTestCase(TestCase):
         self.assertEqual(resultado["databases"]["default"], "connected")
         self.assertEqual(resultado["databases"]["azul"], "connected")
 
-    @patch("apps.authentication.services.authentication_service.connections")
-    def test_health_check_bd_desconectada(self, mock_connections):
+    def test_health_check_bd_desconectada(self):
         """
-        Verifica que health_check retorna unhealthy si alguna BD falla.
-        """
-        mock_connections['default'].ensure_connection.return_value = None
-        mock_connections['azul'].ensure_connection.side_effect = Exception("Connection refused")
+        Verifica que health_check retorna unhealthy si alguna BD falla,
+        sin afectar el estado de la que sí está conectada.
 
-        resultado = AuthenticationService.health_check()
+        Nota: se usa un dict real de mocks y no `mock_connections['azul']`,
+        porque en un MagicMock todas las claves devuelven el mismo hijo
+        (`m['default'] is m['azul']` es True) y ambas BDs quedarían con el
+        mismo comportamiento.
+        """
+        default_conn = MagicMock()
+        azul_conn = MagicMock()
+        azul_conn.ensure_connection.side_effect = Exception("Connection refused")
+
+        fake_connections = {"default": default_conn, "azul": azul_conn}
+        with patch(
+            "apps.authentication.services.authentication_service.connections",
+            fake_connections,
+        ):
+            resultado = AuthenticationService.health_check()
 
         self.assertEqual(resultado["status"], "unhealthy")
         self.assertIn("error", resultado["databases"]["azul"])
         self.assertEqual(resultado["databases"]["default"], "connected")
+        default_conn.ensure_connection.assert_called_once()
+        azul_conn.ensure_connection.assert_called_once()
 
     def test_get_secure_cookie_settings(self):
         """

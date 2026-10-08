@@ -1,8 +1,27 @@
-from rest_framework.throttling import BaseThrottle
+from rest_framework.throttling import BaseThrottle, SimpleRateThrottle
 from django.core.cache import cache
 from django.utils import timezone
 from apps.security.models import APIKey
 from rest_framework.exceptions import Throttled
+
+
+class PasswordChangeRateThrottle(SimpleRateThrottle):
+    """
+    Limita la cantidad de intentos de cambio de contraseña para prevenir ataques de fuerza bruta.
+    Usa el ID del usuario autenticado o la dirección IP como identificador.
+    """
+    scope = 'password_change'
+
+    def get_cache_key(self, request, view):
+        if request.user and request.user.is_authenticated:
+            ident = f"user_{request.user.pk}"
+        else:
+            ident = self.get_ident(request)
+
+        return self.cache_format % {
+            'scope': self.scope,
+            'ident': ident,
+        }
 
 
 class APIKeyRateThrottle(BaseThrottle):
