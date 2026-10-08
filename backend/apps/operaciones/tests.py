@@ -56,10 +56,25 @@ class ActividadServiceTests(TestCase):
 
 		self.assertTrue(result)
 		self.assertTrue(instance.is_deleted)
-		self.assertEqual(instance.deleted_by, 99)
+		self.assertEqual(instance.deleted_by_id, 99)
 		instance.save.assert_called_once_with(
 			update_fields=['is_deleted', 'deleted_at', 'deleted_by', 'updated_at']
 		)
+
+	def test_actualizar_asigna_updated_by_id_correctamente(self):
+		instance = MagicMock()
+		instance.id = 10
+		validated_data = {"estado": "en_progreso"}
+
+		ActividadService.actualizar(
+			instance,
+			validated_data,
+			actor_user_id=45,
+		)
+
+		self.assertEqual(instance.estado, "en_progreso")
+		self.assertEqual(instance.updated_by_id, 45)
+		instance.save.assert_called_once()
 
 	@patch('apps.operaciones.services.actividad_service.Actividad.objects')
 	def test_listar_applies_default_base_filter(self, actividad_objects):
@@ -136,6 +151,30 @@ class ActividadServiceOTSyncTests(DjangoTestCase):
 		self.assertEqual(actividad.fecha_fin_estimado, date(2026, 5, 20))
 
 
+class AgendaServiceTests(DjangoTestCase):
+	def test_buscar_actividad_ot_retorna_none_cuando_no_existe(self):
+		from apps.operaciones.services.agenda_service import AgendaService
+		res = AgendaService.buscar_actividad_por_ot("OT-INEXISTENTE-99999")
+		self.assertIsNone(res)
+
+	def test_buscar_actividad_ot_retorna_fechas_correctas(self):
+		from apps.operaciones.models import Actividad
+		from apps.operaciones.services.agenda_service import AgendaService
+		act = Actividad.objects.create(
+			ot="OT-TEST-AGENDA-01",
+			responsable_id=1,
+			fecha_inicio="2026-06-15",
+			fecha_fin_estimado="2026-06-20",
+		)
+		res = AgendaService.buscar_actividad_por_ot("OT-TEST-AGENDA-01")
+		self.assertIsNotNone(res)
+		self.assertEqual(res["ot"], "OT-TEST-AGENDA-01")
+		self.assertEqual(res["fecha_inicio"], "2026-06-15")
+		self.assertEqual(res["fecha_fin_estimado"], "2026-06-20")
+
+
+
+
 class ActividadWriteSerializerValidationTests(TestCase):
 	def test_acepta_campos_opcionales_del_front_en_blanco(self):
 		payload = {
@@ -167,6 +206,7 @@ class ActividadWriteSerializerValidationTests(TestCase):
 			 patch('apps.operaciones.serializers.actividad_serializer.ActividadService.validar_ots_unicas'):
 			serializer = ActividadWriteSerializer(data=payload)
 			self.assertTrue(serializer.is_valid(), serializer.errors)
+			self.assertEqual(serializer.validated_data.get('responsable_id'), 1)
 
 	def test_acepta_ubicacion_con_campos_opcionales_vacios(self):
 		payload = {
@@ -304,3 +344,22 @@ class ActividadWriteSerializerValidationTests(TestCase):
 				serializer.errors["ots"][0],
 				"La OT 00010 tiene una fecha fin menor que la fecha inicio.",
 			)
+
+
+class AgendaApiTests(TestCase):
+	def test_serializer_agenda_mes_query_valido(self):
+		from apps.operaciones.serializers.agenda_serializer import AgendaMesQuerySerializer
+		serializer = AgendaMesQuerySerializer(data={"mes": "06", "yyyy": "2026"})
+		self.assertTrue(serializer.is_valid())
+
+	def test_serializer_agenda_parametros_carpeta(self):
+		from apps.operaciones.serializers.agenda_serializer import AgendaParametrosCarpetaSaveSerializer
+		serializer = AgendaParametrosCarpetaSaveSerializer(data={"sede": "medellin", "data_param": [{"param": "1", "color": "#ff0000"}]})
+		self.assertTrue(serializer.is_valid())
+
+	def test_serializer_agenda_importar_csv(self):
+		from django.core.files.uploadedfile import SimpleUploadedFile
+		from apps.operaciones.serializers.agenda_serializer import AgendaImportarCsvSerializer
+		file = SimpleUploadedFile("test.csv", b"cedula,ot,fecha_inicio,fecha_fin\n123,OT1,2026-06-01,2026-06-02", content_type="text/csv")
+		serializer = AgendaImportarCsvSerializer(data={"file": file})
+		self.assertTrue(serializer.is_valid(), serializer.errors)

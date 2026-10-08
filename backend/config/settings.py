@@ -178,6 +178,7 @@ REST_FRAMEWORK = {
         "password_change": "5/min",
     },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",
 }
 
 LEGACY_JWT_SHARED_SECRET = os.environ.get('LEGACY_JWT_SHARED_SECRET', '')
@@ -234,7 +235,7 @@ DATABASES = {
     },
     'azul': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ.get('DB_AZUL_NAME', 'cinco-api'),
+        'NAME': 'bd_c3nc4s1s' if os.environ.get('DB_AZUL_NAME') in (None, '', 'cinco-api') else os.environ.get('DB_AZUL_NAME'),
         'USER': os.environ.get('DB_AZUL_USER', 'root'),
         'PASSWORD': os.environ.get('DB_AZUL_PASSWORD', ''),
         'HOST': os.environ.get('DB_AZUL_HOST', '127.0.0.1'),

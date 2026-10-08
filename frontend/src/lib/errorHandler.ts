@@ -43,6 +43,18 @@ const getNetworkErrorMessage = (): string => {
   return "No fue posible conectar con el servicio. Intenta nuevamente en unos minutos.";
 };
 
+export const containsHtml = (value: unknown): boolean => {
+  if (typeof value !== "string") return false;
+  const str = value.trim();
+  return (
+    str.startsWith("<!DOCTYPE") ||
+    str.startsWith("<!doctype") ||
+    str.startsWith("<html") ||
+    str.includes("<body") ||
+    /<[a-z][\s\S]*>/i.test(str)
+  );
+};
+
 const getRawErrorMessage = (error: any): string => {
   if (!error) return "";
   if (typeof error.message === "string") return error.message;
@@ -50,8 +62,12 @@ const getRawErrorMessage = (error: any): string => {
 };
 
 const getFirstNestedMessage = (value: unknown): string | undefined => {
-  if (typeof value === "string" && value.trim()) {
-    return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed && !containsHtml(trimmed)) {
+      return trimmed;
+    }
+    return undefined;
   }
 
   if (Array.isArray(value)) {
@@ -87,13 +103,26 @@ export function classifyError(error: any): ApiErrorDetail {
 
   const status = error?.response?.status || 0;
   const data = error?.response?.data;
-  const nestedMessage = getFirstNestedMessage(data);
-  const rawMessage =
-    data?.message ||
-    data?.detail ||
-    nestedMessage ||
-    getRawErrorMessage(error) ||
-    "Error desconocido";
+  const isHtmlResponse = typeof data === "string" && containsHtml(data);
+  const safeData = isHtmlResponse ? null : data;
+  const nestedMessage = getFirstNestedMessage(safeData);
+
+  const rawDetail = safeData?.detail;
+  const rawMsgField = safeData?.message;
+  const safeDetail =
+    typeof rawDetail === "string" && !containsHtml(rawDetail) ? rawDetail : undefined;
+  const safeMsgField =
+    typeof rawMsgField === "string" && !containsHtml(rawMsgField) ? rawMsgField : undefined;
+
+  let rawMessage =
+    safeMsgField ||
+    safeDetail ||
+    nestedMessage;
+
+  if (!rawMessage) {
+    const fallback = getRawErrorMessage(error);
+    rawMessage = containsHtml(fallback) ? "" : fallback;
+  }
 
   let type: ApiErrorType = ApiErrorType.UNKNOWN;
 
@@ -132,24 +161,31 @@ export function classifyError(error: any): ApiErrorDetail {
     }
   }
 
+  if (type === ApiErrorType.SERVER_ERROR || status >= 500) {
+    type = ApiErrorType.SERVER_ERROR;
+    if (!rawMessage || containsHtml(rawMessage) || rawMessage.length > 250) {
+      rawMessage = "Error en el servidor. Por favor, intenta más tarde o contacta a soporte.";
+    }
+  }
+
   const message =
     error instanceof ZodError
       ? "Se recibieron actividades con un formato inesperado del backend."
       : type === ApiErrorType.NETWORK_ERROR ||
-          rawMessage === "Network Error" ||
-          rawMessage === "Failed to fetch"
-        ? getNetworkErrorMessage()
-        : rawMessage;
+    rawMessage === "Network Error" ||
+    rawMessage === "Failed to fetch"
+      ? getNetworkErrorMessage()
+      : (rawMessage || "Error desconocido");
 
   return {
     type,
     status,
     message,
-    detail: data?.detail,
+    detail: safeDetail,
     errors:
-      data?.errors ||
-      (typeof data === "object" && !data?.detail && !data?.message
-        ? data
+      safeData?.errors ||
+      (typeof safeData === "object" && safeData !== null && !safeData?.detail && !safeData?.message
+        ? safeData
         : undefined),
     timestamp: new Date().toISOString(),
   };
@@ -173,13 +209,22 @@ export function createApiError(error: any): ApiError {
 
 /**
  * Obtiene el mensaje de error mas apropiado segun el tipo
- * Prioriza mensajes especificos del backend (Django)
+ * Prioriza mensajes legibles y previene exponer HTML o volcados tecnicos
  */
 export function getErrorMessage(errorDetail: ApiErrorDetail): string {
-  if (errorDetail.detail) {
+  if (
+    errorDetail.detail &&
+    !containsHtml(errorDetail.detail) &&
+    errorDetail.detail.length <= 250
+  ) {
     return errorDetail.detail;
   }
-  if (errorDetail.message && errorDetail.message !== "Error desconocido") {
+  if (
+    errorDetail.message &&
+    errorDetail.message !== "Error desconocido" &&
+    !containsHtml(errorDetail.message) &&
+    errorDetail.message.length <= 250
+  ) {
     return errorDetail.message;
   }
 
@@ -197,7 +242,7 @@ export function getErrorMessage(errorDetail: ApiErrorDetail): string {
     case ApiErrorType.RATE_LIMIT:
       return "Has realizado demasiadas solicitudes. Intenta mas tarde";
     case ApiErrorType.SERVER_ERROR:
-      return "Error en el servidor. Intenta mas tarde";
+      return "Error en el servidor. Por favor, intenta más tarde o contacta a soporte.";
     case ApiErrorType.NETWORK_ERROR:
       return getNetworkErrorMessage();
     case ApiErrorType.TIMEOUT:
