@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "../../context/SidebarContext";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { House } from "lucide-react";
+import { House, Settings } from "lucide-react";
 import { ChevronDownIcon, HorizontaLDots } from "../../icons/index";
 import { IconMessageChatbot } from '@tabler/icons-react';
 import { useAuthStore } from "@/store/auth.store";
@@ -59,6 +59,11 @@ const defaultNavItems: NavItem[] = [
     subItems: [
       { name: "IA DEV", path: "/programacion/ia-dev", requiresSuperuser: true },
     ],
+  },
+  {
+    name: "Configuraciones",
+    icon: <Settings className="h-5 w-5" />,
+    path: "/configuraciones",
   },
 ];
 
