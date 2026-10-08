@@ -4,3 +4,5 @@ from .refresh_view import RefreshTokenView
 from .logout_view import LogoutView
 from .csrf_view import CsrfTokenView
 from .session_view import SessionView
+from .change_password_view import ChangePasswordView
+
