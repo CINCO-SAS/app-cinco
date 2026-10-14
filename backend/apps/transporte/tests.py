@@ -40,6 +40,7 @@ from .models import (
     Vehiculo,
 )
 from .serializers.jefe_serializer import JefeValidadorSerializer
+from .services import calendario
 from .services import ConductorService, FlotaService, LiquidacionService, ParametrosService
 from .services.flota_service import COLUMNAS_CSV_BANCARIOS
 from .services.periodos import restar_meses
@@ -398,6 +399,79 @@ class EtlComandoTests(TestCase):
         # La fila 3 de cierres (fecha 0000-00-00) se reporta, no aborta.
         self.assertIn("errores=1", salida)
         self.assertIn("fecha cero", salida)
+
+
+class CalendarioTests(SimpleTestCase):
+    """Port de `frontend/src/utils/festivos/festivosColombia.ts`.
+
+    Valores dorados = test TS (`festivosColombia.test.ts`); la semántica
+    de sábado por defecto (hábil) replica el frontend y la CR-9 legacy
+    la desactiva con `sabado_habil=False` en su punto de uso.
+    """
+
+    def test_calcula_18_festivos_por_anio(self):
+        self.assertEqual(len(calendario.calcular_festivos_colombia(2026)), 18)
+
+    def test_fijos_y_nombre(self):
+        self.assertEqual(calendario.festivo_nombre("2026-01-01"), "Año Nuevo")
+        self.assertEqual(
+            calendario.festivo_nombre(date(2026, 7, 20)), "Día de la Independencia"
+        )
+        self.assertEqual(
+            calendario.festivo_nombre("2026-08-07"), "Batalla de Boyacá"
+        )
+        self.assertEqual(calendario.festivo_nombre("2026-12-25"), "Navidad")
+
+    def test_ley_emiliani_traslada_al_lunes(self):
+        # 6 de enero 2026 cae martes → lunes 12 (dorado del test TS).
+        self.assertEqual(
+            calendario.festivo_nombre("2026-01-12"), "Día de los Reyes Magos"
+        )
+        self.assertFalse(calendario.es_festivo("2026-01-06"))
+
+    def test_relativos_a_pascua(self):
+        # Pascua 2026 = 5 de abril (dorados del test TS).
+        self.assertEqual(calendario.festivo_nombre("2026-04-02"), "Jueves Santo")
+        self.assertEqual(calendario.festivo_nombre("2026-04-03"), "Viernes Santo")
+        self.assertTrue(calendario.es_festivo("2026-05-18"))   # Ascensión
+        self.assertTrue(calendario.es_festivo("2026-06-08"))   # Corpus Christi
+        self.assertTrue(calendario.es_festivo("2026-06-15"))   # Sagrado Corazón
+
+    def test_dia_habil_domingo_y_festivo_no(self):
+        self.assertFalse(calendario.es_dia_habil("2026-10-04"))  # domingo
+        self.assertFalse(calendario.es_dia_habil("2026-10-12"))  # festivo
+        self.assertTrue(calendario.es_dia_habil("2026-10-13"))   # martes
+
+    def test_sabado_habil_como_el_frontend(self):
+        # Paridad con el archivo TS: hábil por defecto, configurable.
+        self.assertTrue(calendario.es_dia_habil("2026-10-10"))
+        self.assertFalse(
+            calendario.es_dia_habil("2026-10-10", sabado_habil=False)
+        )
+
+    def test_sumar_dias_habiles_dorados_ts(self):
+        self.assertEqual(
+            calendario.sumar_dias_habiles("2026-10-09", 1), date(2026, 10, 10)
+        )
+        # Salta domingo 11 + festivo 12 → lunes 13.
+        self.assertEqual(
+            calendario.sumar_dias_habiles("2026-10-10", 1), date(2026, 10, 13)
+        )
+
+    def test_restar_dias_habiles_paridad_legacy(self):
+        # CR-9 legacy (base_salida_transporte.php 77–96): sábados NO cuentan.
+        # Desde martes 13: viernes 9 (1), jueves 8 (2) → 8 de octubre.
+        self.assertEqual(
+            calendario.restar_dias_habiles(
+                "2026-10-13", 2, sabado_habil=False
+            ),
+            date(2026, 10, 8),
+        )
+        # Con sábado hábil la ventana es más corta: viernes 9.
+        self.assertEqual(
+            calendario.restar_dias_habiles("2026-10-13", 2),
+            date(2026, 10, 9),
+        )
 
 
 class SemaforoCompartidoTests(SimpleTestCase):
