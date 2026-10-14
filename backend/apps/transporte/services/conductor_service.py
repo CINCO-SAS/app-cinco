@@ -16,11 +16,7 @@ from datetime import date
 from django.db import IntegrityError, transaction
 
 from ..models import Conductor
-from ..models.choices import TipoVinculacion
-
-# Semáforo de vigencia (misma regla verificada de SOAT/CDA, §5.3).
-DIAS_VERDE = 60
-DIAS_NARANJA = 30
+from .vigencia import estado_vigencia
 
 
 class ConductorService:
@@ -152,19 +148,8 @@ class ConductorService:
 
     @staticmethod
     def estado_licencia(licencia_vencimiento, hoy=None):
-        """
-        Semáforo en servidor: 'VIGENTE' (>60), 'POR_VENCER' (31–60),
-        'VENCIDA' (≤30 o vencida). Sin fecha → 'SIN_REGISTRO'.
-        """
-        if not licencia_vencimiento:
-            return "SIN_REGISTRO"
-        hoy = hoy or date.today()
-        dias = (licencia_vencimiento - hoy).days
-        if dias > DIAS_VERDE:
-            return "VIGENTE"
-        if dias > DIAS_NARANJA:
-            return "POR_VENCER"
-        return "VENCIDA"
+        """Semáforo en servidor (§5.4); delega en la regla compartida."""
+        return estado_vigencia(licencia_vencimiento, hoy)
 
     # ------------------------------------------------------------------ #
     # Validaciones internas

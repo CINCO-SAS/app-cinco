@@ -1,15 +1,17 @@
 """
 Tests del módulo Transporte.
 
-Ejecución (usa config.settings_test → SQLite en memoria, sin MySQL):
-    python backend/manage.py test apps.transporte --settings=config.settings_test
+Ejecución (aislada de otros módulos; SQLite en memoria, sin MySQL):
+    python backend/manage.py test apps.transporte --settings=config.settings_test_transporte
 """
 from datetime import date
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 from django.test import SimpleTestCase, TestCase
 
 from .models import Conductor, Novedad, Salida, TipoVehiculo, Vehiculo
-from .services import ConductorService
+from .services import ConductorService, FlotaService
+from .services.vigencia import estado_vigencia
 
 
 class EdadDerivadaTests(SimpleTestCase):
@@ -144,3 +146,144 @@ class ConductorCRUDTests(TestCase):
     def test_listar_filtro_activo_false(self):
         ConductorService.crear(self._datos(), actor=None)
         self.assertEqual(ConductorService.listar({"activo": "false"}).count(), 0)
+
+
+class SemaforoCompartidoTests(SimpleTestCase):
+    """La misma regla (§5.3/§5.4) gobierna SOAT, CDA y licencia."""
+
+    hoy = date(2026, 10, 14)
+
+    def test_misma_regla_para_soat_y_licencia(self):
+        por_vencer = date(2026, 11, 30)  # 47 días
+        self.assertEqual(estado_vigencia(por_vencer, self.hoy), "POR_VENCER")
+
+    def test_sin_fecha(self):
+        self.assertEqual(estado_vigencia(None, self.hoy), "SIN_REGISTRO")
+
+    def test_vencida_incluye_vencidas(self):
+        self.assertEqual(estado_vigencia(date(2020, 1, 1), self.hoy), "VENCIDA")
+
+
+class FlotaCRUDTests(TestCase):
+    """§5.3: ABM con placa única y semáforo en servidor."""
+
+    def _datos(self, **extra):
+        datos = {
+            "placa": "ABC123",
+            "tipo_vehiculo": "CAMIONETA",
+            "marca": "MAZDA",
+            "referencia": "CX5",
+            "modelo_anio": 2022,
+            "tipo_contrato": "PROPIO",
+            "nombre_propietario": "CINCO SAS",
+            "cedula_propietario": "900111222",
+            "valor_dia_base": 85000,
+            "fecha_soat": date(2027, 1, 1),   # 79 días → VIGENTE
+            "fecha_cda": date(2026, 11, 15),  # 32 días → POR_VENCER
+        }
+        datos.update(extra)
+        return datos
+
+    def test_crear_vehiculo_ok(self):
+        vehiculo = FlotaService.crear(self._datos(), actor=None)
+        self.assertEqual(vehiculo.placa, "ABC123")
+        self.assertTrue(vehiculo.activo)
+
+    def test_placa_se_normaliza_a_mayusculas(self):
+        vehiculo = FlotaService.crear(self._datos(placa=" abc123 "), actor=None)
+        self.assertEqual(vehiculo.placa, "ABC123")
+
+    def test_placa_duplicada_rechazada(self):
+        FlotaService.crear(self._datos(), actor=None)
+        with self.assertRaisesMessage(ValueError, "Ya existe un vehículo"):
+            FlotaService.crear(self._datos(marca="OTRA"), actor=None)
+
+    def test_placa_obligatoria(self):
+        with self.assertRaisesMessage(ValueError, "placa es obligatoria"):
+            FlotaService.crear(self._datos(placa="  "), actor=None)
+
+    def test_motos_fuera_de_alcance(self):
+        """D-A13: el catálogo no admite motos."""
+        with self.assertRaisesMessage(ValueError, "no es un valor válido"):
+            FlotaService.crear(self._datos(tipo_vehiculo="MOTO"), actor=None)
+
+    def test_inactivar_es_logico(self):
+        vehiculo = FlotaService.crear(self._datos(), actor=None)
+        FlotaService.inactivar(vehiculo.pk, actor=None)
+        self.assertTrue(Vehiculo.objects.filter(pk=vehiculo.pk, activo=False).exists())
+
+    def test_semario_soat_calculado_en_servidor(self):
+        vehiculo = FlotaService.crear(self._datos(), actor=None)
+        ficha = FlotaService.ficha_documental(vehiculo.pk, hoy=date(2026, 10, 14))
+        self.assertEqual(ficha["semaforo"]["soat"], "VIGENTE")      # 79 días
+        self.assertEqual(ficha["semaforo"]["cda"], "POR_VENCER")     # 32 días
+
+    def test_semario_vencido(self):
+        vehiculo = FlotaService.crear(
+            self._datos(fecha_soat=date(2026, 10, 1)), actor=None
+        )
+        ficha = FlotaService.ficha_documental(vehiculo.pk, hoy=date(2026, 10, 14))
+        self.assertEqual(ficha["semaforo"]["soat"], "VENCIDA")
+
+
+class DocumentoVehiculoTests(TestCase):
+    """§5.3: documentos validados por tipo/tamaño, upsert por tipo."""
+
+    def _vehiculo(self):
+        return FlotaService.crear(
+            {
+                "placa": "XYZ789",
+                "tipo_vehiculo": "FURGON",
+                "marca": "RENAULT",
+                "modelo_anio": 2021,
+                "tipo_contrato": "EXTERNO",
+                "nombre_propietario": "TERCERO",
+                "cedula_propietario": "800999888",
+                "fecha_ingreso": date(2026, 1, 1),
+            },
+            actor=None,
+        )
+
+    def _archivo(self, nombre="soat.jpg", contenido=b"img", tipo="image/jpeg"):
+        return SimpleUploadedFile(nombre, contenido, content_type=tipo)
+
+    def test_subir_documento_ok(self):
+        vehiculo = self._vehiculo()
+        doc = FlotaService.subir_documento(
+            vehiculo.pk, "SOAT", self._archivo(), date(2027, 1, 1), actor=None
+        )
+        self.assertEqual(doc.tipo, "SOAT")
+        self.assertTrue(vehiculo.documentos.exists())
+
+    def test_tipo_archivo_no_permitido(self):
+        vehiculo = self._vehiculo()
+        with self.assertRaisesMessage(ValueError, "no permitido"):
+            FlotaService.subir_documento(
+                vehiculo.pk,
+                "SOAT",
+                self._archivo(nombre="virus.exe", tipo="application/octet-stream"),
+                None,
+                actor=None,
+            )
+
+    def test_archivo_demasiado_grande(self):
+        vehiculo = self._vehiculo()
+        grande = SimpleUploadedFile(
+            "gigante.jpg", b"x" * (5 * 1024 * 1024 + 1), content_type="image/jpeg"
+        )
+        with self.assertRaisesMessage(ValueError, "tamaño máximo"):
+            FlotaService.subir_documento(
+                vehiculo.pk, "SOAT", grande, None, actor=None
+            )
+
+    def test_upsert_reemplaza_documento_existente(self):
+        vehiculo = self._vehiculo()
+        FlotaService.subir_documento(
+            vehiculo.pk, "SOAT", self._archivo("a.jpg"), date(2027, 1, 1), actor=None
+        )
+        FlotaService.subir_documento(
+            vehiculo.pk, "SOAT", self._archivo("b.jpg"), date(2028, 1, 1), actor=None
+        )
+        self.assertEqual(vehiculo.documentos.filter(tipo="SOAT").count(), 1)
+        doc = vehiculo.documentos.get(tipo="SOAT")
+        self.assertEqual(doc.fecha_vencimiento, date(2028, 1, 1))
