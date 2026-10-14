@@ -5,9 +5,10 @@ Ejecución (aislada de otros módulos; SQLite en memoria, sin MySQL):
     python backend/manage.py test apps.transporte --settings=config.settings_test_transporte
 """
 from datetime import date
-from django.core.files.uploadedfile import SimpleUploadedFile
+import tempfile
 
-from django.test import SimpleTestCase, TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from .models import Conductor, Novedad, Salida, TipoVehiculo, Vehiculo
 from .services import ConductorService, FlotaService
@@ -228,6 +229,15 @@ class FlotaCRUDTests(TestCase):
 
 class DocumentoVehiculoTests(TestCase):
     """§5.3: documentos validados por tipo/tamaño, upsert por tipo."""
+
+    # Los archivos de test van a un temporal, nunca al árbol del repo.
+    MEDIA_ROOT_OVERRIDE = override_settings(
+        MEDIA_ROOT=tempfile.mkdtemp(prefix="transporte_test_media_")
+    )
+
+    def setUp(self):
+        self.MEDIA_ROOT_OVERRIDE.enable()
+        self.addCleanup(self.MEDIA_ROOT_OVERRIDE.disable)
 
     def _vehiculo(self):
         return FlotaService.crear(
