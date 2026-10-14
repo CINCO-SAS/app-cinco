@@ -81,6 +81,15 @@
 
 - [ ] **B1 · F1-resto: festivos** — modelo/precarga del calendario + caché en memoria
       + tests de la regla de −2 días hábiles (CR-9). *Tamaño M · Es gate de todo el tramo.*
+      **Avance (14-oct):** el ALGORITMO ya está portado al backend en
+      `services/calendario.py` (18 festivos estatutarios Ley 51/1983 +
+      Pascua Butcher/Meeus, port de `frontend/src/utils/festivos/festivosColombia.ts`,
+      sábado configurable con default hábil como el original). G1 ahora solo
+      gatea la TABLA `common.Festivo` (festivos decretados art. 71 + fuente
+      compartida de otras áreas): al llegar, `es_festivo` = algoritmo ∪ BD.
+      **Paridad verificada:** el legacy CR-9 excluía sábados
+      (`base_salida_transporte.php` 77–96) → la ventana usará
+      `sabado_habil=False` explícito.
 - [ ] **B2 · F3 núcleo: registro de salidas** — `SalidaService`:
       ventana CR-9, anticolisión CR-1 `(vehículo, fecha)` y CR-2 `(conductor, fecha)`
       excluyendo `ELIMINADO`, snapshots de datos en la salida, máquina de estados
