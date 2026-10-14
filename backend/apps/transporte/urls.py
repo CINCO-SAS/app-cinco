@@ -9,6 +9,10 @@ funcionalidad → endpoint). Registro por fases:
 - F3: /kiosco/, /salidas/
 - F4: backoffice salidas (aprobar-lote, rechazar, novedades)
 - F5: /liquidaciones/, /planillas/, /informes/
+  (A2: /liquidaciones/ con ?mes=&anio=, sábanas pago-mensual/pronto-pago,
+  acciones /consecutivo/ y /pago/ — la ruta compuesta D3
+  /liquidaciones/{anio}/{mes}/ queda como query param: DefaultRouter
+  reserva /{pk}/)
 """
 from rest_framework.routers import DefaultRouter
 
@@ -16,6 +20,7 @@ from .views import (
     ConductorViewSet,
     FechaLimiteCierreViewSet,
     JefeValidadorViewSet,
+    LiquidacionViewSet,
     VehiculoViewSet,
 )
 
@@ -27,6 +32,9 @@ router.register(
 )
 router.register(
     r"parametros/jefes", JefeValidadorViewSet, basename="jefes-validadores"
+)
+router.register(
+    r"liquidaciones", LiquidacionViewSet, basename="liquidaciones"
 )
 
 urlpatterns = router.urls

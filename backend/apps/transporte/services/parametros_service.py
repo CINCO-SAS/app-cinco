@@ -15,10 +15,7 @@ from django.db import IntegrityError, transaction
 from apps.empleados.models import Empleado
 
 from ..models import FechaLimiteCierre, JefeValidador
-
-# Periodos plausibles de cierre (legacy opera desde 2021; margen holgado).
-MES_MIN, MES_MAX = 1, 12
-ANIO_MIN, ANIO_MAX = 2015, 2100
+from .periodos import entero, validar_mes, validar_periodo, validar_anio
 
 
 class ParametrosService:
@@ -38,14 +35,12 @@ class ParametrosService:
 
         mes = query_params.get("mes")
         if mes not in (None, ""):
-            mes = ParametrosService._entero(mes, "mes")
-            ParametrosService._validar_mes(mes)
+            mes = validar_mes(entero(mes, "mes"))
             queryset = queryset.filter(mes=mes)
 
         anio = query_params.get("anio")
         if anio not in (None, ""):
-            anio = ParametrosService._entero(anio, "anio")
-            ParametrosService._validar_anio(anio)
+            anio = validar_anio(entero(anio, "anio"))
             queryset = queryset.filter(anio=anio)
 
         return queryset.order_by("-fecha_limite")
@@ -156,7 +151,7 @@ class ParametrosService:
         empleado = query_params.get("empleado")
         if empleado not in (None, ""):
             queryset = queryset.filter(
-                empleado_id=ParametrosService._entero(empleado, "empleado")
+                empleado_id=entero(empleado, "empleado")
             )
 
         jefes = list(queryset)
@@ -283,32 +278,8 @@ class ParametrosService:
     # Validaciones internas
     # ------------------------------------------------------------------ #
     @staticmethod
-    def _entero(valor, nombre):
-        try:
-            return int(valor)
-        except (TypeError, ValueError):
-            raise ValueError(f"El campo {nombre} debe ser un número entero.")
-
-    @staticmethod
-    def _validar_mes(mes):
-        if not MES_MIN <= mes <= MES_MAX:
-            raise ValueError(f"El mes debe estar entre {MES_MIN} y {MES_MAX}.")
-        return mes
-
-    @staticmethod
-    def _validar_anio(anio):
-        if not ANIO_MIN <= anio <= ANIO_MAX:
-            raise ValueError(
-                f"El año debe estar entre {ANIO_MIN} y {ANIO_MAX}."
-            )
-        return anio
-
-    @staticmethod
     def _validar_cierre(datos):
-        mes = ParametrosService._entero(datos.get("mes"), "mes")
-        ParametrosService._validar_mes(mes)
-        anio = ParametrosService._entero(datos.get("anio"), "anio")
-        ParametrosService._validar_anio(anio)
+        mes, anio = validar_periodo(datos.get("mes"), datos.get("anio"))
         fecha_limite = datos.get("fecha_limite")
         if not fecha_limite:
             raise ValueError("La fecha límite es obligatoria.")
@@ -321,7 +292,7 @@ class ParametrosService:
             return empleado.pk
         if empleado in (None, ""):
             raise ValueError("El empleado es obligatorio.")
-        empleado_id = ParametrosService._entero(empleado, "empleado")
+        empleado_id = entero(empleado, "empleado")
         if not Empleado.objects.filter(pk=empleado_id).exists():
             raise ValueError(f"No existe empleado con id {empleado_id}.")
         return empleado_id

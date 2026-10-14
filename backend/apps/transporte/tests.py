@@ -7,6 +7,7 @@ Ejecución (aislada de otros módulos; SQLite en memoria, sin MySQL):
 import os
 import tempfile
 from datetime import date
+from decimal import Decimal
 from unittest import mock
 
 import qrcode
@@ -19,16 +20,22 @@ from apps.empleados.models import Empleado
 
 from .models import (
     Conductor,
+    ConsecutivoMensual,
+    EstadoSalida,
     FechaLimiteCierre,
     JefeValidador,
     Novedad,
+    PagoVehiculoMensual,
     Salida,
+    TipoNovedad,
+    TipoPago,
     TipoVehiculo,
     Vehiculo,
 )
 from .serializers.jefe_serializer import JefeValidadorSerializer
-from .services import ConductorService, FlotaService, ParametrosService
+from .services import ConductorService, FlotaService, LiquidacionService, ParametrosService
 from .services.flota_service import COLUMNAS_CSV_BANCARIOS
+from .services.periodos import restar_meses
 from .services.vigencia import estado_vigencia
 
 
@@ -810,3 +817,268 @@ class JefeValidadorTests(TestCase):
     def test_es_jefe_validador_sin_cedula_o_area(self):
         self.assertFalse(ParametrosService.es_jefe_validador("", "TRANSPORTE"))
         self.assertFalse(ParametrosService.es_jefe_validador("1000756621", ""))
+
+
+class LiquidacionTests(TestCase):
+    """§5.2 / CR-10: sábanas, consecutivos atómicos y gate de cierre."""
+
+    def _vehiculo(self, placa="ABC123"):
+        return FlotaService.crear(
+            {
+                "placa": placa,
+                "tipo_vehiculo": "CAMIONETA",
+                "marca": "MAZDA",
+                "referencia": "CX5",
+                "modelo_anio": 2022,
+                "tipo_contrato": "PROPIO",
+                "nombre_propietario": "CINCO SAS",
+                "cedula_propietario": "900111222",
+                "valor_dia_base": 85000,
+                "fecha_soat": date(2027, 1, 1),
+                "fecha_cda": date(2026, 11, 15),
+            },
+            actor=None,
+        )
+
+    def _salida(self, vehiculo, fecha, estado, valor="85000"):
+        return Salida.objects.create(
+            vehiculo=vehiculo,
+            fecha_salida=fecha,
+            valor_dia=Decimal(valor),
+            estado=estado,
+        )
+
+    def _inscribir(self, vehiculo, mes, anio, tipo=TipoPago.MENSUAL):
+        return PagoVehiculoMensual.objects.create(
+            vehiculo=vehiculo, mes=mes, anio=anio, tipo=tipo
+        )
+
+    # --------------------------- sábanas (CR-10) -------------------------- #
+    def test_pago_mensual_suma_tres_estados(self):
+        vehiculo = self._vehiculo()
+        self._inscribir(vehiculo, 9, 2026)
+        self._salida(vehiculo, date(2026, 9, 5), EstadoSalida.APROBADO)
+        self._salida(vehiculo, date(2026, 9, 6), EstadoSalida.REPORTADO)
+        self._salida(vehiculo, date(2026, 9, 7), EstadoSalida.VALIDADO)
+        self._salida(vehiculo, date(2026, 9, 8), EstadoSalida.RECHAZADO)
+        self._salida(vehiculo, date(2026, 9, 9), EstadoSalida.ELIMINADO)
+
+        sabana = LiquidacionService.sabana_pago_mensual(9, 2026)
+        self.assertEqual(sabana["filas"][0]["dias"], 3)
+        self.assertFalse(sabana["retroactivo"])
+        self.assertEqual(sabana["mes_aplicado"], 9)
+        self.assertEqual(sabana["totales"]["dias"], 3)
+
+    def test_pronto_pago_solo_aprobado(self):
+        """CR-10: misma flota y mes, pero pronto pago cuenta solo APROBADO."""
+        vehiculo = self._vehiculo()
+        self._inscribir(vehiculo, 9, 2026, tipo=TipoPago.PRONTO_PAGO)
+        self._salida(vehiculo, date(2026, 9, 5), EstadoSalida.APROBADO)
+        self._salida(vehiculo, date(2026, 9, 6), EstadoSalida.REPORTADO)
+        self._salida(vehiculo, date(2026, 9, 7), EstadoSalida.VALIDADO)
+
+        sabana = LiquidacionService.sabana_pronto_pago(9, 2026)
+        self.assertEqual(sabana["filas"][0]["dias"], 1)
+
+    def test_total_suma_novedades(self):
+        """§5.1: total = Σ (valor_dia ± novedad)."""
+        vehiculo = self._vehiculo()
+        self._inscribir(vehiculo, 9, 2026)
+        salida_a = self._salida(vehiculo, date(2026, 9, 5), EstadoSalida.APROBADO)
+        salida_b = self._salida(vehiculo, date(2026, 9, 6), EstadoSalida.APROBADO)
+        Novedad.objects.create(
+            salida=salida_a,
+            tipo=TipoNovedad.ADICIONAL,
+            valor=Decimal("5000"),
+            descripcion="extra",
+        )
+        Novedad.objects.create(
+            salida=salida_b,
+            tipo=TipoNovedad.DESCUENTO,
+            valor=Decimal("3000"),
+            descripcion="descuento",
+        )
+
+        sabana = LiquidacionService.sabana_pago_mensual(9, 2026)
+        self.assertEqual(sabana["filas"][0]["total"], Decimal("172000.00"))
+        self.assertEqual(sabana["totales"]["total"], Decimal("172000.00"))
+
+    def test_sin_inscritos_error(self):
+        with self.assertRaisesMessage(
+            ValueError, "No se encontraron registros para el mes y año 01/2025."
+        ):
+            LiquidacionService.sabana_pago_mensual(1, 2025)
+
+    def test_retroceso_desde_mes_actual(self):
+        """CR-10: pedido del mes en curso sin inscritos → hasta 6 meses atrás."""
+        hoy = date.today()
+        mes, anio = hoy.month, hoy.year
+        mes_prev, anio_prev = restar_meses(mes, anio, 1)
+
+        vehiculo = self._vehiculo()
+        self._inscribir(vehiculo, mes_prev, anio_prev)
+        self._salida(vehiculo, date(anio_prev, mes_prev, 5), EstadoSalida.APROBADO)
+
+        sabana = LiquidacionService.sabana_pago_mensual(mes, anio)
+        self.assertTrue(sabana["retroactivo"])
+        self.assertEqual((mes, anio), (sabana["mes"], sabana["anio"]))
+        self.assertEqual(
+            (mes_prev, anio_prev),
+            (sabana["mes_aplicado"], sabana["anio_aplicado"]),
+        )
+        self.assertEqual(sabana["filas"][0]["dias"], 1)
+
+    def test_retroceso_agotado_error(self):
+        hoy = date.today()
+        with self.assertRaisesMessage(ValueError, "No se encontraron registros"):
+            LiquidacionService.sabana_pago_mensual(hoy.month, hoy.year)
+
+    def test_filtros_de_sabana(self):
+        v1 = self._vehiculo("ABC123")
+        v2 = self._vehiculo("DEF456")
+        self._inscribir(v1, 9, 2026)
+        self._inscribir(v2, 9, 2026)
+
+        sabana = LiquidacionService.sabana_pago_mensual(
+            9, 2026, filtros={"placa": "abc"}
+        )
+        self.assertEqual(len(sabana["filas"]), 1)
+        self.assertEqual(sabana["filas"][0]["placa"], "ABC123")
+
+    # ------------------------- consecutivos (D3) -------------------------- #
+    def test_consecutivo_arranca_en_1000(self):
+        vehiculo = self._vehiculo()
+        numero, creado = LiquidacionService.proximo_consecutivo(
+            vehiculo.pk, 9, 2026
+        )
+        self.assertEqual(numero.consecutivo, 1000)
+        self.assertTrue(creado)
+
+    def test_consecutivo_sigue_el_maximo_global(self):
+        """El legacy tomaba MAX de TODA la tabla (no por vehículo)."""
+        a = self._vehiculo("ABC123")
+        b = self._vehiculo("DEF456")
+        primero, _ = LiquidacionService.proximo_consecutivo(a.pk, 9, 2026)
+        segundo, creado = LiquidacionService.proximo_consecutivo(b.pk, 9, 2026)
+        self.assertEqual(primero.consecutivo, 1000)
+        self.assertEqual(segundo.consecutivo, 1001)
+        self.assertTrue(creado)
+
+    def test_consecutivo_idempotente(self):
+        vehiculo = self._vehiculo()
+        primero, creado_1 = LiquidacionService.proximo_consecutivo(
+            vehiculo.pk, 9, 2026
+        )
+        segundo, creado_2 = LiquidacionService.proximo_consecutivo(
+            vehiculo.pk, 9, 2026
+        )
+        self.assertEqual(primero.pk, segundo.pk)
+        self.assertEqual(primero.consecutivo, segundo.consecutivo)
+        self.assertTrue(creado_1)
+        self.assertFalse(creado_2)
+
+    def test_consecutivo_vehiculo_inexistente(self):
+        with self.assertRaisesMessage(ValueError, "No existe un vehículo"):
+            LiquidacionService.proximo_consecutivo(999999, 9, 2026)
+
+    # ------------------------ pagos (D4 / upsert) ------------------------- #
+    def test_guardar_pago_upsert(self):
+        vehiculo = self._vehiculo()
+        LiquidacionService.guardar_pago(
+            {"vehiculo": vehiculo.pk, "mes": 9, "anio": 2026, "tipo": "MENSUAL"},
+            actor=None,
+        )
+        pago = LiquidacionService.guardar_pago(
+            {
+                "vehiculo": vehiculo.pk,
+                "mes": 9,
+                "anio": 2026,
+                "tipo": "MENSUAL",
+                "pagado": True,
+                "fecha_pago": date(2026, 10, 10),
+            },
+            actor=None,
+        )
+        inscritos = PagoVehiculoMensual.objects.filter(
+            vehiculo=vehiculo, mes=9, anio=2026, tipo=TipoPago.MENSUAL
+        )
+        self.assertEqual(inscritos.count(), 1)
+        self.assertTrue(pago.pagado)
+        self.assertEqual(pago.fecha_pago, date(2026, 10, 10))
+
+    def test_guardar_pago_snapshot_automatico(self):
+        """Al marcar pagado sin total, se calcula con la fórmula de la sábana."""
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, date(2026, 9, 5), EstadoSalida.APROBADO)
+        self._salida(vehiculo, date(2026, 9, 6), EstadoSalida.REPORTADO)
+
+        pago = LiquidacionService.guardar_pago(
+            {
+                "vehiculo": vehiculo.pk,
+                "mes": 9,
+                "anio": 2026,
+                "tipo": "MENSUAL",
+                "pagado": True,
+            },
+            actor=None,
+        )
+        self.assertEqual(pago.total_liquidado, Decimal("170000.00"))
+
+    def test_guardar_pago_tipo_invalido(self):
+        vehiculo = self._vehiculo()
+        with self.assertRaisesMessage(ValueError, "no es un valor válido"):
+            LiquidacionService.guardar_pago(
+                {
+                    "vehiculo": vehiculo.pk,
+                    "mes": 9,
+                    "anio": 2026,
+                    "tipo": "OTRO",
+                },
+                actor=None,
+            )
+
+    def test_guardar_pago_periodo_invalido(self):
+        vehiculo = self._vehiculo()
+        with self.assertRaisesMessage(ValueError, "mes debe estar entre 1 y 12"):
+            LiquidacionService.guardar_pago(
+                {
+                    "vehiculo": vehiculo.pk,
+                    "mes": 13,
+                    "anio": 2026,
+                    "tipo": "MENSUAL",
+                },
+                actor=None,
+            )
+
+    def test_listar_pagos_filtros(self):
+        vehiculo = self._vehiculo()
+        self._inscribir(vehiculo, 9, 2026, tipo=TipoPago.MENSUAL)
+        self._inscribir(vehiculo, 9, 2026, tipo=TipoPago.PRONTO_PAGO)
+
+        mensual = LiquidacionService.listar_pagos({"tipo": "MENSUAL"})
+        self.assertEqual(mensual.count(), 1)
+        self.assertEqual(mensual[0].tipo, TipoPago.MENSUAL)
+
+        with self.assertRaisesMessage(ValueError, "no es un valor válido"):
+            LiquidacionService.listar_pagos({"tipo": "OTRO"})
+        with self.assertRaisesMessage(ValueError, "número entero"):
+            LiquidacionService.listar_pagos({"mes": "x"})
+
+    # ----------------------- gate de fecha límite ------------------------- #
+    def test_periodo_abierto_sin_cierre_o_con_cierre_futuro(self):
+        self.assertTrue(LiquidacionService.puede_editar_periodo(9, 2026))
+        FechaLimiteCierre.objects.create(
+            mes=9, anio=2026, fecha_limite=date(2099, 1, 1)
+        )
+        self.assertTrue(LiquidacionService.puede_editar_periodo(9, 2026))
+
+    def test_periodo_cerrado_tras_fecha_limite(self):
+        FechaLimiteCierre.objects.create(
+            mes=9, anio=2026, fecha_limite=date(2020, 1, 1)
+        )
+        self.assertFalse(LiquidacionService.puede_editar_periodo(9, 2026))
+        self.assertTrue(
+            LiquidacionService.puede_editar_periodo(
+                9, 2026, tiene_permiso_editar=True
+            )
+        )
