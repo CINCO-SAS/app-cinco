@@ -51,10 +51,21 @@
       > D-A10) + tabla de prueba creada con `schema_editor` únicamente en
       > tests de transporte. Escrituras con `DjangoModelPermissions`
       > (gate `$permi_editar`; permiso granular `editar_tras_cierre` → E3).
-- [ ] **A2 · Núcleo de liquidaciones F5 con fixtures** — `PagoVehiculoMensual`
-      (CR-10: suma APROBADO+REPORTADO+VALIDADO; ProntoPago **solo APROBADO**),
-      `ConsecutivoMensual` atómico, edición gateada por fecha límite.
-      *Tamaño M · Riesgo R2 (rework controlado). No incluye planilla ni informes (van tras B2).*
+- [x] **A2 · Núcleo de liquidaciones F5 con fixtures** — ✅ **CERRADO**
+      (`7a4d89c`, 105 tests). `LiquidacionService`: sábanas CR-10
+      (pago mensual APROBADO+REPORTADO+VALIDADO vs pronto pago **solo
+      APROBADO**) con retroceso de 6 meses solo si el pedido es el mes en
+      curso (legacy 331–348/411–428), `proximo_consecutivo` atómico
+      (`select_for_update` + unique, arranque 1000 = MAX global como el
+      legacy), `puede_editar_periodo` (gate `editar_tras_cierre`) y upsert
+      de `PagoVehiculoMensual` con `total_liquidado` autocalculado (§5.1).
+      Endpoints: `GET /liquidaciones/?mes=&anio=` (D3; la ruta compuesta
+      `/{anio}/{mes}/` queda como query param — DefaultRouter reserva
+      `/{pk}/`), `GET .../pago-mensual|pronto-pago/` (D4),
+      `POST .../consecutivo|pago/`. Matemática de períodos extraída a
+      `services/periodos.py` (fuente única con cierres). *Pendiente de A2:
+      ruta compuesta B3 `/cierres/{mes}/{anio}/`; planilla/informes van
+      tras B2.*
 - [ ] **A3 (opcional) · Esqueleto del comando ETL con fixtures locales** —
       estructura de `migrate_transporte_legacy` + muestra de JSONs; se valida de
       verdad recién en C3. *Tamaño S.*
@@ -150,3 +161,4 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-14 | QR bajo demanda (D-A8) + dependencias | `c97b9bb` |
 | 2026-10-14 | ROADMAP: tramos, gates y orden pendiente | `35f2186` |
 | 2026-10-14 | A1 parámetros completo: cierres + jefes (87 tests) | `58889b8` |
+| 2026-10-14 | A2 núcleo liquidaciones: CR-10, consecutivos, gate (105 tests) | `7a4d89c` |
