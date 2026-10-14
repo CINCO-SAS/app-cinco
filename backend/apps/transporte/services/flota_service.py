@@ -10,12 +10,15 @@ Reglas de negocio:
 - Exclusión de motos del catálogo (D-A13) — garantizada por choices.
 - Datos bancarios: upsert por CSV (CR-13) — ver importar_datos_bancarios_csv.
 """
+import csv
+import io
+import re
 from datetime import date
 
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 
-from ..models import DocumentoVehiculo, Vehiculo
+from ..models import DatosBancariosVehiculo, DocumentoVehiculo, Vehiculo
 from .vigencia import estado_vigencia
 
 # Límites de subida de documentos (§5.3).
@@ -26,6 +29,18 @@ TIPOS_ARCHIVO_PERMITIDOS = {
     "application/pdf",
 }
 TAMANO_MAXIMO_BYTES = 5 * 1024 * 1024  # 5 MB
+
+# Import CSV bancarios (CR-13): orden de columnas del legacy verificado en
+# base_transportadores.php 605–610.
+COLUMNAS_CSV_BANCARIOS = (
+    "placa",
+    "cedula_titular",
+    "nombre_titular",
+    "tipo_cuenta",
+    "banco",
+    "numero_cuenta",
+)
+CAMPOS_BANCARIOS = COLUMNAS_CSV_BANCARIOS[1:]
 
 
 class FlotaService:
@@ -200,6 +215,107 @@ class FlotaService:
             documento.modificado_por = actor
             documento.save()
         return documento
+
+    # ------------------------------------------------------------------ #
+    # Import CSV bancarios (CR-13 / §5.3)
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def limpiar_texto(valor):
+        """
+        Réplica de limpiarTexto() del legacy (base_transportadores.php 14–18):
+        elimina todo carácter fuera de [a-zA-Z0-9\\s] y sube a mayúsculas.
+        """
+        return re.sub(r"[^a-zA-Z0-9\s]", "", valor or "").strip().upper()
+
+    @staticmethod
+    def detectar_separador(primeria_linea):
+        """Auto-detección delimitador: ';' si la cabecera lo tiene, si no ','."""
+        return ";" if ";" in (primeria_linea or "") else ","
+
+    @staticmethod
+    def importar_datos_bancarios_csv(archivo, actor=None):
+        """
+        Importación masiva de datos bancarios con lógica UPSERT por placa (CR-13):
+        1) Auto-detección del separador (';' vs ',').
+        2) Sanitización alfanumérica estricta de textos y cuentas.
+        3) Si el vehículo ya tiene cuenta → actualiza; si no → la crea.
+        4) Reporta filas rechazadas con causa explícita (mejora sobre el
+           legacy, que solo devolvía 'Fila: N').
+
+        Devuelve: {'insertados', 'actualizados', 'filas', 'errores'}.
+        """
+        if archivo is None:
+            raise ValueError("El archivo CSV es obligatorio.")
+
+        contenido = archivo.read()
+        if isinstance(contenido, bytes):
+            contenido = contenido.decode("utf-8", errors="replace")
+        lineas = contenido.splitlines()
+        if len(lineas) < 2:
+            raise ValueError("El archivo CSV está vacío o solo tiene cabecera.")
+
+        separador = FlotaService.detectar_separador(lineas[0])
+        filas_procesadas = 0
+        insertados = 0
+        actualizados = 0
+        errores = []
+
+        lector = csv.reader(io.StringIO("\n".join(lineas[1:])), delimiter=separador)
+        for indice, fila in enumerate(lector, start=2):  # 2 = cabecera incluida
+            filas_procesadas += 1
+            limpios = {
+                columna: FlotaService.limpiar_texto(fila[i] if i < len(fila) else "")
+                for i, columna in enumerate(COLUMNAS_CSV_BANCARIOS)
+            }
+
+            faltantes = [c for c in COLUMNAS_CSV_BANCARIOS if not limpios[c]]
+            if faltantes:
+                errores.append({
+                    "fila": indice,
+                    "causa": f"Campos vacíos: {', '.join(faltantes)}.",
+                })
+                continue
+
+            try:
+                vehiculo = Vehiculo.objects.get(
+                    placa=limpios["placa"], activo=True
+                )
+            except Vehiculo.DoesNotExist:
+                errores.append({
+                    "fila": indice,
+                    "causa": (
+                        f"No existe vehículo ACTIVO con placa {limpios['placa']}."
+                    ),
+                })
+                continue
+
+            con_datos = {
+                campo: limpios[campo] for campo in CAMPOS_BANCARIOS
+            }
+            with transaction.atomic():
+                existente = DatosBancariosVehiculo.objects.filter(
+                    vehiculo=vehiculo, activo=True
+                ).first()
+                if existente:
+                    for campo, valor in con_datos.items():
+                        setattr(existente, campo, valor)
+                    existente.modificado_por = actor
+                    existente.save()
+                    actualizados += 1
+                else:
+                    DatosBancariosVehiculo.objects.create(
+                        vehiculo=vehiculo,
+                        creado_por=actor,
+                        **con_datos,
+                    )
+                    insertados += 1
+
+        return {
+            "insertados": insertados,
+            "actualizados": actualizados,
+            "filas": filas_procesadas,
+            "errores": errores,
+        }
 
     # ------------------------------------------------------------------ #
     # Validaciones internas

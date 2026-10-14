@@ -152,6 +152,34 @@ class VehiculoViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
             vehiculo_serializer.DocumentoVehiculoSerializer(documento).data
         )
 
+    @extend_schema(
+        request={"multipart/form-data": {"type": "object", "properties": {
+            "archivo": {"type": "string", "format": "binary"},
+        }}},
+        responses={200: None},
+        description=(
+            "Import CSV bancarios (CR-13): auto-detección de separador, "
+            "limpieza alfanumérica y upsert por placa."
+        ),
+    )
+    @action(detail=False, methods=["post"], url_path="importar-bancarios")
+    def importar_bancarios(self, request):
+        archivo = request.FILES.get("archivo")
+        try:
+            resultado = FlotaService.importar_datos_bancarios_csv(
+                archivo, actor=self._actor(request)
+            )
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        http = (
+            status.HTTP_200_OK
+            if resultado["insertados"] + resultado["actualizados"] > 0
+            else status.HTTP_400_BAD_REQUEST
+        )
+        return Response(resultado, status=http)
+
     # ------------------------------------------------------------------ #
     @staticmethod
     def _actor(request):

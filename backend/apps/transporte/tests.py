@@ -12,6 +12,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 
 from .models import Conductor, Novedad, Salida, TipoVehiculo, Vehiculo
 from .services import ConductorService, FlotaService
+from .services.flota_service import COLUMNAS_CSV_BANCARIOS
 from .services.vigencia import estado_vigencia
 
 
@@ -297,3 +298,121 @@ class DocumentoVehiculoTests(TestCase):
         self.assertEqual(vehiculo.documentos.filter(tipo="SOAT").count(), 1)
         doc = vehiculo.documentos.get(tipo="SOAT")
         self.assertEqual(doc.fecha_vencimiento, date(2028, 1, 1))
+
+
+class ImportBancariosCsvTests(TestCase):
+    """CR-13 / §5.3: separador autodetectado, limpieza regex y upsert por placa."""
+
+    def _vehiculo(self, placa="ABC123"):
+        return FlotaService.crear(
+            {
+                "placa": placa,
+                "tipo_vehiculo": "CAMIONETA",
+                "marca": "MAZDA",
+                "modelo_anio": 2022,
+                "tipo_contrato": "PROPIO",
+                "nombre_propietario": "CINCO SAS",
+                "cedula_propietario": "900111222",
+                "fecha_ingreso": date(2026, 1, 1),
+            },
+            actor=None,
+        )
+
+    def _csv(self, contenido, nombre="bancos.csv"):
+        return SimpleUploadedFile(
+            nombre, contenido.encode("utf-8"), content_type="text/csv"
+        )
+
+    def test_orden_columnas_del_legacy(self):
+        """Fija el contrato CSV → modelo de CR-13 (base_transportadores.php 605–610)."""
+        self.assertEqual(
+            COLUMNAS_CSV_BANCARIOS,
+            (
+                "placa",
+                "cedula_titular",
+                "nombre_titular",
+                "tipo_cuenta",
+                "banco",
+                "numero_cuenta",
+            ),
+        )
+
+    def test_separador_punto_y_coma(self):
+        self._vehiculo()
+        contenido = "placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\nABC123;12345;JUAN;AHORRO;LOJA;001"
+        resultado = FlotaService.importar_datos_bancarios_csv(self._csv(contenido))
+        self.assertEqual(resultado["insertados"], 1)
+        self.assertEqual(resultado["actualizados"], 0)
+        self.assertEqual(resultado["errores"], [])
+
+    def test_separador_coma(self):
+        self._vehiculo()
+        contenido = "placa,cedula_banco,nombre,tipo_cuenta,banco,cuenta\nABC123,12345,JUAN,AHORRO,LOJA,001"
+        resultado = FlotaService.importar_datos_bancarios_csv(self._csv(contenido))
+        self.assertEqual(resultado["insertados"], 1)
+
+    def test_limpieza_alfanumerica_y_mayusculas(self):
+        """Réplica de limpiarTexto(): sin símbolos ni acentos, en mayúsculas."""
+        self.assertEqual(
+            FlotaService.limpiar_texto("Banco López! 33-4"), "BANCO LPEZ 334"
+        )
+
+    def test_upsert_actualiza_cuenta_existente(self):
+        vehiculo = self._vehiculo()
+        fila = "ABC123;111;PEDRO;AHORRO;LOJA;001"
+        contenido = f"placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\n{fila}"
+        FlotaService.importar_datos_bancarios_csv(self._csv(contenido))
+        contenido2 = f"placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\nABC123;222;PEDRO;CORRIENTE;PRODUBANCO;999"
+        resultado = FlotaService.importar_datos_bancarios_csv(self._csv(contenido2))
+
+        self.assertEqual(resultado["insertados"], 0)
+        self.assertEqual(resultado["actualizados"], 1)
+        self.assertEqual(vehiculo.datos_bancarios.filter(activo=True).count(), 1)
+        dato = vehiculo.datos_bancarios.get(activo=True)
+        self.assertEqual(dato.numero_cuenta, "999")
+        self.assertEqual(dato.cedula_titular, "222")
+
+    def test_placa_inexistente_reporta_causa(self):
+        contenido = "placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\nNOEX99;1;A;B;C;D"
+        resultado = FlotaService.importar_datos_bancarios_csv(self._csv(contenido))
+        self.assertEqual(resultado["insertados"], 0)
+        self.assertEqual(len(resultado["errores"]), 1)
+        self.assertIn("NOEX99", resultado["errores"][0]["causa"])
+        self.assertEqual(resultado["errores"][0]["fila"], 2)
+
+    def test_placa_de_vehiculo_inactivo_rechazada(self):
+        vehiculo = self._vehiculo(placa="INE999")
+        FlotaService.inactivar(vehiculo.pk, actor=None)
+        contenido = "placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\nINE999;1;A;B;C;D"
+        resultado = FlotaService.importar_datos_bancarios_csv(self._csv(contenido))
+        self.assertEqual(resultado["errores"][0]["fila"], 2)
+
+    def test_campos_vacios_reportados(self):
+        self._vehiculo()
+        contenido = "placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\nABC123;;JUAN;AHORRO;LOJA;001"
+        resultado = FlotaService.importar_datos_bancarios_csv(self._csv(contenido))
+        self.assertIn("cedula_titular", resultado["errores"][0]["causa"])
+
+    def test_archivo_vacio_rechazado(self):
+        with self.assertRaisesMessage(ValueError, "vacío"):
+            FlotaService.importar_datos_bancarios_csv(self._csv("cabecera\n"))
+
+    def test_archivo_ausente_rechazado(self):
+        with self.assertRaisesMessage(ValueError, "obligatorio"):
+            FlotaService.importar_datos_bancarios_csv(None)
+
+    def test_varias_filas_mezcladas(self):
+        self._vehiculo("ABC123")
+        self._vehiculo("DEF456")
+        contenido = (
+            "placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\n"
+            "ABC123;1;JUAN;AHORRO;LOJA;001\n"
+            "NOEX99;1;A;B;C;D\n"
+            "DEF456;;MARIA;AHORRO;LOJA;002\n"
+            "DEF456;2;MARIA;AHORRO;PRODUBANCO;777\n"
+        )
+        resultado = FlotaService.importar_datos_bancarios_csv(self._csv(contenido))
+        self.assertEqual(resultado["filas"], 4)
+        self.assertEqual(resultado["insertados"], 2)  # ABC123 y DEF456 (fila 4)
+        self.assertEqual(resultado["actualizados"], 0)
+        self.assertEqual(len(resultado["errores"]), 2)  # NOEX99 y fila 3 de DEF456
