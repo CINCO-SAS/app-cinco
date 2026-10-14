@@ -12,12 +12,37 @@ from unittest import mock
 import qrcode
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
 
-from .models import Conductor, Novedad, Salida, TipoVehiculo, Vehiculo
-from .services import ConductorService, FlotaService
+from apps.empleados.models import Empleado
+
+from .models import (
+    Conductor,
+    FechaLimiteCierre,
+    JefeValidador,
+    Novedad,
+    Salida,
+    TipoVehiculo,
+    Vehiculo,
+)
+from .serializers.jefe_serializer import JefeValidadorSerializer
+from .services import ConductorService, FlotaService, ParametrosService
 from .services.flota_service import COLUMNAS_CSV_BANCARIOS
 from .services.vigencia import estado_vigencia
+
+
+def _asegurar_tabla_empleados():
+    """
+    Empleado es managed=False (cinco_base_de_personal) y en tests el router
+    está desactivado, así que la tabla no existe en la BD por defecto: se crea
+    UNA vez desde este archivo (andamiaje solo de tests de transporte; no se
+    toca el módulo empleados). Se invoca en setUpClass ANTES de
+    super().setUpClass() para quedar fuera de las transacciones de TestCase.
+    """
+    if "cinco_base_de_personal" not in connection.introspection.table_names():
+        with connection.schema_editor() as editor:
+            editor.create_model(Empleado)
 
 
 class EdadDerivadaTests(SimpleTestCase):
@@ -483,3 +508,305 @@ class QrTests(TestCase):
     def test_vehiculo_inexistente(self):
         with self.assertRaisesMessage(ValueError, "No existe un vehículo"):
             FlotaService.generar_qr(999999)
+
+
+class CierreTests(TestCase):
+    """§5.8 / matriz B2-D2: cierres con unicidad natural (mes, anio)."""
+
+    def _datos(self, **extra):
+        datos = {"mes": 9, "anio": 2026, "fecha_limite": date(2026, 10, 5)}
+        datos.update(extra)
+        return datos
+
+    def test_crear_ok(self):
+        cierre = ParametrosService.crear_cierre(self._datos(), actor=None)
+        self.assertEqual((cierre.mes, cierre.anio), (9, 2026))
+
+    def test_crear_duplicado_rechazado(self):
+        ParametrosService.crear_cierre(self._datos(), actor=None)
+        with self.assertRaisesMessage(ValueError, "Ya existe una fecha límite"):
+            ParametrosService.crear_cierre(
+                self._datos(fecha_limite=date(2026, 10, 7)), actor=None
+            )
+
+    def test_mes_fuera_de_rango(self):
+        with self.assertRaisesMessage(ValueError, "mes debe estar entre 1 y 12"):
+            ParametrosService.crear_cierre(self._datos(mes=13), actor=None)
+
+    def test_mes_no_entero(self):
+        with self.assertRaisesMessage(ValueError, "número entero"):
+            ParametrosService.crear_cierre(self._datos(mes="sep"), actor=None)
+
+    def test_anio_fuera_de_rango(self):
+        with self.assertRaisesMessage(ValueError, "año debe estar entre"):
+            ParametrosService.crear_cierre(self._datos(anio=1999), actor=None)
+
+    def test_fecha_limite_obligatoria(self):
+        with self.assertRaisesMessage(ValueError, "obligatoria"):
+            ParametrosService.crear_cierre(
+                self._datos(fecha_limite=None), actor=None
+            )
+
+    def test_listar_ordenado_por_fecha_desc(self):
+        """Réplica de get_all_fecha: ORDER BY fecha_limite DESC."""
+        ParametrosService.crear_cierre(self._datos(), actor=None)
+        ParametrosService.crear_cierre(
+            self._datos(mes=10, fecha_limite=date(2026, 11, 5)), actor=None
+        )
+        cierres = ParametrosService.listar_cierres()
+        self.assertEqual([c.mes for c in cierres], [10, 9])
+
+    def test_filtros_mes_anio(self):
+        ParametrosService.crear_cierre(self._datos(), actor=None)
+        ParametrosService.crear_cierre(
+            self._datos(mes=10, fecha_limite=date(2026, 11, 5)), actor=None
+        )
+        cierres = ParametrosService.listar_cierres({"mes": "9", "anio": "2026"})
+        self.assertEqual(len(cierres), 1)
+        self.assertEqual(cierres[0].mes, 9)
+
+    def test_filtro_mes_invalido(self):
+        with self.assertRaisesMessage(ValueError, "número entero"):
+            ParametrosService.listar_cierres({"mes": "x"})
+
+    def test_obtener_inexistente(self):
+        with self.assertRaisesMessage(ValueError, "No existe una fecha límite"):
+            ParametrosService.obtener_cierre(999999)
+
+    def test_actualizar_parche_conserva_periodo(self):
+        cierre = ParametrosService.crear_cierre(self._datos(), actor=None)
+        actualizado = ParametrosService.actualizar_cierre(
+            cierre.pk, {"fecha_limite": date(2026, 10, 10)}, actor=None
+        )
+        self.assertEqual(actualizado.fecha_limite, date(2026, 10, 10))
+        self.assertEqual(actualizado.mes, 9)  # no tocado por el parche
+
+    def test_actualizar_conflicto_de_periodo(self):
+        a = ParametrosService.crear_cierre(self._datos(), actor=None)
+        b = ParametrosService.crear_cierre(
+            self._datos(mes=10, fecha_limite=date(2026, 11, 5)), actor=None
+        )
+        self.assertNotEqual(a.pk, b.pk)
+        with self.assertRaisesMessage(ValueError, "Ya existe una fecha límite"):
+            ParametrosService.actualizar_cierre(b.pk, {"mes": 9}, actor=None)
+
+    def test_eliminar(self):
+        cierre = ParametrosService.crear_cierre(self._datos(), actor=None)
+        ParametrosService.eliminar_cierre(cierre.pk)
+        self.assertFalse(
+            FechaLimiteCierre.objects.filter(pk=cierre.pk).exists()
+        )
+
+    def test_eliminar_inexistente(self):
+        with self.assertRaisesMessage(ValueError, "No existe una fecha límite"):
+            ParametrosService.eliminar_cierre(999999)
+
+
+class JefeValidadorTests(TestCase):
+    """§5.8 / D1: jefes validadores (mapeo del JSON data_jefes legacy)."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()  # DDL antes de las transacciones
+        super().setUpClass()
+
+    def _empleado(self, cedula="1000756621"):
+        return Empleado.objects.create(
+            cedula=cedula,
+            codigo_sap=f"SAP-{cedula}",
+            nombre="ANA",
+            apellido="PEREZ",
+            password="",
+        )
+
+    def _datos(self, empleado, **extra):
+        datos = {
+            "empleado": empleado,
+            "areas": ["TRANSPORTE"],
+            "carpetas_por_area": {"TRANSPORTE": ["LOGISTICA"]},
+        }
+        datos.update(extra)
+        return datos
+
+    # ------------------------------ alta ------------------------------ #
+    def test_crear_jefe_ok(self):
+        empleado = self._empleado()
+        jefe = ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        self.assertEqual(jefe.empleado_id, empleado.pk)
+        self.assertTrue(jefe.activo)
+
+    def test_crear_acepta_pk_ademas_de_instancia(self):
+        empleado = self._empleado()
+        jefe = ParametrosService.crear_jefe(self._datos(empleado.pk), actor=None)
+        self.assertEqual(jefe.empleado_id, empleado.pk)
+
+    def test_empleado_inexistente(self):
+        with self.assertRaisesMessage(ValueError, "No existe empleado"):
+            ParametrosService.crear_jefe(self._datos(999999), actor=None)
+
+    def test_empleado_ausente(self):
+        with self.assertRaisesMessage(ValueError, "empleado es obligatorio"):
+            ParametrosService.crear_jefe(self._datos(None), actor=None)
+
+    def test_sin_areas_rechazado(self):
+        empleado = self._empleado()
+        with self.assertRaisesMessage(ValueError, "al menos un área"):
+            ParametrosService.crear_jefe(
+                self._datos(empleado, areas=[]), actor=None
+            )
+
+    def test_area_en_blanco(self):
+        empleado = self._empleado()
+        with self.assertRaisesMessage(ValueError, "texto no vacío"):
+            ParametrosService.crear_jefe(
+                self._datos(empleado, areas=["   "]), actor=None
+            )
+
+    def test_carpetas_de_area_no_registrada(self):
+        """La subclava de carpetas debe apuntar a áreas de la lista."""
+        empleado = self._empleado()
+        with self.assertRaisesMessage(ValueError, "no está en areas"):
+            ParametrosService.crear_jefe(
+                self._datos(empleado, carpetas_por_area={"OTRA": ["X"]}),
+                actor=None,
+            )
+
+    def test_carpetas_no_lista(self):
+        empleado = self._empleado()
+        with self.assertRaisesMessage(ValueError, "lista de textos"):
+            ParametrosService.crear_jefe(
+                self._datos(empleado, carpetas_por_area={"TRANSPORTE": "LOG"}),
+                actor=None,
+            )
+
+    def test_jefe_duplicado_activo(self):
+        empleado = self._empleado()
+        ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        with self.assertRaisesMessage(ValueError, "Ya existe un jefe validador"):
+            ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+
+    def test_actualizar_jefe_areas(self):
+        """Snapshot: campos no enviados (empleado, activo) se conservan."""
+        empleado = self._empleado()
+        jefe = ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        actualizado = ParametrosService.actualizar_jefe(
+            jefe.pk,
+            {
+                "areas": ["TRANSPORTE", "ADMINISTRACION"],
+                "carpetas_por_area": {"TRANSPORTE": []},
+            },
+            actor=None,
+        )
+        self.assertEqual(actualizado.areas, ["TRANSPORTE", "ADMINISTRACION"])
+        self.assertEqual(actualizado.empleado_id, empleado.pk)
+        self.assertTrue(actualizado.activo)
+
+    # --------------------------- baja/listado -------------------------- #
+    def test_inactivar_libera_al_empleado(self):
+        empleado = self._empleado()
+        jefe = ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        ParametrosService.inactivar_jefe(jefe.pk, actor=None)
+        self.assertTrue(
+            JefeValidador.objects.filter(pk=jefe.pk, activo=False).exists()
+        )
+        # Con el primero inactivo, el empleado puede tener otro jefe activo.
+        nuevo = ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        self.assertTrue(nuevo.activo)
+
+    def test_listar_filtro_activo(self):
+        empleado = self._empleado()
+        jefe = ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        ParametrosService.inactivar_jefe(jefe.pk, actor=None)
+        self.assertEqual(len(ParametrosService.listar_jefes({"activo": "true"})), 0)
+        self.assertEqual(len(ParametrosService.listar_jefes({"activo": "false"})), 1)
+
+    def test_listar_adjunta_empleados_sin_join(self):
+        """1 query de jefes + 1 in_bulk: cero N+1 y cero JOIN cross-database."""
+        empleado = self._empleado()
+        ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        with self.assertNumQueries(2):
+            jefes = ParametrosService.listar_jefes()
+            self.assertEqual(jefes[0].empleado.cedula, "1000756621")
+
+    def test_serializer_expone_cedula_y_nombre(self):
+        empleado = self._empleado()
+        jefe = ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        datos = JefeValidadorSerializer(ParametrosService.obtener_jefe(jefe.pk)).data
+        self.assertEqual(datos["empleado_cedula"], "1000756621")
+        self.assertEqual(datos["empleado_nombre"], "ANA PEREZ")
+
+    # ------------------- isUserLeaderOfSalida (782) ------------------- #
+    def test_es_jefe_validador_ok(self):
+        self._empleado("1055837370")
+        ParametrosService.crear_jefe(
+            self._datos(Empleado.objects.get(cedula="1055837370")), actor=None
+        )
+        self.assertTrue(
+            ParametrosService.es_jefe_validador(
+                "1055837370", "TRANSPORTE", "LOGISTICA"
+            )
+        )
+
+    def test_es_jefe_validador_carpeta_fuera_de_lista(self):
+        empleado = self._empleado("1055837370")
+        ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        self.assertFalse(
+            ParametrosService.es_jefe_validador(
+                "1055837370", "TRANSPORTE", "ADMINISTRACION"
+            )
+        )
+
+    def test_es_jefe_validador_carpetas_vacias_cubre_todas(self):
+        empleado = self._empleado("1055837370")
+        ParametrosService.crear_jefe(
+            self._datos(empleado, carpetas_por_area={}), actor=None
+        )
+        self.assertTrue(
+            ParametrosService.es_jefe_validador(
+                "1055837370", "TRANSPORTE", "CUALQUIERA"
+            )
+        )
+
+    def test_es_jefe_validador_area_fuera(self):
+        empleado = self._empleado("1055837370")
+        ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        self.assertFalse(
+            ParametrosService.es_jefe_validador(
+                "1055837370", "CONTABILIDAD", "LOGISTICA"
+            )
+        )
+
+    def test_es_jefe_validador_inactivo(self):
+        empleado = self._empleado("1055837370")
+        jefe = ParametrosService.crear_jefe(self._datos(empleado), actor=None)
+        ParametrosService.inactivar_jefe(jefe.pk, actor=None)
+        self.assertFalse(
+            ParametrosService.es_jefe_validador(
+                "1055837370", "TRANSPORTE", "LOGISTICA"
+            )
+        )
+
+    def test_es_jefe_validador_cedula_sin_jefatura(self):
+        self._empleado("800999888")  # existe en personal pero no es jefe
+        self.assertFalse(
+            ParametrosService.es_jefe_validador("800999888", "TRANSPORTE", "X")
+        )
+
+    def test_es_jefe_validador_cedula_desconocida(self):
+        self.assertFalse(
+            ParametrosService.es_jefe_validador("111222333", "TRANSPORTE", "X")
+        )
+
+    def test_es_jefe_validador_acepta_cedula_numerica(self):
+        """La sesión legacy envía cédula; se normaliza a str para el lookup."""
+        empleado = self._empleado("1000756621")
+        ParametrosService.crear_jefe(
+            self._datos(empleado, carpetas_por_area={}), actor=None
+        )
+        self.assertTrue(
+            ParametrosService.es_jefe_validador(1000756621, "TRANSPORTE", "X")
+        )
+
+    def test_es_jefe_validador_sin_cedula_o_area(self):
+        self.assertFalse(ParametrosService.es_jefe_validador("", "TRANSPORTE"))
+        self.assertFalse(ParametrosService.es_jefe_validador("1000756621", ""))
