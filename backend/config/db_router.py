@@ -6,6 +6,7 @@ class MultiDBRouter:
         "common": "azul",
         "operaciones": "default",
         "empleados": "azul",
+        "transporte": "default",
         # "reports": "reporting",
         # "audit": "audit",
     }

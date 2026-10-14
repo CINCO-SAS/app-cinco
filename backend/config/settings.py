@@ -114,6 +114,7 @@ INSTALLED_APPS = [
     'apps.operaciones',
     'apps.empleados',
     'apps.ia_dev',
+    'apps.transporte',
 ]
 
 MIDDLEWARE = [
