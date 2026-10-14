@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1,
+    "cedula": "1032456789",
+    "nombre_conductor": "MARIA ELENA RESTREPO",
+    "celular_conductor": "3001234567",
+    "direccion": "CALLE 10 # 45-67",
+    "barrio": "LA AMERICA",
+    "licencia": "C2",
+    "fecha_vencimiento_licencia": "2027-08-15",
+    "fecha_ingreso": "2021-03-01",
+    "fecha_nacimiento": "1985-11-20",
+    "fecha_egreso": "0000-00-00",
+    "estado": "ACTIVO"
+  },
+  {
+    "id": 2,
+    "cedula": "80123456",
+    "nombre_conductor": "CARLOS ANDRES MEJIA",
+    "celular_conductor": "3119876543",
+    "direccion": "CARRERA 45 # 12-34",
+    "barrio": "BELEN",
+    "licencia": "C1",
+    "fecha_vencimiento_licencia": "2026-01-30",
+    "fecha_ingreso": "2019-07-15",
+    "fecha_nacimiento": "1990-02-10",
+    "fecha_egreso": "2024-11-30",
+    "estado": "INACTIVO"
+  },
+  {
+    "id": 3,
+    "cedula": "43567890",
+    "nombre_conductor": "JULIO CESAR OSPINA",
+    "celular_conductor": "3155554444",
+    "direccion": "CALLE 50 # 30-15",
+    "barrio": "PRADO CENTRO",
+    "licencia": "D3",
+    "fecha_vencimiento_licencia": "2027-05-20",
+    "fecha_ingreso": "2020-09-10",
+    "fecha_nacimiento": "1978-06-05",
+    "fecha_egreso": "",
+    "estado": "activo"
+  }
+]

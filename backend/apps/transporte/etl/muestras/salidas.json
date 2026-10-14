@@ -1,0 +1,38 @@
+[
+  {
+    "id": 1,
+    "id_vehiculo": 1,
+    "movil_sale": "1032456789",
+    "fecha_salida": "2026-09-10 08:30:00",
+    "fecha_retorno": "2026-09-10 17:45:00",
+    "estado": "aprobado",
+    "observacion": "Ruta Medellín - Cartagena",
+    "cedula_tecnico": "1050987654",
+    "historial": "[{\"estado\":\"REPORTADO\",\"fecha_edit\":\"2026-09-10 08:30:00\",\"edit\":\"1050987654\",\"fecha_salida\":\"2026-09-10\"},{\"estado\":\"aprobado\",\"fecha_edit\":\"2026-09-10 09:15:00\",\"edit\":\"1098765432\",\"fecha_salida\":\"2026-09-10\"}]",
+    "datos": "{\"placa\":\"ABC123\",\"valor_dia\":\"450000\",\"area_sale\":\"OPERACIONES\",\"carpeta_sale\":\"TRANSPORTE\",\"sede_sale\":\"MEDELLIN\",\"novedad\":{\"existe\":\"SI\",\"tipo\":\"adicional\",\"valor\":\"50000\",\"descripcion\":\"Sobrecosto por espera en terminal\"}}"
+  },
+  {
+    "id": 2,
+    "id_vehiculo": 2,
+    "movil_sale": "disponible",
+    "fecha_salida": "2026-09-11 06:00:00",
+    "fecha_retorno": "2026-09-11 15:30:00",
+    "estado": "VALIDADO",
+    "observacion": "Sin novedad",
+    "cedula_tecnico": "808765432",
+    "historial": "[]",
+    "datos": "{\"placa\":\"XYZ789\",\"valor_dia\":\"320000\",\"area_sale\":\"LOGISTICA\",\"carpeta_sale\":\"TRANSPORTE\",\"sede_sale\":\"MONTERIA\",\"novedad\":{\"existe\":\"NO\",\"tipo\":\"\",\"valor\":\"\",\"descripcion\":\"\"}}"
+  },
+  {
+    "id": 3,
+    "id_vehiculo": 3,
+    "movil_sale": "80123456",
+    "fecha_salida": "2026-09-12 07:15:00",
+    "fecha_retorno": "0000-00-00 00:00:00",
+    "estado": "RECHAZADO",
+    "observacion": "Retorno sin novedad",
+    "cedula_tecnico": "1050987654",
+    "historial": "[{\"estado\":\"RECHAZADO\",\"fecha_edit\":\"2026-09-12 18:00:00\",\"edit\":\"1098765432\",\"fecha_salida\":\"2026-09-12\"}]",
+    "datos": "{\"placa\":\"DEF456\",\"valor_dia\":\"550000\",\"area_sale\":\"OPERACIONES\",\"carpeta_sale\":\"TRANSPORTE\",\"sede_sale\":\"SINCELEJO\",\"novedad\":{\"existe\":\"SI\",\"tipo\":\"DESCUENTO\",\"valor\":\"25000\",\"descripcion\":\"No presentó novedad de retorno\"}}"
+  }
+]

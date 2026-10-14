@@ -4,20 +4,27 @@ Tests del módulo Transporte.
 Ejecución (aislada de otros módulos; SQLite en memoria, sin MySQL):
     python backend/manage.py test apps.transporte --settings=config.settings_test_transporte
 """
+import io
+import json
 import os
 import tempfile
-from datetime import date
+from datetime import date, timezone as dt_timezone
 from decimal import Decimal
+from pathlib import Path
 from unittest import mock
 
 import qrcode
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.empleados.models import Empleado
 
+from .etl import convertidores as cv
+from .etl import normalizadores as nz
 from .models import (
     Conductor,
     ConsecutivoMensual,
@@ -184,6 +191,213 @@ class ConductorCRUDTests(TestCase):
     def test_listar_filtro_activo_false(self):
         ConductorService.crear(self._datos(), actor=None)
         self.assertEqual(ConductorService.listar({"activo": "false"}).count(), 0)
+
+
+class EtlNormalizadoresTests(SimpleTestCase):
+    """Normalizadores: catálogo D-A6, booleanos SI/NO, fechas cero y
+    zona horaria America/Bogota (D-A4). Puros, sin BD."""
+
+    def test_normalizar_estado_minusculas_a_mayusculas(self):
+        self.assertEqual(nz.normalizar_estado("reportado"), "REPORTADO")
+
+    def test_normalizar_estado_fuera_de_catalogo_rechaza(self):
+        with self.assertRaisesMessage(ValueError, "fuera de catálogo"):
+            nz.normalizar_estado("FINALIZADO")
+
+    def test_booleano_si_no(self):
+        self.assertTrue(nz.booleano_si_no("SI"))
+        self.assertFalse(nz.booleano_si_no("NO"))
+        self.assertFalse(nz.booleano_si_no(""))
+
+    def test_fecha_cero_devuelve_none(self):
+        self.assertIsNone(nz.fecha_legacy("0000-00-00"))
+
+    def test_datetime_legacy_aware_en_bogota(self):
+        resultado = nz.datetime_legacy("2026-09-10 08:30:00")
+        self.assertIsNotNone(resultado.tzinfo)
+        self.assertEqual(str(resultado.tzinfo), "America/Bogota")
+        # 08:30 en Bogotá (UTC-5) es 13:30 UTC.
+        self.assertEqual(
+            resultado.astimezone(dt_timezone.utc).hour, 13
+        )
+
+
+class EtlConvertidoresTests(SimpleTestCase):
+    """Convertidores: desempaquetado del JSON `datos` (§7.2) sin BD."""
+
+    def test_convertir_vehiculo_desempaqueta_bancarios_y_pagos(self):
+        fila = {
+            "placa": "abc123",
+            "tipo": "camioneta",
+            "tipo_contrato": "externo",
+            "tipo_vinculacion": "externo",
+            "marca": "CHEVROLET",
+            "modelo": "2021",
+            "valor_dia": "450000",
+            "propietario": "TRANSPORTE NORTE SAS",
+            "cedula": "900123456",
+            "cedual_conductor": "1032456789",
+            "estado": "ACTIVO",
+            "datos": json.dumps({
+                "bancarios": [{"cedula": "900123456", "nombre": "NORTE",
+                               "banco": "DAVIVIENDA", "tipo_cuenta": "AHORROS",
+                               "numero_cuenta": "123"}],
+                "pago_mensual": [{"mes": 9, "yyyy": 2026}],
+                "pronto_pago": [{"mes": 8, "yyyy": 2026}],
+            }),
+        }
+        datos = cv.convertir_vehiculo(fila)
+        self.assertEqual(datos["placa"], "ABC123")  # mayúsculas D-A6
+        self.assertEqual(datos["tipo_vehiculo"], "CAMIONETA")
+        self.assertEqual(len(datos["_bancarios"]), 1)
+        self.assertEqual(len(datos["_pagos"]), 2)
+        tipos = {p["tipo"] for p in datos["_pagos"]}
+        self.assertEqual(tipos, {TipoPago.MENSUAL, TipoPago.PRONTO_PAGO})
+
+    def test_convertir_conductor_fecha_cero_devuelve_none(self):
+        fila = {
+            "cedula": "123", "nombre_conductor": "X", "celular_conductor": "1",
+            "licencia": "C1", "fecha_ingreso": "2021-01-01",
+            "fecha_egreso": "0000-00-00", "estado": "ACTIVO",
+        }
+        datos = cv.convertir_conductor(fila)
+        self.assertIsNone(datos["fecha_egreso"])
+
+    def test_convertir_jefe_anida_carpetas(self):
+        fila = {"datos": json.dumps([{
+            "cedula_jefe": "1050987654", "estado": "ACTIVO",
+            "areas": ["OPERACIONES"],
+            "carpetas": {"OPERACIONES": ["TRANSPORTE"]},
+        }])}
+        jefes = cv.convertir_jefes_fila(fila)
+        self.assertEqual(len(jefes), 1)
+        self.assertEqual(
+            jefes[0]["carpetas_por_area"], {"OPERACIONES": ["TRANSPORTE"]}
+        )
+
+    def test_convertir_fecha_limite_cero_rechaza(self):
+        # La fila queda como "no convertible" (reporte) y NO descuadra la
+        # conciliación: la rechaza el convertidor, no el service.
+        with self.assertRaisesMessage(ValueError, "fecha cero"):
+            cv.convertir_fecha_limite(
+                {"mes": "8", "anio": "2026", "fecha_limite": "0000-00-00"}
+            )
+
+    def test_convertir_fecha_limite_ok(self):
+        datos = cv.convertir_fecha_limite(
+            {"mes": "9", "anio": "2026", "fecha_limite": "2026-10-05"}
+        )
+        self.assertEqual(datos["mes"], 9)
+        self.assertEqual(datos["fecha_limite"], date(2026, 10, 5))
+
+
+class EtlComandoTests(TestCase):
+    """`manage.py migrate_transporte_legacy` contra fixtures locales."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        # Los jefes validadores y los técnicos de salidas referencian
+        # empleados por cédula (resolución en dos pasos, D-A10): se crean
+        # los que la muestra usa para que la corrida no pierda filas.
+        for cedula in (
+            "1050987654", "1098765432", "1011223344", "1099887766",
+            "808765432",
+        ):
+            Empleado.objects.create(
+                cedula=cedula,
+                codigo_sap=f"SAP-{cedula}",
+                nombre="EMPLEADO",
+                apellido=f"ETL {cedula[-4:]}",
+                password="",
+            )
+
+    def _ruta_muestra(self):
+        return Path(__file__).resolve().parent / "etl" / "muestras"
+
+    def _ejecutar(self, *args):
+        salida = io.StringIO()
+        call_command(
+            "migrate_transporte_legacy",
+            "--fuente", str(self._ruta_muestra()), *args,
+            stdout=salida,
+        )
+        return salida.getvalue()
+
+    def test_dry_run_no_escribe(self):
+        salida = self._ejecutar("--dry-run")
+        self.assertIn("DRY-RUN", salida)
+        self.assertEqual(Conductor.objects.count(), 0)
+        self.assertEqual(Vehiculo.objects.count(), 0)
+        self.assertEqual(Salida.objects.count(), 0)
+
+    def test_carga_completa(self):
+        self._ejecutar()
+        self.assertEqual(Conductor.objects.count(), 3)
+        self.assertEqual(Vehiculo.objects.count(), 3)
+        self.assertEqual(Salida.objects.count(), 3)
+        self.assertEqual(JefeValidador.objects.count(), 4)
+        # 3 leídas − 1 con fecha cero (fila no convertible) = 2.
+        self.assertEqual(FechaLimiteCierre.objects.count(), 2)
+
+    def test_carga_resuelve_fk_por_cedula_y_placa(self):
+        self._ejecutar()
+        vehiculo = Vehiculo.objects.get(placa="ABC123")
+        # conductor_habitual resuelto por cédula (cédual_conductor).
+        self.assertEqual(vehiculo.conductor_habitual.cedula, "1032456789")
+        salida = Salida.objects.get(vehiculo__placa="ABC123")
+        self.assertEqual(salida.conductor.cedula, "1032456789")
+
+    def test_carga_normaliza_estado_minuscula(self):
+        self._ejecutar()
+        salida = Salida.objects.get(vehiculo__placa="ABC123")
+        self.assertEqual(salida.estado, "APROBADO")
+
+    def test_carga_convierte_booleanos_si_no(self):
+        self._ejecutar()
+        vehiculo = Vehiculo.objects.get(placa="ABC123")
+        self.assertTrue(vehiculo.cajon)
+        self.assertFalse(vehiculo.logos)
+
+    def test_carga_fecha_cero_a_none(self):
+        self._ejecutar()
+        vehiculo = Vehiculo.objects.get(placa="DEF456")
+        self.assertIsNone(vehiculo.fecha_egreso)
+
+    def test_carga_persiste_pagos_y_bancarios(self):
+        self._ejecutar()
+        vehiculo = Vehiculo.objects.get(placa="ABC123")
+        self.assertEqual(vehiculo.datos_bancarios.count(), 2)
+        self.assertEqual(vehiculo.pagos.count(), 3)
+
+    def test_carga_novedad_y_historial(self):
+        self._ejecutar()
+        salida = Salida.objects.get(vehiculo__placa="ABC123")
+        self.assertEqual(salida.novedad.tipo, TipoNovedad.ADICIONAL)
+        self.assertEqual(salida.historial.count(), 2)
+
+    def test_carga_datetime_a_utc(self):
+        self._ejecutar()
+        historial = Salida.objects.get(
+            vehiculo__placa="ABC123"
+        ).historial.order_by("fecha_cambio").first()
+        # 08:30 Bogotá → 13:30 UTC (D-A4).
+        self.assertEqual(historial.fecha_cambio.hour, 13)
+
+    def test_conciliacion_cero(self):
+        salida = self._ejecutar()
+        # El DoD de C3: conteo origen = destino en TODAS las entidades.
+        self.assertEqual(salida.count("conciliación OK"), 5)
+        self.assertNotIn("DISCREPANCIA", salida)
+
+    def test_reporte_filas_no_convertibles(self):
+        salida = self._ejecutar()
+        # La fila 3 de cierres (fecha 0000-00-00) se reporta, no aborta.
+        self.assertIn("errores=1", salida)
+        self.assertIn("fecha cero", salida)
 
 
 class SemaforoCompartidoTests(SimpleTestCase):

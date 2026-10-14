@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "datos": "[{\"cedula_jefe\":\"1050987654\",\"estado\":\"ACTIVO\",\"areas\":[\"OPERACIONES\",\"LOGISTICA\"],\"carpetas\":{\"OPERACIONES\":[\"TRANSPORTE\"],\"LOGISTICA\":[\"TRANSPORTE\"]}}]"
+  },
+  {
+    "id": 2,
+    "datos": "[{\"cedula_jefe\":\"1098765432\",\"estado\":\"inactivo\",\"areas\":[\"ADMINISTRACION\"],\"carpetas\":{\"ADMINISTRACION\":[\"TRANSPORTE\"]}}]"
+  },
+  {
+    "id": 3,
+    "datos": "[{\"cedula_jefe\":\"1011223344\",\"estado\":\"ACTIVO\",\"areas\":[\"TESORERIA\"],\"carpetas\":{\"TESORERIA\":[\"TRANSPORTE\",\"CONCILIACION\"]}},{\"cedula_jefe\":\"1099887766\",\"estado\":\"ACTIVO\",\"areas\":[\"CONTABILIDAD\"],\"carpetas\":{\"CONTABILIDAD\":[\"TRANSPORTE\"]}}]"
+  }
+]
