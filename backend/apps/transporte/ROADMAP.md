@@ -41,9 +41,16 @@
 
 ### Tramo A — sin bloqueos (ejecutable hoy)
 
-- [ ] **A1 · Parámetros (§5.8)** — CRUD `FechaLimiteCierre` (cierres) y `JefeValidador`
-      (áreas/carpetas como JSON → **no exige G3**). Endpoints `/cierres/`, `/jefes/`.
-      *Tamaño S · DoD: tests + check + commit.*
+- [x] **A1 · Parámetros (§5.8)** — ✅ **CERRADO** (`58889b8`, 87 tests).
+      CRUD `FechaLimiteCierre` (cierres, unicidad (mes, anio)) y
+      `JefeValidador` (áreas/carpetas como JSON → **no exige G3**).
+      Endpoints canónicos `/parametros/cierres/` (absorbe B2) y
+      `/parametros/jefes/` (D1) + `POST {id}/inactivar/`.
+      > **Empleado (managed=False, cross-DB) resuelto:** resolución en dos
+      > pasos (cédula→id, luego filtro local `empleado_id`; **cero JOINs**,
+      > D-A10) + tabla de prueba creada con `schema_editor` únicamente en
+      > tests de transporte. Escrituras con `DjangoModelPermissions`
+      > (gate `$permi_editar`; permiso granular `editar_tras_cierre` → E3).
 - [ ] **A2 · Núcleo de liquidaciones F5 con fixtures** — `PagoVehiculoMensual`
       (CR-10: suma APROBADO+REPORTADO+VALIDADO; ProntoPago **solo APROBADO**),
       `ConsecutivoMensual` atómico, edición gateada por fecha límite.
@@ -141,3 +148,5 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-14 | Fix tests MEDIA_ROOT temporal | `f88221c` |
 | 2026-10-14 | Import CSV bancarios (CR-13) | `5fd3583` |
 | 2026-10-14 | QR bajo demanda (D-A8) + dependencias | `c97b9bb` |
+| 2026-10-14 | ROADMAP: tramos, gates y orden pendiente | `35f2186` |
+| 2026-10-14 | A1 parámetros completo: cierres + jefes (87 tests) | `58889b8` |
