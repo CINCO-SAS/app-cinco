@@ -66,9 +66,14 @@
       `services/periodos.py` (fuente única con cierres). *Pendiente de A2:
       ruta compuesta B3 `/cierres/{mes}/{anio}/`; planilla/informes van
       tras B2.*
-- [ ] **A3 (opcional) · Esqueleto del comando ETL con fixtures locales** —
-      estructura de `migrate_transporte_legacy` + muestra de JSONs; se valida de
-      verdad recién en C3. *Tamaño S.*
+- [x] **A3 · Esqueleto del comando ETL con fixtures locales** — CERRADO.
+      `apps/transporte/etl/` (normalizadores D-A4/D-A6, convertidores puros
+      §7.2, carga con FKs por cédula/placa + lotes + conciliación) y
+      `manage.py migrate_transporte_legacy` (`--fuente/--lote/--dry-run`);
+      muestras en `etl/muestras/`. La validación real recién en C3 (G2).
+      *Hallazgo: la conciliación usa `convertidas` (no creadas): una fila
+      que convierte pero falla al cargar descuadra y el comando sale con
+      estado 1 — intencional, el cutover no avanza con datos perdidos.*
 
 > T6 (teléfonos/`buscar_movil`) **no** es Tramo A: encadena tres BD (G2) y arrastra D-A9/D-A10 (G4).
 
@@ -162,3 +167,4 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-14 | ROADMAP: tramos, gates y orden pendiente | `35f2186` |
 | 2026-10-14 | A1 parámetros completo: cierres + jefes (87 tests) | `58889b8` |
 | 2026-10-14 | A2 núcleo liquidaciones: CR-10, consecutivos, gate (105 tests) | `7a4d89c` |
+| 2026-10-14 | A3 esqueleto ETL: comando + muestras + conciliación (126 tests) — **Tramo A completo** | `3c8a457` |
