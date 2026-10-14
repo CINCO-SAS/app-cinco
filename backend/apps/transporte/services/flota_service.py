@@ -15,6 +15,7 @@ import io
 import re
 from datetime import date
 
+import qrcode
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 
@@ -316,6 +317,33 @@ class FlotaService:
             "filas": filas_procesadas,
             "errores": errores,
         }
+
+    # ------------------------------------------------------------------ #
+    # QR de verificación (D-A8)
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def generar_qr(vehiculo_id):
+        """
+        PNG del QR de la placa, regenerado EN MEMORIA bajo demanda: nunca
+        se persiste en BD ni en disco (D-A8 elimina codigo_qr/codigo_barras).
+
+        Payload = placa, verificado en el legacy: el kiosco recibe lo
+        escaneado como texto de placa (transporte_salida.php → POST val_placa)
+        y el PNG legacy se nombraba qr_{placa}.png (base_transportadores.php).
+        """
+        vehiculo = FlotaService.obtener(vehiculo_id)
+        qr = qrcode.QRCode(
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(vehiculo.placa)
+        qr.make(fit=True)
+        buffer = io.BytesIO()
+        qr.make_image(fill_color="black", back_color="white").save(
+            buffer, format="PNG"
+        )
+        return buffer.getvalue()
 
     # ------------------------------------------------------------------ #
     # Validaciones internas

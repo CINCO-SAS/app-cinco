@@ -4,7 +4,8 @@ VehiculoViewSet — ABM de la flota vehicular (Tab Base Transportadores).
 Contrato ADMCINCO (D-A3): delega en FlotaService; traduce sus ValueError
 a HTTP 400/404, igual que el resto del módulo.
 """
-from drf_spectacular.utils import extend_schema
+from django.http import HttpResponse
+from drf_spectacular.utils import OpenApiTypes, extend_schema
 from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
@@ -179,6 +180,23 @@ class VehiculoViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
             else status.HTTP_400_BAD_REQUEST
         )
         return Response(resultado, status=http)
+
+    @extend_schema(
+        responses={(200, "image/png"): OpenApiTypes.BYTE},
+        description=(
+            "QR de verificación de la placa, regenerado bajo demanda "
+            "(D-A8: no se persiste en BD ni en disco)."
+        ),
+    )
+    @action(detail=True, methods=["get"], url_path="qr.png")
+    def qr(self, request, pk=None):
+        try:
+            png = FlotaService.generar_qr(pk)
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND
+            )
+        return HttpResponse(png, content_type="image/png")
 
     # ------------------------------------------------------------------ #
     @staticmethod

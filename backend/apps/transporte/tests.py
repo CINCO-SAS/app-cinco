@@ -4,9 +4,13 @@ Tests del módulo Transporte.
 Ejecución (aislada de otros módulos; SQLite en memoria, sin MySQL):
     python backend/manage.py test apps.transporte --settings=config.settings_test_transporte
 """
-from datetime import date
+import os
 import tempfile
+from datetime import date
+from unittest import mock
 
+import qrcode
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase, override_settings
 
@@ -416,3 +420,66 @@ class ImportBancariosCsvTests(TestCase):
         self.assertEqual(resultado["insertados"], 2)  # ABC123 y DEF456 (fila 4)
         self.assertEqual(resultado["actualizados"], 0)
         self.assertEqual(len(resultado["errores"]), 2)  # NOEX99 y fila 3 de DEF456
+
+
+class QrTests(TestCase):
+    """D-A8: el QR se regenera bajo demanda y jamás se persiste."""
+
+    MEDIA_ROOT_OVERRIDE = override_settings(
+        MEDIA_ROOT=tempfile.mkdtemp(prefix="transporte_test_qr_")
+    )
+
+    def setUp(self):
+        self.MEDIA_ROOT_OVERRIDE.enable()
+        self.addCleanup(self.MEDIA_ROOT_OVERRIDE.disable)
+
+    def _vehiculo(self, placa="QRS123"):
+        return FlotaService.crear(
+            {
+                "placa": placa,
+                "tipo_vehiculo": "CAMIONETA",
+                "marca": "MAZDA",
+                "modelo_anio": 2022,
+                "tipo_contrato": "PROPIO",
+                "nombre_propietario": "CINCO SAS",
+                "cedula_propietario": "900111222",
+                "fecha_ingreso": date(2026, 1, 1),
+            },
+            actor=None,
+        )
+
+    def test_genera_png_valido(self):
+        vehiculo = self._vehiculo()
+        png = FlotaService.generar_qr(vehiculo.pk)
+        self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_es_determinista(self):
+        """Regenerable: mismo vehículo → mismos bytes en cada petición."""
+        vehiculo = self._vehiculo()
+        self.assertEqual(
+            FlotaService.generar_qr(vehiculo.pk),
+            FlotaService.generar_qr(vehiculo.pk),
+        )
+
+    def test_payload_es_la_placa(self):
+        vehiculo = self._vehiculo()
+        capturados = []
+        original = qrcode.QRCode.add_data
+
+        def espia(self, data):
+            capturados.append(data)
+            return original(self, data)
+
+        with mock.patch.object(qrcode.QRCode, "add_data", espia):
+            FlotaService.generar_qr(vehiculo.pk)
+
+        self.assertEqual(capturados, [vehiculo.placa])
+
+    def test_no_persiste_archivos(self):
+        vehiculo = self._vehiculo()
+        FlotaService.generar_qr(vehiculo.pk)
+        self.assertEqual(os.listdir(settings.MEDIA_ROOT), [])
+
+    def test_vehiculo_inexistente(self):
+        with self.assertRaisesMessage(ValueError, "No existe un vehículo"):
+            FlotaService.generar_qr(999999)
