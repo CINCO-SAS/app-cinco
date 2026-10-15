@@ -41,6 +41,7 @@ from .models import (
     TipoNovedad,
     TipoPago,
     TipoVehiculo,
+    ValidacionSalida,
     Vehiculo,
 )
 from .serializers.jefe_serializer import JefeValidadorSerializer
@@ -51,6 +52,7 @@ from .services import (
     LiquidacionService,
     ParametrosService,
     SalidaService,
+    ValidacionService,
 )
 from .services.flota_service import COLUMNAS_CSV_BANCARIOS
 from .services.periodos import restar_meses
@@ -1864,3 +1866,351 @@ class SalidaServiceTests(TestCase):
             FlotaService.escanear("   ")
         with self.assertRaisesMessage(ValueError, "no encontrado"):
             FlotaService.escanear("ZZZ999")
+class NovedadSalidaTests(TestCase):
+    """B6/B7 · §5.1: novedades con UNA por salida, ventana CR-9 y
+    máquina de estados (solo REPORTADO/APROBADO es gestionable)."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        self.hoy = timezone.localdate()
+        self.personal = Empleado.objects.create(
+            cedula="111222333", codigo_sap="SAP-111222333",
+            nombre="MARIA", apellido="GOMEZ",
+            area="OPERACIONES", carpeta="LOGISTICA", sede="MEDELLIN",
+            password="",
+        )
+        self.operador = User.objects.create_user(
+            username="111222333", password="x"
+        )
+        self.jefe_empleado = Empleado.objects.create(
+            cedula="555666001", codigo_sap="SAP-555666001",
+            nombre="ANA", apellido="JEFE", password="",
+        )
+        ParametrosService.crear_jefe(
+            {
+                "empleado": self.jefe_empleado,
+                "areas": ["OPERACIONES"],
+                "carpetas_por_area": {"OPERACIONES": []},
+            },
+            actor=None,
+        )
+        self.jefe = User.objects.create_user(
+            username="555666001", password="x"
+        )
+        self.vehiculo = FlotaService.crear(
+            SalidaServiceTests._vehiculo_datos("NOV001"), actor=None
+        )
+
+    def _salida(self, estado=EstadoSalida.REPORTADO, fecha=None,
+                vehiculo=None):
+        salida = Salida.objects.create(
+            vehiculo=vehiculo or self.vehiculo,
+            fecha_salida=fecha or self.hoy,
+            area="OPERACIONES", carpeta="LOGISTICA", sede="MEDELLIN",
+            valor_dia=Decimal("85000"), estado=estado,
+        )
+        SalidaHistorial.objects.create(
+            salida=salida, estado=estado, motivo="",
+            fecha_cambio=timezone.now(),
+        )
+        return salida
+
+    def test_adicional_suma_al_total(self):
+        salida = self._salida()
+        SalidaService.registrar_novedad(
+            salida.pk, TipoNovedad.ADICIONAL, Decimal("15000"),
+            "Recargo nocturno", usuario=self.operador,
+        )
+        salida.refresh_from_db()
+        self.assertEqual(
+            SalidaService.calcular_pago(salida), Decimal("100000")
+        )
+
+    def test_descuento_rest_al_total(self):
+        salida = self._salida()
+        SalidaService.registrar_novedad(
+            salida.pk, TipoNovedad.DESCUENTO, Decimal("5000"),
+            "Retardo", usuario=self.operador,
+        )
+        salida.refresh_from_db()
+        self.assertEqual(
+            SalidaService.calcular_pago(salida), Decimal("80000")
+        )
+
+    def test_una_por_salida_sobrescribe(self):
+        salida = self._salida()
+        primera = SalidaService.registrar_novedad(
+            salida.pk, TipoNovedad.ADICIONAL, Decimal("10000"),
+            "Primera", usuario=self.operador,
+        )
+        segunda = SalidaService.registrar_novedad(
+            salida.pk, TipoNovedad.DESCUENTO, Decimal("20000"),
+            "Segunda", usuario=self.operador,
+        )
+        self.assertEqual(primera.pk, segunda.pk)
+        self.assertEqual(Novedad.objects.filter(salida=salida).count(), 1)
+        salida.refresh_from_db()
+        self.assertEqual(
+            SalidaService.calcular_pago(salida), Decimal("65000")
+        )
+
+    def test_novedad_dentro_de_ventana_la_puede_cualquiera(self):
+        # CR-9: dentro de [hoy−2, hoy] la ventana estricta deja pasar a
+        # cualquier usuario sin necesidad de bypass.
+        salida = self._salida()
+        ajeno = User.objects.create_user(
+            username="999888777", password="x"
+        )
+        novedad = SalidaService.registrar_novedad(
+            salida.pk, TipoNovedad.ADICIONAL, Decimal("1000"),
+            "Dentro de ventana", usuario=ajeno,
+        )
+        self.assertIsNotNone(novedad.pk)
+
+    def test_novedad_fuera_de_ventana_exige_bypass(self):
+        # Fuera de ventana un ajeno NUNCA pasa; el jefe del área sí.
+        vieja = self.hoy - timedelta(days=15)
+        salida = self._salida(fecha=vieja)
+        ajeno = User.objects.create_user(
+            username="999888777", password="x"
+        )
+        with self.assertRaisesMessage(ValueError, "2 días atrás"):
+            SalidaService.registrar_novedad(
+                salida.pk, TipoNovedad.ADICIONAL, Decimal("1000"),
+                "Intento fuera de ventana", usuario=ajeno,
+            )
+        # El jefe del área sí tiene bypass de ventana y puede gestionar.
+        novedad = SalidaService.registrar_novedad(
+            salida.pk, TipoNovedad.ADICIONAL, Decimal("1000"),
+            "Bypass del jefe", usuario=self.jefe,
+        )
+        self.assertIsNotNone(novedad.pk)
+
+    def test_eliminar_novedad_borra_y_audita(self):
+        salida = self._salida()
+        SalidaService.registrar_novedad(
+            salida.pk, TipoNovedad.ADICIONAL, Decimal("10000"),
+            "Borrar", usuario=self.operador,
+        )
+        SalidaService.eliminar_novedad(salida.pk, usuario=self.operador)
+        self.assertEqual(Novedad.objects.filter(salida=salida).count(), 0)
+        salida.refresh_from_db()
+        self.assertEqual(
+            SalidaService.calcular_pago(salida), Decimal("85000")
+        )
+
+    def test_eliminar_novedad_sin_novedad_da_error(self):
+        salida = self._salida()
+        with self.assertRaisesMessage(ValueError, "no tiene novedades"):
+            SalidaService.eliminar_novedad(salida.pk, usuario=self.operador)
+
+    def test_serializer_B10_mixto_con_y_sin_novedad(self):
+        # B10/B15 en el camino crítico del listado: una salida SIN
+        # novedad (RelatedObjectDoesNotExist capturado) y otra CON
+        # novedad, serializadas juntas sin romper.
+        from .serializers.salida_serializer import SalidaSerializer
+        con = self._salida()
+        SalidaService.registrar_novedad(
+            con.pk, TipoNovedad.ADICIONAL, Decimal("15000"),
+            "Recargo", usuario=self.operador,
+        )
+        sin = self._salida(vehiculo=FlotaService.crear(
+            SalidaServiceTests._vehiculo_datos("NOV002"), actor=None
+        ))
+        qs = Salida.objects.select_related(
+            "vehiculo", "novedad"
+        ).filter(pk__in=[con.pk, sin.pk])
+        ctx = {"request": type("R", (), {"user": None})()}
+        datos = {d["id"]: d for d in SalidaSerializer(
+            qs, many=True, context=ctx
+        ).data}
+        self.assertEqual(str(datos[con.pk]["valor_novedad"]), "15000.00")
+        self.assertEqual(str(datos[con.pk]["total_a_pagar"]), "100000.00")
+        # Decimal(0) sin contexto serializa como "0"; el decimal del
+        # modelo (0.00) como "0.00". Aceptamos ambos, es cosmético.
+        self.assertIn(str(datos[sin.pk]["valor_novedad"]), ("0", "0.00"))
+        self.assertEqual(str(datos[sin.pk]["total_a_pagar"]), "85000.00")
+
+
+class ValidacionServiceTests(TestCase):
+    """B4/F4 · cierre mensual por área: UNA fila por (área, mes, año) y
+    autorización jefe-del-área (A1) o programación (§5.9)."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        self.jefe_empleado = Empleado.objects.create(
+            cedula="555000111", codigo_sap="SAP-555000111",
+            nombre="ANA", apellido="JEFE", password="",
+        )
+        ParametrosService.crear_jefe(
+            {
+                "empleado": self.jefe_empleado,
+                "areas": ["OPERACIONES"],
+                "carpetas_por_area": {"OPERACIONES": []},
+            },
+            actor=None,
+        )
+        self.jefe = User.objects.create_user(
+            username="555000111", password="x"
+        )
+        self.admin = User.objects.create_user(
+            username="999000111", password="x", is_staff=True
+        )
+        self.ajeno = User.objects.create_user(
+            username="999000222", password="x"
+        )
+
+    def _datos(self, **extra):
+        datos = {
+            "area": "OPERACIONES",
+            "mes": 9,
+            "anio": 2026,
+            "datos": {"notas": "cierre de prueba"},
+        }
+        datos.update(extra)
+        return datos
+
+    def test_cierre_por_jefe_del_area(self):
+        cierre = ValidacionService.cerrar_area(
+            self._datos(), usuario=self.jefe
+        )
+        self.assertEqual(cierre.area, "OPERACIONES")
+        self.assertEqual(cierre.mes, 9)
+        self.assertEqual(cierre.anio, 2026)
+        self.assertEqual(cierre.datos["notas"], "cierre de prueba")
+
+    def test_cierre_por_admin(self):
+        cierre = ValidacionService.cerrar_area(
+            self._datos(), usuario=self.admin
+        )
+        self.assertIsNotNone(cierre.pk)
+
+    def test_cierre_sin_rol_es_rechazado(self):
+        with self.assertRaisesMessage(ValueError, "No tiene permisos"):
+            ValidacionService.cerrar_area(
+                self._datos(), usuario=self.ajeno
+            )
+
+    def test_unicidad_area_periodo(self):
+        ValidacionService.cerrar_area(self._datos(), usuario=self.admin)
+        with self.assertRaisesMessage(ValueError, "Ya existe un cierre"):
+            ValidacionService.cerrar_area(self._datos(), usuario=self.admin)
+        self.assertEqual(
+            ValidacionSalida.objects.filter(area="OPERACIONES").count(), 1
+        )
+
+    def test_listar_filtra_por_mes_anio_area(self):
+        ValidacionService.cerrar_area(self._datos(), usuario=self.admin)
+        ValidacionService.cerrar_area(
+            self._datos(area="FINANZAS"), usuario=self.admin
+        )
+        solo_oper = ValidacionService.listar({"area": "operaciones"})
+        self.assertEqual(solo_oper.count(), 1)
+        por_mes = ValidacionService.listar({"mes": "9", "anio": "2026"})
+        self.assertEqual(por_mes.count(), 2)
+        vacio = ValidacionService.listar({"mes": "1"})
+        self.assertEqual(vacio.count(), 0)
+
+    def test_listar_mes_invalido_da_error(self):
+        with self.assertRaisesMessage(ValueError, "mes"):
+            ValidacionService.listar({"mes": "13"})
+
+
+class PerfilGestionTests(TestCase):
+    """B15 · permisos por fila sin N+1: programación o jefatura por
+    área/carpeta (A1)."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        self.jefe_empleado = Empleado.objects.create(
+            cedula="444333222", codigo_sap="SAP-444333222",
+            nombre="LUIS", apellido="JEFE", password="",
+        )
+        ParametrosService.crear_jefe(
+            {
+                "empleado": self.jefe_empleado,
+                "areas": ["OPERACIONES"],
+                "carpetas_por_area": {"OPERACIONES": ["LOGISTICA"]},
+            },
+            actor=None,
+        )
+        self.jefe = User.objects.create_user(
+            username="444333222", password="x"
+        )
+        self.admin = User.objects.create_user(
+            username="999444333", password="x", is_staff=True
+        )
+
+    def test_admin_gestiona_todo(self):
+        perfil = SalidaService.perfil_gestion(self.admin)
+        self.assertTrue(perfil.puede_gestionar("CUALQUIERA"))
+
+    def test_jefe_gestiona_su_area_carpeta(self):
+        perfil = SalidaService.perfil_gestion(self.jefe)
+        self.assertTrue(
+            perfil.puede_gestionar("OPERACIONES", "LOGISTICA")
+        )
+
+    def test_jefe_no_gestiona_otra_area_ni_carpeta(self):
+        perfil = SalidaService.perfil_gestion(self.jefe)
+        self.assertFalse(perfil.puede_gestionar("OPERACIONES", "OTRA"))
+        self.assertFalse(perfil.puede_gestionar("FINANZAS", "LOGISTICA"))
+
+    def test_sin_rol_no_gestiona(self):
+        ajeno = User.objects.create_user(username="000111222", password="x")
+        perfil = SalidaService.perfil_gestion(ajeno)
+        self.assertFalse(perfil.puede_gestionar("OPERACIONES", "LOGISTICA"))
+
+
+class HistorialSalidaTests(TestCase):
+    """B4 · §7.2: historial como FILAS de SalidaHistorial, más reciente
+    primero; error si la salida no existe."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        self.hoy = timezone.localdate()
+        self.vehiculo = FlotaService.crear(
+            SalidaServiceTests._vehiculo_datos("HIS001"), actor=None
+        )
+        self.salida = Salida.objects.create(
+            vehiculo=self.vehiculo,
+            fecha_salida=self.hoy,
+            area="OPERACIONES", carpeta="LOGISTICA", sede="MEDELLIN",
+            valor_dia=Decimal("85000"), estado=EstadoSalida.REPORTADO,
+        )
+
+    def test_historial_mas_reciente_primero(self):
+        base = timezone.now()
+        SalidaHistorial.objects.create(
+            salida=self.salida, estado=EstadoSalida.REPORTADO,
+            motivo="", fecha_cambio=base,
+        )
+        SalidaHistorial.objects.create(
+            salida=self.salida, estado=EstadoSalida.APROBADO,
+            motivo="", fecha_cambio=base + timedelta(hours=1),
+        )
+        filas = list(SalidaService.historial(self.salida.pk))
+        self.assertEqual(
+            [f.estado for f in filas],
+            [EstadoSalida.APROBADO, EstadoSalida.REPORTADO],
+        )
+
+    def test_historial_salida_inexistente(self):
+        with self.assertRaisesMessage(ValueError, "No existe la salida"):
+            SalidaService.historial(999999)

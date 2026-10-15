@@ -9,6 +9,7 @@ from .flota_service import FlotaService
 from .liquidacion_service import LiquidacionService
 from .parametros_service import ParametrosService
 from .salida_service import SalidaService
+from .validacion_service import ValidacionService
 
 __all__ = [
     "ConductorService",
@@ -16,4 +17,5 @@ __all__ = [
     "LiquidacionService",
     "ParametrosService",
     "SalidaService",
+    "ValidacionService",
 ]

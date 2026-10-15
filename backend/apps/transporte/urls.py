@@ -8,7 +8,9 @@ funcionalidad → endpoint). Registro por fases:
   — canónico según matriz D1/D2; B2 '/cierres/' queda absorbido aquí
 - F3: /kiosco/, /salidas/ (B2: alta S6, consulta B1 y escaneo S1; las
   transiciones/novedades F4 son B4)
-- F4: backoffice salidas (aprobar-lote, rechazar, novedades)
+- F4: backoffice salidas (B4: aprobar-lote B12, rechazar B13, validar
+  D-A11, eliminar B5, novedades B6/B7, historial) y /validaciones/
+  (cierre mensual por área, legacy `get_valid_trans`)
 - F5: /liquidaciones/, /planillas/, /informes/
   (A2: /liquidaciones/ con ?mes=&anio=, sábanas pago-mensual/pronto-pago,
   acciones /consecutivo/ y /pago/ — la ruta compuesta D3
@@ -24,6 +26,7 @@ from .views import (
     KioscoViewSet,
     LiquidacionViewSet,
     SalidaViewSet,
+    ValidacionViewSet,
     VehiculoViewSet,
 )
 

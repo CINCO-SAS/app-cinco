@@ -164,7 +164,8 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | **R2** | A2 adelantado a B2 | Cubierto: specs CR-10/D-A11 cerradas; sin rework detectado |
 | **R5** | Divergencia con legacy | Mitigado con mensajes/reglas citados; legacy intocado |
 | **Hallazgo C4** | La query CR-2 legacy comparaba columna `movil_sale` contra cédula pudiendo contener nombres (comentario del propio PHP) | El backend aplica CR-2 sobre la FK `conductor` resuelta; verificar comportamiento con datos reales en C4 |
-| **Deuda técnica** | Pregunta abierta del `PLAN_TECNICO` | **Sin decisión del usuario** (pospuesta) |
+| **Pendientes de negocio** | Decisiones abiertas del consolidado **§8 (P1–P5)**, no del `PLAN_TECNICO` (que es spec cerrada) | **P1** verifica archivos legacy (bloquea B3); **P2/D-A1** motor MySQL vs PG (adoptado MySQL, falta cierre formal); **P3/D-A9** fuente de verdad de `asignar_movil` (bloquea S2); **P4** ventana de novedades tras cierre mensual y `fecha_egreso` al inactivar (P4a toca B4); **P5** auditoría de duplicados (bloquea F6). Detalle en consolidado §8 |
+| **F0 · `ValidacionSalida.datos`** | JSON cuya forma definitiva pospuse a F0 (documentado en `validacion_service.py`) | Se persiste **tal cual** hasta F0; no bloquea B4 |
 
 ---
 

@@ -27,6 +27,21 @@ Reglas verificadas en el legacy:
 - Resolución de cédulas en dos pasos sin JOINs cross-DB (D-A10):
   ``username → Empleado`` (audit) y ``movil_sale → Empleado/Conductor``.
 
+Novedades (B4, §5.1 — legacy `base_salida_transporte.php` `id_row`):
+
+- **UNA por salida** (OneToOne): el legacy sobrescribía
+  ``datos.novedad``; aquí ``update_or_create`` con AuditoriaLog
+  CREADO/ACTUALIZADO. Solo sobre salidas ``REPORTADO``/``APROBADO``
+  (``esGestionable``, líneas 1032–1034) y con la **ventana CR-9** de
+  novedades (mensaje literal 768). El total se calcula en servidor
+  (``calcular_pago`` = ``valor_dia ± novedad``).
+- **Eliminar novedad** (B7): ventana CR-9 o jefe/programación, como en
+  legacy (``esValido`` = ventana, línea 2134); solo bloquea estado
+  ``ELIMINADO``. Auditoría de borrado.
+- **Permisos por fila** (B15): ``perfil_gestion`` resuelve UNA vez por
+  request quién es jefe de qué área/carpeta (A1) para evaluar cada fila
+  sin N+1.
+
 Papeles (§5.9, hasta E3):
 - programación/admin: ``is_staff``/``is_superuser``, grupo
   ``transporte_admin`` o permiso ``transporte.puede_programar`` (el
@@ -36,6 +51,7 @@ Papeles (§5.9, hasta E3):
   ``ParametrosService.es_jefe_validador`` (A1).
 """
 from datetime import date, datetime
+from decimal import Decimal
 
 from django.contrib.auth.models import Group
 from django.db import transaction
@@ -47,8 +63,11 @@ from ..models import (
     AuditoriaLog,
     Conductor,
     EstadoSalida,
+    JefeValidador,
+    Novedad,
     Salida,
     SalidaHistorial,
+    TipoNovedad,
     Vehiculo,
 )
 from . import calendario
@@ -97,6 +116,13 @@ MSG_FUERA_VENTANA_NOVEDAD = (
 )
 MSG_SIN_PERMISO = "No tiene permiso para gestionar esta salida."
 MSG_MOTIVO_RECHAZO = "Debe indicar un motivo de rechazo."
+MSG_NOVEDAD_VACIA = "Debe indicar el tipo, el valor y la descripción de la novedad."
+MSG_NOVEDAD_VALOR = "El valor de la novedad no puede ser negativo."
+MSG_SIN_NOVEDAD = "La salida no tiene novedades registradas."
+MSG_NOVEDAD_ESTADO = (
+    "Solo se puede reportar novedad sobre salidas en estado REPORTADO "
+    "o APROBADO."
+)
 
 
 def _a_fecha(valor):
@@ -106,6 +132,31 @@ def _a_fecha(valor):
     if isinstance(valor, date):
         return valor
     return date.fromisoformat(str(valor).strip()[:10])
+
+
+class PerfilGestion:
+    """
+    Permisos por fila (B15, §6): "jefe área/carpeta o programación".
+    Se resuelve una vez por request (`SalidaService.perfil_gestion`) y
+    el serializer pregunta por fila sin volver a tocar BD (sin N+1).
+    Réplica de isUserLeaderOfSalida con la misma semántica de carpetas
+    vacías (= todas las del área).
+    """
+
+    def __init__(self, programacion, jefaturas):
+        self.programacion = programacion
+        self.jefaturas = jefaturas  # área → set | None (todas)
+
+    def puede_gestionar(self, area, carpeta=None):
+        if self.programacion:
+            return True
+        area = (area or "").strip()
+        if area not in self.jefaturas:
+            return False
+        carpetas = self.jefaturas.get(area)
+        if carpetas is None:  # None = todas las carpetas del área
+            return True
+        return carpeta in carpetas
 
 
 class SalidaService:
@@ -299,7 +350,7 @@ class SalidaService:
         estado explícitamente (incluido ELIMINADO).
         """
         queryset = Salida.objects.select_related(
-            "vehiculo", "conductor", "tecnico_asignado"
+            "vehiculo", "conductor", "tecnico_asignado", "novedad"
         )
 
         desde = (query_params.get("desde") or "").strip()
@@ -412,6 +463,156 @@ class SalidaService:
         return cls._cambiar_estado(
             salida, EstadoSalida.ELIMINADO, usuario, requiere_gestion=False
         )
+
+    # ------------------------------------------------------------------ #
+    # Novedades (B6/B7, §5.1)
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def registrar_novedad(cls, salida_id, tipo, valor, descripcion,
+                          usuario=None):
+        """
+        Reporta la novedad de la salida (B6, `id_row` de
+        `base_salida_transporte.php` 723–833).
+
+        UNA por salida: el legacy sobrescribía ``datos.novedad``; aquí se
+        conserva el comportamiento con update sobre la fila única
+        (§3.C). Ventana CR-9 para novedades (línea 763–771) y estados
+        ``REPORTADO``/``APROBADO`` (``esGestionable``, 1032–1034).
+        Devuelve la ``Novedad``.
+        """
+        salida = cls.obtener(salida_id)
+        if not cls.ventana_validacion(
+            salida.fecha_salida, usuario, "novedad",
+            area=salida.area, carpeta=salida.carpeta,
+        ):
+            raise ValueError(MSG_FUERA_VENTANA_NOVEDAD)
+        if salida.estado not in (
+            EstadoSalida.REPORTADO, EstadoSalida.APROBADO
+        ):
+            raise ValueError(MSG_NOVEDAD_ESTADO)
+
+        tipo = str(tipo or "").strip().upper()
+        descripcion = str(descripcion or "").strip()
+        if tipo not in TipoNovedad.values or not descripcion:
+            raise ValueError(MSG_NOVEDAD_VACIA)
+        try:
+            valor = Decimal(str(valor))
+        except Exception:
+            raise ValueError(MSG_NOVEDAD_VACIA)
+        if valor < 0:
+            raise ValueError(MSG_NOVEDAD_VALOR)
+
+        empleado = cls._empleado_de(usuario)
+        # UNA por salida (OneToOne): sobrescribe como el legacy.
+        novedad, creada = Novedad.objects.update_or_create(
+            salida=salida,
+            defaults={
+                "tipo": tipo,
+                "valor": valor,
+                "descripcion": descripcion,
+                "creado_por": empleado,
+                "modificado_por": empleado,
+            },
+        )
+        cls._auditar(
+            salida,
+            "NOVEDAD_CREADA" if creada else "NOVEDAD_ACTUALIZADA",
+            None,
+            {
+                "tipo": tipo,
+                "valor": str(valor),
+                "descripcion": descripcion,
+            },
+            empleado,
+        )
+        return novedad
+
+    @classmethod
+    def eliminar_novedad(cls, salida_id, usuario=None):
+        """
+        Limpia la novedad con auditoría (B7, legacy `eliminar_novedad`
+        que vaciaba `datos.novedad`). Ventana CR-9 como al reportar
+        (CR-9 aplica a novedades); solo bloquea salidas ELIMINADO.
+        """
+        salida = cls.obtener(salida_id)
+        if salida.estado == EstadoSalida.ELIMINADO:
+            raise ValueError(MSG_NOVEDAD_ESTADO)
+        if not cls.ventana_validacion(
+            salida.fecha_salida, usuario, "novedad",
+            area=salida.area, carpeta=salida.carpeta,
+        ):
+            raise ValueError(MSG_FUERA_VENTANA_NOVEDAD)
+        try:
+            novedad = salida.novedad
+        except Novedad.DoesNotExist:
+            raise ValueError(MSG_SIN_NOVEDAD)
+
+        empleado = cls._empleado_de(usuario)
+        datos_antes = {
+            "tipo": novedad.tipo,
+            "valor": str(novedad.valor),
+            "descripcion": novedad.descripcion,
+        }
+        novedad.delete()
+        cls._auditar(
+            salida, "NOVEDAD_ELIMINADA", datos_antes, None, empleado
+        )
+        return True
+
+    @staticmethod
+    def calcular_pago(salida):
+        """
+        ``valor_dia ± novedad`` (§5.1) — implementación única
+        determinista: delega en la propiedad del modelo.
+        """
+        return salida.total_a_pagar
+
+    @staticmethod
+    def historial(salida_id):
+        """Filas de ``SalidaHistorial`` de la salida (§7.2), más
+        recientes primero; error si la salida no existe."""
+        SalidaService.obtener(salida_id)  # valida existencia
+        return SalidaHistorial.objects.filter(salida_id=salida_id).order_by(
+            "-fecha_cambio", "-id"
+        )
+
+    # ------------------------------------------------------------------ #
+    # Permisos por fila (B15, §6)
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def perfil_gestion(cls, usuario):
+        """
+        Perfil del usuario para evaluar permisos POR FILA (B15) sin N+1:
+        se resuelve UNA vez por request (programación o jefaturas de
+        área/carpeta desde A1) y el serializer consulta por fila.
+        """
+        if usuario is None:
+            return PerfilGestion(False, {})
+        if cls._puede_programar(usuario):
+            return PerfilGestion(True, {})
+        cedula = str(getattr(usuario, "username", "") or "").strip()
+        try:
+            empleado_id = Empleado.objects.values_list(
+                "id", flat=True
+            ).get(cedula=cedula)
+        except Empleado.DoesNotExist:
+            return PerfilGestion(False, {})
+        jefaturas = {}  # área → set de carpetas, o None = todas
+        for jefe in JefeValidador.objects.filter(
+            empleado_id=empleado_id, activo=True
+        ):
+            carpetas_area = jefe.carpetas_por_area or {}
+            for area in jefe.areas or []:
+                carpetas = carpetas_area.get(area) or []
+                # Lista vacía = todas las carpetas del área (A1).
+                cubiertas = None if not carpetas else set(carpetas)
+                if area not in jefaturas:
+                    jefaturas[area] = cubiertas
+                elif jefaturas[area] is None or cubiertas is None:
+                    jefaturas[area] = None
+                else:
+                    jefaturas[area] = jefaturas[area] | cubiertas
+        return PerfilGestion(False, jefaturas)
 
     @classmethod
     def _cambiar_estado(cls, salida, destino, usuario, motivo="",
