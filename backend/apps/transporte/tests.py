@@ -35,6 +35,7 @@ from .models import (
     AuditoriaLog,
     Conductor,
     ConsecutivoMensual,
+    DatosBancariosVehiculo,
     EstadoSalida,
     FechaLimiteCierre,
     JefeValidador,
@@ -55,6 +56,7 @@ from .services import calendario
 from .services import (
     ConductorService,
     FlotaService,
+    InformeService,
     LiquidacionService,
     ParametrosService,
     ReporteFotograficoService,
@@ -2668,3 +2670,165 @@ class KioscoS3S4Tests(TestCase):
         self._salida(self.vehiculo, timezone.localdate(), EstadoSalida.ELIMINADO)
         data = self.api.get("/transporte/kiosco/vehiculo/KIO123/").json()
         self.assertIsNone(data["salida"])
+
+
+class CuentaCobroTests(TestCase):
+    """F5-1: cuenta de cobro imprimible (§5.7) — importe en servidor."""
+
+    MES, ANIO = 10, 2026
+
+    def _vehiculo(self, placa="CCB123"):
+        return FlotaService.crear(
+            {
+                "placa": placa,
+                "tipo_vehiculo": "CAMIONETA",
+                "marca": "MAZDA",
+                "referencia": "CX5",
+                "modelo_anio": 2022,
+                "tipo_contrato": "PROPIO",
+                "nombre_propietario": "CINCO SAS",
+                "cedula_propietario": "900111222",
+                "valor_dia_base": 85000,
+                "fecha_soat": date(2027, 1, 1),
+                "fecha_cda": date(2026, 11, 15),
+            },
+            actor=None,
+        )
+
+    def _salida(self, vehiculo, dia, estado, valor="85000"):
+        return Salida.objects.create(
+            vehiculo=vehiculo,
+            fecha_salida=date(self.ANIO, self.MES, dia),
+            valor_dia=Decimal(valor),
+            estado=estado,
+        )
+
+    def _cuenta(self, vehiculo=None, mes=MES, anio=ANIO):
+        return InformeService.cuenta_cobro(
+            (vehiculo or self._vehiculo()).placa, mes, anio
+        )
+
+    # --------------------------- cálculo ---------------------------- #
+    def test_importe_calculado_en_servidor(self):
+        vehiculo = self._vehiculo()
+        for dia in (1, 2, 3):
+            self._salida(vehiculo, dia, EstadoSalida.APROBADO)
+        datos = self._cuenta(vehiculo)
+        self.assertEqual(datos["total_dias"], 3)
+        # valor_base = 3 × 85000 = 255000; retefuente 1% = 2550;
+        # pagar = 255000 − 2550 = 252450 (fórmula de la sábana).
+        self.assertEqual(datos["valor_base"], Decimal("255000"))
+        self.assertEqual(datos["retefuente"], Decimal("2550.00"))
+        self.assertEqual(datos["pagar"], Decimal("252450.00"))
+
+    def test_novedad_adicional_suma(self):
+        vehiculo = self._vehiculo()
+        salida = self._salida(vehiculo, 5, EstadoSalida.APROBADO)
+        Novedad.objects.create(
+            salida=salida, tipo=TipoNovedad.ADICIONAL,
+            valor=Decimal("10000"), descripcion="adicional",
+        )
+        self.assertEqual(self._cuenta(vehiculo)["valor_base"], Decimal("95000"))
+
+    def test_novedad_descuento_resta(self):
+        vehiculo = self._vehiculo()
+        salida = self._salida(vehiculo, 5, EstadoSalida.APROBADO)
+        Novedad.objects.create(
+            salida=salida, tipo=TipoNovedad.DESCUENTO,
+            valor=Decimal("5000"), descripcion="descuento",
+        )
+        self.assertEqual(self._cuenta(vehiculo)["valor_base"], Decimal("80000"))
+
+    def test_eliminadas_excluidas(self):
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, 1, EstadoSalida.APROBADO)
+        self._salida(vehiculo, 2, EstadoSalida.ELIMINADO)
+        self.assertEqual(self._cuenta(vehiculo)["total_dias"], 1)
+
+    def test_periodo_diferente_no_suma(self):
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, 1, EstadoSalida.APROBADO)
+        # Noviembre no debe sumar nada de octubre.
+        self.assertEqual(self._cuenta(vehiculo, mes=11)["total_dias"], 0)
+
+    def test_placa_inexistente_error(self):
+        with self.assertRaises(ValueError):
+            InformeService.cuenta_cobro("ZZZ999", self.MES, self.ANIO)
+
+    # ---------------------------- pagador ---------------------------- #
+    def test_pagador_desde_datos_bancarios(self):
+        vehiculo = self._vehiculo()
+        DatosBancariosVehiculo.objects.create(
+            vehiculo=vehiculo, cedula_titular="888777666",
+            nombre_titular="TITULAR BANCO", banco="BOGOTA",
+            tipo_cuenta="AHORROS", numero_cuenta="12345",
+        )
+        datos = self._cuenta(vehiculo)
+        self.assertEqual(datos["cedula_pago"], "888777666")
+        self.assertEqual(datos["nombre_pago"], "TITULAR BANCO")
+        self.assertEqual(datos["banco"], "BOGOTA")
+        self.assertEqual(datos["cuenta_pago"], "12345")
+
+    def test_pagador_fallback_propietario(self):
+        vehiculo = self._vehiculo()
+        datos = self._cuenta(vehiculo)
+        self.assertEqual(datos["nombre_pago"], "CINCO SAS")
+        self.assertEqual(datos["cedula_pago"], "900111222")
+        self.assertEqual(datos["cuenta_pago"], "")
+
+    def test_consecutivo_del_periodo(self):
+        vehiculo = self._vehiculo()
+        ConsecutivoMensual.objects.create(
+            vehiculo=vehiculo, mes=self.MES, anio=self.ANIO, consecutivo=1042
+        )
+        self.assertEqual(self._cuenta(vehiculo)["consecutivo"], 1042)
+
+    # ------------------------------ HTTP ----------------------------- #
+    def setUp(self):
+        self.user = User.objects.create_user(username="1000111", password="x")
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def _get(self, **extra):
+        params = {"placa": "CCB123", "mes": self.MES, "anio": self.ANIO}
+        params.update(extra)
+        return self.api.get("/transporte/informes/cuenta-cobro/", params)
+
+    def test_html_imprimible(self):
+        vehiculo = self._vehiculo()
+        for dia in (1, 2):
+            self._salida(vehiculo, dia, EstadoSalida.APROBADO)
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/html", resp["Content-Type"])
+        html = resp.content.decode()
+        self.assertIn("CCB123", html)
+        self.assertIn("OCTUBRE", html)
+        self.assertIn("COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA", html)
+        # 2 × 85000 = 170000; rete 1700; pagar 168300 → "168.300".
+        self.assertIn("168.300", html)
+
+    def test_seguridad_importe_no_viende_del_cliente(self):
+        """El legacy imprimía `pagar`/`banco` desde campos ocultos del
+        formulario: alterables desde el navegador. Aquí se ignoran."""
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, 1, EstadoSalida.APROBADO)
+        resp = self._get(pagar="999999", banco="HACKED", nombre_pago="OTRO")
+        html = resp.content.decode()
+        self.assertNotIn("999999", html)
+        self.assertNotIn("HACKED", html)
+        self.assertNotIn("OTRO", html)
+        # En cambio sí está el importe del servidor (85000 − 850 = 84150).
+        self.assertIn("84.150", html)
+
+    def test_periodo_invalido_http(self):
+        self.assertEqual(self._get(mes=13).status_code, 400)
+        self.assertEqual(self._get(anio=1999).status_code, 400)
+
+    def test_placa_inexistente_http(self):
+        resp = self.api.get(
+            "/transporte/informes/cuenta-cobro/",
+            {"placa": "ZZZ999", "mes": self.MES, "anio": self.ANIO},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("no encontrado", resp.json()["detail"])

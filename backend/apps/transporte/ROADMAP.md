@@ -16,12 +16,12 @@
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | Núcleo **CERRADO** (B2): alta de salidas S6, consulta B1, escaneo S1; **fotos B3 núcleo cerrado** (ventana/agenda/imágenes en servidor); **kiosco S3 (pre-chequeo) y S4 (consulta por placa) cerrados**; pendiente solo S2 (gated G4) y refinamientos B3 | ~70% |
 | F4 Backoffice y Novedades | Backoffice **CERRADO** (B4): `aprobar-lote`, `aprobar`, `rechazar`, `validar`, `DELETE`, novedades (B6/B7), historial y `/validaciones/` (cierre por área) | ~60% (falta B11 centros de costos → G3) |
-| F5 Liquidaciones e Informes | Núcleo CERRADO (A2); planillas/informes pendientes | ~50% |
+| F5 Liquidaciones e Informes | Núcleo CERRADO (A2); **F5-1 cuenta de cobro cerrada**; resto troceado en F5-2…F5-7 (gráfico, informe mensual, export, WFM, planillas, agregados) | ~55% |
 | F6 ETL histórico | — | 0% |
 | F7 Cutover | — | 0% |
 | F8 Estabilización | — | 0% |
 
-- 225 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
+- 238 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
 - **Nada ejecutado contra MySQL real.**
 
 ---
@@ -138,6 +138,44 @@
 - [ ] **D2 · F8 estabilización** — índices/monitoreo en MySQL, archivo del PHP
       legacy, informe final del proyecto.
 
+### F5 — desglose en curso (Tab 2 informes + planillas)
+
+Núcleo de liquidaciones **CERRADO** en A2 (D3/D4, CR-10, consecutivos). El
+resto de F5, troceado de menor a mayor (1 hito = 1 commit). WFM y cuenta de
+cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
+
+- [x] **F5-1 · Cuenta de cobro** — ✅ `GET /informes/cuenta-cobro/?placa=&mes=&anio=`
+      devuelve HTML imprimible (legacy `cuenta_cobro_plantilla.php`).
+      **Mejora de integridad:** el legacy imprimía `pagar`/`banco`/`cuenta`/
+      `nombre` desde campos ocultos del formulario (importe alterable desde
+      el navegador); aquí el importe se calcula en SERVIDOR
+      (`valor_base = Σ total_a_pagar`; retefuente 1 %; `pagar = base − rete`)
+      y el pagador se lee de `DatosBancariosVehiculo` (fallback: propietario).
+      Consecutivo tomado de `ConsecutivoMensual` si existe. *Tamaño S.*
+- [ ] **F5-2 · Gráfico mensual por área** — `series_chart` del
+      `controlador_transporte_salida_informe.php` (datos del chart de la
+      sábana). *Tamaño S · sin bloqueos.*
+- [ ] **F5-3 · Informe mensual + filtros** — §5.7 `InformeService`:
+      `GET /informes/mensual/?mes=&anio=` = salidas no eliminadas del mes +
+      filtros (fecha, estado, sede, área) server-side. Es la **fundación**
+      de la sábana; su contrato está en el JS `consultaDatosTrasporte`
+      (el PHP controlador `transporte_salida_controlador.php` no se tiene,
+      P1). *Tamaño M · sin bloqueos.*
+- [ ] **F5-4 · Export server-side** — fila B4: `GET /salidas/export/?format=xlsx|csv`
+      (hoy client-side con DataTables → server-side). *Tamaño S-M · tras F5-3.*
+- [ ] **F5-5 · WFM** — cola de jobs `reportado→validado` + worker/cron
+      (`transporte_validacion_wfm_service.php` 836 L + worker, ya disponibles).
+      *Tamaño M ·* ⚠️ **requiere decisión D-A11** (WFM hace
+      `reportado→validado` directo; las `TRANSICIONES` actuales no lo permiten).
+- [ ] **F5-6 · Planillas** — `POST /planillas/?alcance=&fecha=` (S5, CR-11:
+      alcance PLACA/PROPIO/EXTERNO/RENTING + **exclusión MOTOS** +
+      consecutivo + QR). El alcance (`generar_planilla_scope`,
+      `transporte_salida.php` 640–682) ya está en el legado disponible.
+      *Tamaño M ·* ⚠️ formato final requiere `planilla_salida.php` (falta, P1).
+- [ ] **F5-7 · Agregados de sábana** — día a día, área, área/carpeta,
+      áreas×mes, nómina, pronto pago y liquidación por placa (agregaciones
+      server-side sobre F5-3). *Tamaño L · al final.*
+
 ---
 
 ## 3. Orden recomendado
@@ -197,4 +235,5 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-15 | B2 núcleo de salidas: CR-9/CR-1/CR-2, D-A11, /salidas/ + /kiosco (162 tests) | `cffd8f8` |
 | 2026-10-15 | B4 backoffice F4: novedades, historial, perfil gestión, /validaciones/ (182 tests) | `a652fc0` |
 | 2026-10-15 | B3 reporte fotográfico (núcleo): ventana/agenda en servidor, imágenes Pillow, /reportes-fotograficos/ (214 tests) | `d510271` |
-| 2026-10-15 | Kiosco S3/S4: pre-chequeo /kiosco/validar/ (CR-9/CR-1/CR-2) y consulta /kiosco/vehiculo/{placa}/ (225 tests) | *(este commit)* |
+| 2026-10-15 | Kiosco S3/S4: pre-chequeo /kiosco/validar/ (CR-9/CR-1/CR-2) y consulta /kiosco/vehiculo/{placa}/ (225 tests) | `bac53fe` |
+| 2026-10-15 | F5-1 cuenta de cobro: /informes/cuenta-cobro/ HTML imprimible, importe y pagador en servidor (238 tests) | *(este commit)* |

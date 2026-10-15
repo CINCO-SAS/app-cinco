@@ -15,7 +15,7 @@
   **B2, B4 y B3 (núcleo) cerrados** — el corazón transaccional (registro
   de salidas con CR-9, anticolisión y máquina de estados D-A11, el
   backoffice F4 y el reporte fotográfico F3).
-- **225 tests OK**, `manage.py check` sin issues, DoD
+- **238 tests OK**, `manage.py check` sin issues, DoD
   cumplido en cada hito (tests verdes → check → commit local).
 - **Cero ejecución contra MySQL real** (G2 sin conectividad); los tests
   corren en SQLite aislado (`config.settings_test_transporte`).
@@ -33,7 +33,7 @@
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | Núcleo cerrado (B2): alta S6, consulta B1, escaneo S1; fotos y S2–S4 pendientes | ~35% |
 | F4 Backoffice y Novedades | Modelos listos; servicio de estados listo (B2), faltan endpoints | 0% |
-| F5 Liquidaciones e Informes | Núcleo cerrado (A2); planillas/informes pendientes | ~50% |
+| F5 Liquidaciones e Informes | Núcleo cerrado (A2); **F5-1 cuenta de cobro cerrada**; resto troceado F5-2…F5-7 | ~55% |
 | F6 ETL histórico | Esqueleto cerrado (A3); corrida real → C3 | ~40% |
 | F7 Cutover / F8 Estabilización | — | 0% |
 
@@ -103,7 +103,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | §5.4 `ConductorService` | ABM, licencia, edad derivada | ✅ |
 | §5.5 `ReporteFotograficoService` | agenda + horario 10–16 | ⬜ → B3 |
 | §5.6 `PlanillaService` (CR-11) | planillas con exclusión de motos | ⬜ |
-| §5.7 `InformeService` | sábanas con filtros server-side + export | ⬜ (B1 filtros base ✅) |
+| §5.7 `InformeService` | sábanas con filtros server-side + export | 🟡 **F5-1 cuenta de cobro ✅** (importe/pagador en servidor); informe mensual/export ⬜ (F5-2…F5-4) |
 | §5.8 `ParametrosService` | cierres + jefes | ✅ A1 |
 | §5.9 `PermisoService` | grupos/permisos vs cédulas hardcodeadas | 🟡 referenciado (`has_perm`), declaración → E3 |
 
@@ -203,4 +203,5 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | 2026-10-15 | B2 núcleo de salidas: CR-9/CR-1/CR-2, D-A11, /salidas/ + /kiosco (162 tests) | `cffd8f8` |
 | 2026-10-15 | B4 backoffice F4: novedades, historial, perfil gestión, /validaciones/ (182 tests) | `a652fc0` |
 | 2026-10-15 | B3 reporte fotográfico (núcleo): ventana/agenda en servidor, imágenes Pillow, /reportes-fotograficos/ (214 tests) | `d510271` |
-| 2026-10-15 | Kiosco S3/S4: pre-chequeo /kiosco/validar/ y consulta /kiosco/vehiculo/{placa}/ (225 tests) | *(este commit)* |
+| 2026-10-15 | Kiosco S3/S4: pre-chequeo /kiosco/validar/ y consulta /kiosco/vehiculo/{placa}/ (225 tests) | `bac53fe` |
+| 2026-10-15 | F5-1 cuenta de cobro: /informes/cuenta-cobro/ HTML imprimible con importe/pagador en servidor (238 tests) | *(este commit)* |

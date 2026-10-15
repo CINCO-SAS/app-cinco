@@ -22,6 +22,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ConductorViewSet,
     FechaLimiteCierreViewSet,
+    InformeViewSet,
     JefeValidadorViewSet,
     KioscoViewSet,
     LiquidacionViewSet,
@@ -43,6 +44,8 @@ router.register(
 router.register(
     r"liquidaciones", LiquidacionViewSet, basename="liquidaciones"
 )
+# F5: Tab 2 informes (I1) — F5-1 cuenta de cobro imprimible.
+router.register(r"informes", InformeViewSet, basename="informes")
 # F3/B2: alta + consulta (S6/B1); transiciones y novedades → F4 (B4).
 router.register(r"salidas", SalidaViewSet, basename="salidas")
 # F3/B2: S1 escaneo; S2–S4 llegan en entregas siguientes.
