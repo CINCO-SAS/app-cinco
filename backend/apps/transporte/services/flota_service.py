@@ -18,8 +18,15 @@ from datetime import date
 import qrcode
 from django.db import IntegrityError, transaction
 from django.db.models import Q
+from django.utils import timezone
 
-from ..models import DatosBancariosVehiculo, DocumentoVehiculo, Vehiculo
+from ..models import (
+    DatosBancariosVehiculo,
+    DocumentoVehiculo,
+    EstadoSalida,
+    Salida,
+    Vehiculo,
+)
 from .vigencia import estado_vigencia
 
 # Límites de subida de documentos (§5.3).
@@ -125,6 +132,30 @@ class FlotaService:
         doc = documentos.get("SOAT") if fecha_campo is None else None
         fecha = fecha_campo or (doc.fecha_vencimiento if doc else None)
         return estado_vigencia(fecha, hoy)
+
+    @staticmethod
+    def escanear(contenido, hoy=None):
+        """
+        S1: el kiosco POSTea el texto decodificado del QR (D-A8 codifica
+        la placa) y el backend resuelve el vehículo + su salida del día —
+        lo que la pantalla del kiosco muestra antes de reportar (S6).
+
+        Devuelve {"vehiculo": Vehiculo, "salida": Salida | None}.
+        """
+        placa = str(contenido or "").strip().upper()
+        if not placa:
+            raise ValueError("El contenido del QR está vacío.")
+        vehiculo = Vehiculo.objects.filter(placa=placa).first()
+        if vehiculo is None:
+            raise ValueError(f"Vehículo no encontrado con placa {placa}.")
+        hoy = hoy or timezone.localdate()
+        salida = (
+            Salida.objects.filter(vehiculo=vehiculo, fecha_salida=hoy)
+            .exclude(estado=EstadoSalida.ELIMINADO)
+            .order_by("-id")
+            .first()
+        )
+        return {"vehiculo": vehiculo, "salida": salida}
 
     # ------------------------------------------------------------------ #
     # Escritura

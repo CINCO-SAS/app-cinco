@@ -6,7 +6,8 @@ funcionalidad → endpoint). Registro por fases:
 - F2: /conductores/ y /vehiculos/ (activos)
 - A1 (Tramo A): /parametros/cierres/ (B2/D2) y /parametros/jefes/ (D1)
   — canónico según matriz D1/D2; B2 '/cierres/' queda absorbido aquí
-- F3: /kiosco/, /salidas/
+- F3: /kiosco/, /salidas/ (B2: alta S6, consulta B1 y escaneo S1; las
+  transiciones/novedades F4 son B4)
 - F4: backoffice salidas (aprobar-lote, rechazar, novedades)
 - F5: /liquidaciones/, /planillas/, /informes/
   (A2: /liquidaciones/ con ?mes=&anio=, sábanas pago-mensual/pronto-pago,
@@ -20,7 +21,9 @@ from .views import (
     ConductorViewSet,
     FechaLimiteCierreViewSet,
     JefeValidadorViewSet,
+    KioscoViewSet,
     LiquidacionViewSet,
+    SalidaViewSet,
     VehiculoViewSet,
 )
 
@@ -36,5 +39,9 @@ router.register(
 router.register(
     r"liquidaciones", LiquidacionViewSet, basename="liquidaciones"
 )
+# F3/B2: alta + consulta (S6/B1); transiciones y novedades → F4 (B4).
+router.register(r"salidas", SalidaViewSet, basename="salidas")
+# F3/B2: S1 escaneo; S2–S4 llegan en entregas siguientes.
+router.register(r"kiosco", KioscoViewSet, basename="kiosco")
 
 urlpatterns = router.urls

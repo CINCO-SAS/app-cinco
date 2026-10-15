@@ -8,24 +8,27 @@ import io
 import json
 import os
 import tempfile
-from datetime import date, timezone as dt_timezone
+from datetime import date, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
 import qrcode
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from apps.empleados.models import Empleado
 
 from .etl import convertidores as cv
 from .etl import normalizadores as nz
 from .models import (
+    AuditoriaLog,
     Conductor,
     ConsecutivoMensual,
     EstadoSalida,
@@ -34,6 +37,7 @@ from .models import (
     Novedad,
     PagoVehiculoMensual,
     Salida,
+    SalidaHistorial,
     TipoNovedad,
     TipoPago,
     TipoVehiculo,
@@ -41,7 +45,13 @@ from .models import (
 )
 from .serializers.jefe_serializer import JefeValidadorSerializer
 from .services import calendario
-from .services import ConductorService, FlotaService, LiquidacionService, ParametrosService
+from .services import (
+    ConductorService,
+    FlotaService,
+    LiquidacionService,
+    ParametrosService,
+    SalidaService,
+)
 from .services.flota_service import COLUMNAS_CSV_BANCARIOS
 from .services.periodos import restar_meses
 from .services.vigencia import estado_vigencia
@@ -1370,3 +1380,487 @@ class LiquidacionTests(TestCase):
                 9, 2026, tiene_permiso_editar=True
             )
         )
+
+
+class SalidaServiceTests(TestCase):
+    """B2 · §5.1: núcleo transaccional de salidas.
+
+    Cubre CR-9 (ventana −2 días hábiles con sábados NO hábiles, bypass
+    por rol), CR-1/CR-2 anticolisión contra salidas vivas, exigencia de
+    personal/disponible, snapshots, máquina de estados D-A11 con
+    historial por fila + AuditoriaLog, consulta B1 y escaneo S1.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()  # DDL antes de las transacciones
+        super().setUpClass()
+
+    def setUp(self):
+        self.hoy = timezone.localdate()
+        # Personal que sale: legacy exige área Y carpeta en personal.
+        self.personal = Empleado.objects.create(
+            cedula="1234567890",
+            codigo_sap="SAP-1234567890",
+            nombre="MARIA",
+            apellido="GOMEZ",
+            area="OPERACIONES",
+            carpeta="LOGISTICA",
+            sede="MEDELLIN",
+            password="",
+        )
+        # Personal sin área/carpeta (bloqueo legacy 461–477).
+        self.sin_area = Empleado.objects.create(
+            cedula="1098765432",
+            codigo_sap="SAP-1098765432",
+            nombre="PEDRO",
+            apellido="SIN-DATOS",
+            password="",
+        )
+        # Cédula dual: está en personal (sale) Y en conductores (externo).
+        self.dual = Empleado.objects.create(
+            cedula="777888999",
+            codigo_sap="SAP-777888999",
+            nombre="LUIS",
+            apellido="EXTERNO",
+            area="OPERACIONES",
+            carpeta="LOGISTICA",
+            sede="MEDELLIN",
+            password="",
+        )
+        self.vehiculo = FlotaService.crear(
+            self._vehiculo_datos("KIA001"), actor=None
+        )
+        self.vehiculo2 = FlotaService.crear(
+            self._vehiculo_datos("KIA002"), actor=None
+        )
+        self.conductor = Conductor.objects.create(
+            cedula="777888999",
+            nombre_completo="LUIS EXTERNO",
+            celular="3001112233",
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        # Jefe validador del área/carpeta de las salidas de prueba.
+        self.jefe_empleado = Empleado.objects.create(
+            cedula="555666777",
+            codigo_sap="SAP-555666777",
+            nombre="ANA",
+            apellido="JEFE",
+            password="",
+        )
+        ParametrosService.crear_jefe(
+            {
+                "empleado": self.jefe_empleado,
+                "areas": ["OPERACIONES"],
+                "carpetas_por_area": {"OPERACIONES": ["LOGISTICA"]},
+            },
+            actor=None,
+        )
+        self.jefe = User.objects.create_user(
+            username="555666777", password="x"
+        )
+        self.operador = User.objects.create_user(
+            username="1234567890", password="x"
+        )
+        self.admin = User.objects.create_user(
+            username="9999999999", password="x", is_staff=True
+        )
+
+    # ------------------------------ fixtures ----------------------------- #
+    @staticmethod
+    def _vehiculo_datos(placa, **extra):
+        datos = {
+            "placa": placa,
+            "tipo_vehiculo": "CAMIONETA",
+            "marca": "KIA",
+            "referencia": "SPORTAGE",
+            "modelo_anio": 2023,
+            "tipo_contrato": "PROPIO",
+            "nombre_propietario": "CINCO SAS",
+            "cedula_propietario": "900111222",
+            "valor_dia_base": 85000,
+        }
+        datos.update(extra)
+        return datos
+
+    def _datos(self, **extra):
+        datos = {
+            "fecha_salida": self.hoy,
+            "vehiculo": self.vehiculo,
+            "movil_sale": "1234567890",
+            "cc_asignada": "1234567890",
+            "observacion": "Reporte de kiosco",
+        }
+        datos.update(extra)
+        return datos
+
+    def _salida(self, estado=EstadoSalida.REPORTADO, fecha=None, **extra):
+        """Salida directa (sin validación de servicio) para probar la
+        máquina; incluye la semilla de historial que todo registro real
+        tiene (registrar_salida/ETL)."""
+        datos = {
+            "vehiculo": self.vehiculo,
+            "fecha_salida": fecha or self.hoy,
+            "area": "OPERACIONES",
+            "carpeta": "LOGISTICA",
+            "sede": "MEDELLIN",
+            "valor_dia": Decimal("85000"),
+            "estado": estado,
+        }
+        datos.update(extra)
+        salida = Salida.objects.create(**datos)
+        SalidaHistorial.objects.create(
+            salida=salida,
+            estado=salida.estado,
+            motivo="",
+            fecha_cambio=timezone.now(),
+        )
+        return salida
+
+    # ------------------------------- CR-9 -------------------------------- #
+    def test_ventana_reportar_limites(self):
+        limite = calendario.restar_dias_habiles(
+            self.hoy, 2, sabado_habil=False
+        )
+        self.assertTrue(SalidaService.ventana_validacion(self.hoy, None))
+        self.assertTrue(
+            SalidaService.ventana_validacion(limite, None, "reportar")
+        )
+        # Un día antes del límite queda fuera (sabado/domingo no "corren"
+        # la ventana: el límite es fijo en días hábiles).
+        self.assertFalse(
+            SalidaService.ventana_validacion(
+                limite - timedelta(days=1), None, "reportar"
+            )
+        )
+        self.assertFalse(
+            SalidaService.ventana_validacion(
+                self.hoy + timedelta(days=1), None, "reportar"
+            )
+        )
+
+    def test_ventana_reportar_bypass_admin(self):
+        vieja = self.hoy - timedelta(days=15)
+        self.assertFalse(
+            SalidaService.ventana_validacion(vieja, self.operador)
+        )
+        self.assertTrue(
+            SalidaService.ventana_validacion(vieja, self.admin, "reportar")
+        )
+
+    def test_ventana_novedad_eliminar_jefe_del_area_bypass(self):
+        vieja = self.hoy - timedelta(days=15)
+        comun = {
+            "accion": "eliminar",
+            "area": "OPERACIONES",
+            "carpeta": "LOGISTICA",
+        }
+        # Jefe del área: bypass; del mismo modo admin/programación.
+        self.assertTrue(
+            SalidaService.ventana_validacion(vieja, self.jefe, **comun)
+        )
+        self.assertTrue(
+            SalidaService.ventana_validacion(vieja, self.admin, **comun)
+        )
+        # Operador de otra carpeta/área: ventana estricta (CR-9).
+        self.assertFalse(
+            SalidaService.ventana_validacion(vieja, self.operador, **comun)
+        )
+        otros = dict(comun, area="FINANZAS")
+        self.assertFalse(
+            SalidaService.ventana_validacion(vieja, self.jefe, **otros)
+        )
+        # Dentro de ventana cualquiera gestionado pasa.
+        self.assertTrue(
+            SalidaService.ventana_validacion(
+                self.hoy, self.operador, **comun
+            )
+        )
+
+    # ------------------------------ registro ----------------------------- #
+    def test_registrar_ok_snapshots_historial_auditoria(self):
+        salida = SalidaService.registrar_salida(
+            self._datos(), usuario=self.operador
+        )
+        self.assertEqual(salida.estado, EstadoSalida.REPORTADO)
+        self.assertFalse(salida.es_disponible)
+        self.assertIsNone(salida.conductor)
+        self.assertEqual(salida.tecnico_asignado_id, self.personal.pk)
+        # Snapshots desde personal (no de la tarifa vigente).
+        self.assertEqual(salida.area, "OPERACIONES")
+        self.assertEqual(salida.carpeta, "LOGISTICA")
+        self.assertEqual(salida.sede, "MEDELLIN")
+        self.assertEqual(salida.valor_dia, Decimal("85000"))
+        self.assertEqual(salida.creado_por_id, self.personal.pk)
+        # Semilla de historial (fila, no JSON) + log de auditoría.
+        historial = list(salida.historial.all())
+        self.assertEqual(len(historial), 1)
+        self.assertEqual(historial[0].estado, EstadoSalida.REPORTADO)
+        log = AuditoriaLog.objects.get(
+            tabla="transporte_salida",
+            accion="CREADO",
+            registro_id=salida.pk,
+        )
+        self.assertEqual(log.datos_despues, {"estado": "REPORTADO"})
+        self.assertEqual(log.creado_por_id, self.personal.pk)
+
+    def test_registrar_disponible_requiere_area_manual(self):
+        with self.assertRaisesMessage(ValueError, "Debe seleccionar un área"):
+            SalidaService.registrar_salida(
+                self._datos(movil_sale="disponible"), usuario=self.operador
+            )
+        salida = SalidaService.registrar_salida(
+            self._datos(
+                movil_sale="disponible", area="OPERACIONES",
+                carpeta="SOPORTE", cc_asignada="",
+            ),
+            usuario=self.operador,
+        )
+        self.assertTrue(salida.es_disponible)
+        self.assertIsNone(salida.conductor)
+        self.assertEqual(salida.area, "OPERACIONES")
+        self.assertEqual(salida.carpeta, "SOPORTE")
+
+    def test_registrar_personal_sin_area_carpeta_bloquea(self):
+        # 461–477: sin área o carpeta en personal ⇒ excepción bloqueante.
+        with self.assertRaisesMessage(
+            ValueError, "no tiene asignada un área o carpeta asignada"
+        ):
+            SalidaService.registrar_salida(
+                self._datos(movil_sale="1098765432"), usuario=self.operador
+            )
+
+    def test_registrar_cedula_inexistente_en_personal_bloquea(self):
+        with self.assertRaisesMessage(
+            ValueError, "no tiene asignada un área o carpeta asignada"
+        ):
+            SalidaService.registrar_salida(
+                self._datos(movil_sale="0000000000"), usuario=self.operador
+            )
+
+    def test_registrar_fuera_de_ventana_y_fecha_futura(self):
+        vieja = self.hoy - timedelta(days=15)
+        with self.assertRaisesMessage(
+            ValueError, "No es posible registrar la salida en esta fecha"
+        ):
+            SalidaService.registrar_salida(
+                self._datos(fecha_salida=vieja), usuario=self.operador
+            )
+        with self.assertRaisesMessage(
+            ValueError, "No es posible registrar la salida en esta fecha"
+        ):
+            SalidaService.registrar_salida(
+                self._datos(fecha_salida=self.hoy + timedelta(days=1)),
+                usuario=self.operador,
+            )
+
+    def test_registrar_en_limite_exacto_de_2_dias_habiles(self):
+        limite = calendario.restar_dias_habiles(
+            self.hoy, 2, sabado_habil=False
+        )
+        # En el límite: pasa sin bypass.
+        salida = SalidaService.registrar_salida(
+            self._datos(fecha_salida=limite), usuario=None
+        )
+        self.assertEqual(salida.fecha_salida, limite)
+        # Un día antes del límite: fuera (aunque sea el mismo "hábil").
+        with self.assertRaisesMessage(
+            ValueError, "No es posible registrar la salida en esta fecha"
+        ):
+            SalidaService.registrar_salida(
+                self._datos(fecha_salida=limite - timedelta(days=1)),
+                usuario=None,
+            )
+
+    def test_registrar_bypass_de_ventana_por_admin(self):
+        vieja = self.hoy - timedelta(days=15)
+        salida = SalidaService.registrar_salida(
+            self._datos(fecha_salida=vieja), usuario=self.admin
+        )
+        self.assertEqual(salida.fecha_salida, vieja)
+
+    def test_cr1_duplicado_vehiculo_dia(self):
+        SalidaService.registrar_salida(self._datos(), usuario=self.operador)
+        with self.assertRaisesMessage(
+            ValueError,
+            "Ya existe un registro de salida para este vehículo",
+        ):
+            SalidaService.registrar_salida(
+                self._datos(movil_sale="disponible", area="OPERACIONES"),
+                usuario=self.operador,
+            )
+
+    def test_cr2_duplicado_movil_dia_conductor(self):
+        s1 = SalidaService.registrar_salida(
+            self._datos(vehiculo=self.vehiculo, movil_sale="777888999"),
+            usuario=self.operador,
+        )
+        # D-A10: cédula dual ⇒ FK conductor (habilita CR-2).
+        self.assertEqual(s1.conductor_id, self.conductor.pk)
+        with self.assertRaisesMessage(
+            ValueError,
+            "Ya existe un registro de salida para esta móvil",
+        ):
+            SalidaService.registrar_salida(
+                self._datos(vehiculo=self.vehiculo2, movil_sale="777888999"),
+                usuario=self.operador,
+            )
+
+    def test_cr1_liberada_por_eliminar_logico(self):
+        salida = SalidaService.registrar_salida(
+            self._datos(), usuario=self.operador
+        )
+        SalidaService.eliminar(salida.pk, usuario=self.operador)
+        # El borrado lógico libera el vehículo para otro despacho el
+        # mismo día (CR-1 solo mira salidas vivas).
+        nueva = SalidaService.registrar_salida(
+            self._datos(), usuario=self.operador
+        )
+        self.assertNotEqual(nueva.pk, salida.pk)
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.ELIMINADO)
+
+    def test_registrar_valor_dia_snapshot_override(self):
+        salida = SalidaService.registrar_salida(
+            self._datos(valor_dia=Decimal("99000")), usuario=self.operador
+        )
+        self.assertEqual(salida.valor_dia, Decimal("99000"))
+
+    def test_obtener_inexistente(self):
+        with self.assertRaisesMessage(ValueError, "No existe la salida"):
+            SalidaService.obtener(999999)
+
+    # ------------------------ máquina de estados ------------------------- #
+    def test_reportado_a_aprobado_con_jefe(self):
+        salida = self._salida()
+        SalidaService.aprobar(salida.pk, usuario=self.jefe)
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.APROBADO)
+        self.assertEqual(salida.modificado_por_id, self.jefe_empleado.pk)
+        estados = {h.estado for h in salida.historial.all()}
+        self.assertEqual(
+            estados, {EstadoSalida.REPORTADO, EstadoSalida.APROBADO}
+        )
+        log = AuditoriaLog.objects.get(
+            accion="CAMBIO_ESTADO", registro_id=salida.pk
+        )
+        self.assertEqual(log.datos_antes, {"estado": "REPORTADO"})
+        self.assertEqual(log.datos_despues["estado"], "APROBADO")
+
+    def test_aprobado_a_validado_d_a11(self):
+        salida = self._salida(estado=EstadoSalida.APROBADO)
+        SalidaService.validar(salida.pk, usuario=self.jefe)
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
+
+    def test_reportado_a_validado_no_permitido(self):
+        salida = self._salida()
+        with self.assertRaisesMessage(ValueError, "Transición no permitida"):
+            SalidaService.validar(salida.pk, usuario=self.jefe)
+
+    def test_rechazar_exige_motivo_y_queda_terminal(self):
+        salida = self._salida()
+        with self.assertRaisesMessage(ValueError, "motivo de rechazo"):
+            SalidaService.rechazar(salida.pk, "  ", usuario=self.jefe)
+        SalidaService.rechazar(
+            salida.pk, "Datos incorrectos", usuario=self.jefe
+        )
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.RECHAZADO)
+        fila = salida.historial.filter(
+            estado=EstadoSalida.RECHAZADO
+        ).first()
+        self.assertEqual(fila.motivo, "Datos incorrectos")
+        self.assertEqual(fila.creado_por_id, self.jefe_empleado.pk)
+        # Terminal: no se re-aprueba desde RECHAZADO.
+        with self.assertRaisesMessage(ValueError, "Transición no permitida"):
+            SalidaService.aprobar(salida.pk, usuario=self.jefe)
+
+    def test_transicion_sin_permiso_de_gestion(self):
+        salida = self._salida()
+        with self.assertRaisesMessage(
+            ValueError, "No tiene permiso para gestionar"
+        ):
+            SalidaService.aprobar(salida.pk, usuario=self.operador)
+
+    def test_aprobar_masivo_todas_o_ninguna(self):
+        a = self._salida()
+        b = self._salida(vehiculo=self.vehiculo2)
+        SalidaService.aprobar_masivo([a.pk, b.pk], usuario=self.jefe)
+        a.refresh_from_db()
+        b.refresh_from_db()
+        self.assertEqual(a.estado, EstadoSalida.APROBADO)
+        self.assertEqual(b.estado, EstadoSalida.APROBADO)
+        # Atómico: si una no está en REPORTADO, ninguna cambia.
+        c = self._salida(estado=EstadoSalida.APROBADO)
+        d = self._salida(vehiculo=self.vehiculo2)
+        with self.assertRaisesMessage(ValueError, "Transición no permitida"):
+            SalidaService.aprobar_masivo([c.pk, d.pk], usuario=self.jefe)
+        d.refresh_from_db()
+        self.assertEqual(d.estado, EstadoSalida.REPORTADO)
+
+    def test_eliminar_ventana_estricta_y_bypass(self):
+        vieja = self._salida(fecha=self.hoy - timedelta(days=15))
+        with self.assertRaisesMessage(
+            ValueError,
+            "Solo se permite eliminar registros de hasta máximo 2 días atrás",
+        ):
+            SalidaService.eliminar(vieja.pk, usuario=self.operador)
+        # Admin bypass y jefe del área también; operador dentro de la
+        # ventana puede (CR-9).
+        SalidaService.eliminar(vieja.pk, usuario=self.admin)
+        vieja.refresh_from_db()
+        self.assertEqual(vieja.estado, EstadoSalida.ELIMINADO)
+        hoy = self._salida(vehiculo=self.vehiculo2)
+        SalidaService.eliminar(hoy.pk, usuario=self.operador)
+        hoy.refresh_from_db()
+        self.assertEqual(hoy.estado, EstadoSalida.ELIMINADO)
+
+    # ------------------------------ consulta ----------------------------- #
+    def test_listar_por_rango_de_fechas(self):
+        self._salida(fecha=self.hoy - timedelta(days=3))
+        self._salida(vehiculo=self.vehiculo2, fecha=self.hoy)
+        dentro = SalidaService.listar(
+            {
+                "desde": str(self.hoy - timedelta(days=2)),
+                "hasta": str(self.hoy),
+            }
+        )
+        self.assertEqual(dentro.count(), 1)
+        self.assertEqual(dentro[0].fecha_salida, self.hoy)
+
+    def test_listar_excluye_eliminadas_por_defecto(self):
+        viva = self._salida()
+        self._salida(vehiculo=self.vehiculo2, estado=EstadoSalida.ELIMINADO)
+        base = SalidaService.listar({})
+        self.assertEqual(list(base), [viva])
+        solo_eliminadas = SalidaService.listar({"estado": "ELIMINADO"})
+        self.assertEqual(solo_eliminadas.count(), 1)
+        self.assertEqual(
+            solo_eliminadas[0].estado, EstadoSalida.ELIMINADO
+        )
+
+    def test_listar_search_por_placa(self):
+        self._salida()
+        otro = self._salida(vehiculo=self.vehiculo2)
+        encontradas = SalidaService.listar({"search": "kia002"})
+        self.assertEqual(list(encontradas), [otro])
+
+    # ------------------------------- kiosco ------------------------------ #
+    def test_escanear_resuelve_qr_a_vehiculo_y_salida_del_dia(self):
+        SalidaService.registrar_salida(self._datos(), usuario=self.operador)
+        datos = FlotaService.escanear(" kia001 ")  # QR: placa, sin sanear
+        self.assertEqual(datos["vehiculo"].placa, "KIA001")
+        self.assertIsNotNone(datos["salida"])
+        self.assertEqual(datos["salida"].estado, EstadoSalida.REPORTADO)
+
+    def test_escanear_sin_salida_del_dia(self):
+        datos = FlotaService.escanear("KIA002")
+        self.assertEqual(datos["vehiculo"].placa, "KIA002")
+        self.assertIsNone(datos["salida"])
+
+    def test_escanear_qr_invalido(self):
+        with self.assertRaisesMessage(ValueError, "está vacío"):
+            FlotaService.escanear("   ")
+        with self.assertRaisesMessage(ValueError, "no encontrado"):
+            FlotaService.escanear("ZZZ999")
