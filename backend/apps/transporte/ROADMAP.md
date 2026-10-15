@@ -3,7 +3,7 @@
 > Documento vivo de seguimiento. Los `.md` de `MIGRACIONES/` son la
 > **especificación**; éste solo registra **qué falta, en qué orden y qué lo
 > desbloquea**. Actualizar la §6 al cerrar cada hito.
-> Última actualización: 2026-10-14 · Rama: `feat/modulo_transporte` · Commits locales sin push.
+> Última actualización: 2026-10-15 · Rama: `feat/modulo_transporte` · Commits locales sin push.
 
 ---
 
@@ -12,16 +12,16 @@
 | Fase | Contenido | Avance |
 |---|---|---|
 | F0 Diccionario y mapeo FKs | Mapeo aplicado en los modelos | ~90% (auditorías CR-3 pendientes → C2) |
-| F1 Base Django y Festivos | 16 modelos + migración generada; **festivos no** | ~50% (festivos → B1; migrate real → C1) |
+| F1 Base Django y Festivos | 16 modelos + migración; **algoritmo de festivos portado + caché** (services/calendario.py); falta la tabla `common.Festivo` | ~70% (solo falta `common.Festivo` → G1; migrate real → C1) |
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | — | 0% |
 | F4 Backoffice y Novedades | Modelos listos | 0% |
-| F5 Liquidaciones e Informes | Modelos listos | 0% (núcleo → A2) |
+| F5 Liquidaciones e Informes | Núcleo CERRADO (A2); planillas/informes pendientes | ~50% |
 | F6 ETL histórico | — | 0% |
 | F7 Cutover | — | 0% |
 | F8 Estabilización | — | 0% |
 
-- 50 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
+- 134 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
 - **Nada ejecutado contra MySQL real.**
 
 ---
