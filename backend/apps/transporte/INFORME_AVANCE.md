@@ -15,7 +15,7 @@
   **B2, B4 y B3 (núcleo) cerrados** — el corazón transaccional (registro
   de salidas con CR-9, anticolisión y máquina de estados D-A11, el
   backoffice F4 y el reporte fotográfico F3).
-- **214 tests OK** en 21 clases, `manage.py check` sin issues, DoD
+- **225 tests OK**, `manage.py check` sin issues, DoD
   cumplido en cada hito (tests verdes → check → commit local).
 - **Cero ejecución contra MySQL real** (G2 sin conectividad); los tests
   corren en SQLite aislado (`config.settings_test_transporte`).
@@ -202,4 +202,5 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | 2026-10-15 | Calendario de festivos portado del frontend (CR-9 desbloqueada) | `59c80dd` |
 | 2026-10-15 | B2 núcleo de salidas: CR-9/CR-1/CR-2, D-A11, /salidas/ + /kiosco (162 tests) | `cffd8f8` |
 | 2026-10-15 | B4 backoffice F4: novedades, historial, perfil gestión, /validaciones/ (182 tests) | `a652fc0` |
-| 2026-10-15 | B3 reporte fotográfico (núcleo): ventana/agenda en servidor, imágenes Pillow, /reportes-fotograficos/ (214 tests) | *(este commit)* |
+| 2026-10-15 | B3 reporte fotográfico (núcleo): ventana/agenda en servidor, imágenes Pillow, /reportes-fotograficos/ (214 tests) | `d510271` |
+| 2026-10-15 | Kiosco S3/S4: pre-chequeo /kiosco/validar/ y consulta /kiosco/vehiculo/{placa}/ (225 tests) | *(este commit)* |

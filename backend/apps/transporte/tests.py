@@ -2541,3 +2541,130 @@ class ReporteFotograficoApiTests(TestCase):
         resp = self.api.get("/transporte/reportes-fotograficos/vehiculo-placa/?placa=API123")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["vehiculo"]["placa"], "API123")
+
+
+class KioscoS3S4Tests(TestCase):
+    """S3 pre-chequeo (fecha/vehículo/móvil) y S4 consulta por placa."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()  # DDL antes de las transacciones
+        super().setUpClass()
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="1000999", password="x")
+        self.vehiculo = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos("KIO123")
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def _salida(self, vehiculo, fecha, estado=EstadoSalida.REPORTADO):
+        return Salida.objects.create(
+            vehiculo=vehiculo,
+            fecha_salida=fecha,
+            area="OPERACIONES", carpeta="LOGISTICA", sede="MEDELLIN",
+            valor_dia=Decimal("85000"), estado=estado,
+        )
+
+    def _validar(self, fecha, vehiculo=None, movil_sale=""):
+        return self.api.post(
+            "/transporte/kiosco/validar/",
+            {
+                "fecha": fecha.isoformat(),
+                "vehiculo": (vehiculo or self.vehiculo).pk,
+                "movil_sale": movil_sale,
+            },
+            format="json",
+        )
+
+    # ------------------------------ S3 ------------------------------ #
+    def test_s3_fecha_ok_sin_salida(self):
+        resp = self._validar(timezone.localdate())
+        data = resp.json()
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(data["validable"])
+        self.assertFalse(data["duplicado_vehiculo"])
+        self.assertFalse(data["duplicado_movil"])
+        self.assertTrue(data["puede_registrar"])
+        self.assertIsNone(data["mensaje"])
+        self.assertIsNone(data["registro"])
+
+    def test_s3_fuera_ventana_no_validable(self):
+        resp = self._validar(timezone.localdate() - timedelta(days=30))
+        data = resp.json()
+        self.assertFalse(data["validable"])
+        self.assertFalse(data["puede_registrar"])
+        self.assertIn("No es posible registrar la salida", data["mensaje"])
+
+    def test_s3_cr1_vehiculo_duplicado(self):
+        hoy = timezone.localdate()
+        self._salida(self.vehiculo, hoy, EstadoSalida.REPORTADO)
+        data = self._validar(hoy).json()
+        self.assertTrue(data["duplicado_vehiculo"])
+        self.assertFalse(data["puede_registrar"])
+        self.assertIn("Ya existe un registro de salida", data["mensaje"])
+        self.assertIsNotNone(data["salida"])
+
+    def test_s3_registro_aprobado_informativo(self):
+        hoy = timezone.localdate()
+        self._salida(self.vehiculo, hoy, EstadoSalida.APROBADO)
+        data = self._validar(hoy).json()
+        self.assertIsNotNone(data["registro"])
+        self.assertEqual(data["registro"]["estado"], EstadoSalida.APROBADO)
+
+    def test_s3_eliminado_no_bloquea(self):
+        hoy = timezone.localdate()
+        self._salida(self.vehiculo, hoy, EstadoSalida.ELIMINADO)
+        data = self._validar(hoy).json()
+        self.assertFalse(data["duplicado_vehiculo"])
+        self.assertTrue(data["puede_registrar"])
+
+    def test_s3_cr2_movil_duplicado(self):
+        hoy = timezone.localdate()
+        conductor = Conductor.objects.create(
+            cedula="777888999", nombre_completo="CON DUCTOR",
+            celular="300", fecha_ingreso=date(2026, 1, 1),
+        )
+        # Otra vehículo deja al conductor ocupado hoy (aisla CR-2 de CR-1).
+        otra = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos("OTR456")
+        )
+        Salida.objects.create(
+            vehiculo=otra, fecha_salida=hoy, conductor=conductor,
+            area="OPERACIONES", carpeta="LOGISTICA", sede="MEDELLIN",
+            valor_dia=Decimal("85000"), estado=EstadoSalida.REPORTADO,
+        )
+        data = self._validar(hoy, movil_sale="777888999").json()
+        self.assertTrue(data["duplicado_movil"])
+        self.assertFalse(data["puede_registrar"])
+        self.assertIn("Ya existe un registro de salida para esta móvil", data["mensaje"])
+
+    def test_s3_disponible_no_aplica_cr2(self):
+        hoy = timezone.localdate()
+        data = self._validar(hoy, movil_sale="disponible").json()
+        self.assertFalse(data["duplicado_movil"])
+        self.assertTrue(data["puede_registrar"])
+
+    # ------------------------------ S4 ------------------------------ #
+    def test_s4_placa_ok_sin_salida(self):
+        resp = self.api.get("/transporte/kiosco/vehiculo/KIO123/")
+        data = resp.json()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(data["vehiculo"]["placa"], "KIO123")
+        self.assertIsNone(data["salida"])
+
+    def test_s4_placa_con_salida_del_dia(self):
+        self._salida(self.vehiculo, timezone.localdate())
+        data = self.api.get("/transporte/kiosco/vehiculo/KIO123/").json()
+        self.assertIsNotNone(data["salida"])
+        self.assertEqual(data["salida"]["vehiculo"], self.vehiculo.pk)
+
+    def test_s4_placa_inexistente(self):
+        resp = self.api.get("/transporte/kiosco/vehiculo/ZZZ999/")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_s4_eliminada_no_se_considera(self):
+        self._salida(self.vehiculo, timezone.localdate(), EstadoSalida.ELIMINADO)
+        data = self.api.get("/transporte/kiosco/vehiculo/KIO123/").json()
+        self.assertIsNone(data["salida"])

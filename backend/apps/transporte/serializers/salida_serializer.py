@@ -112,6 +112,19 @@ class EscanearSerializer(serializers.Serializer):
     )
 
 
+class ValidarSerializer(serializers.Serializer):
+    """S3 (kiosco): pre-chequeo de fecha/vehículo/móvil antes del alta S6."""
+
+    fecha = serializers.DateField()
+    vehiculo = serializers.PrimaryKeyRelatedField(queryset=Vehiculo.objects.all())
+    movil_sale = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Cédula de quien sale (opcional) para el chequeo CR-2.",
+    )
+
+
 class AprobarLoteSerializer(serializers.Serializer):
     """B12: validación masiva (legacy `save_valid_transport`)."""
     ids = serializers.ListField(

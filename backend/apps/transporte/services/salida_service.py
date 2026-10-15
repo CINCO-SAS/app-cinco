@@ -337,6 +337,79 @@ class SalidaService:
         return salida
 
     # ------------------------------------------------------------------ #
+    # Pre-chequeo S3 (kiosco) — SOLO LECTURA
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def pre_validar(fecha, vehiculo, movil_sale="", usuario=None):
+        """
+        S3 kiosco: pre-chequeo de fecha/vehículo/móvil ANTES del alta S6.
+
+        Legacy `transporte_salida.php`: `validar_fecha` (160–201, devuelve
+        ``validable`` = CR-9 y el registro ``APROBADO`` del vehículo ese día)
+        y `cedula_movil` (204–219, chequeo de la móvil). Se añaden las
+        reglas de bloqueo reales CR-1/CR-2 que aplicará ``registrar_salida``
+        para que la UI sepa de antemano si el alta pasará. **No escribe BD.**
+
+        Devuelve ``{validable, duplicado_vehiculo, duplicado_movil,
+        puede_registrar, mensaje, registro, salida}`` donde ``mensaje`` es el
+        literal legacy del primer bloqueo (o ``None``).
+        """
+        fecha = _a_fecha(fecha)
+        if not isinstance(vehiculo, Vehiculo):
+            vehiculo = Vehiculo.objects.get(pk=vehiculo)
+
+        validable = SalidaService.ventana_validacion(fecha, usuario, "reportar")
+
+        # Información legacy: registro APROBADO del vehículo ese día.
+        registro = (
+            Salida.objects.filter(
+                vehiculo=vehiculo, fecha_salida=fecha,
+                estado=EstadoSalida.APROBADO,
+            )
+            .order_by("-id")
+            .first()
+        )
+        # Salida viva (CR-1) del vehículo ese día.
+        salida_viva = (
+            Salida.objects.filter(vehiculo=vehiculo, fecha_salida=fecha)
+            .exclude(estado=EstadoSalida.ELIMINADO)
+            .order_by("-id")
+            .first()
+        )
+        duplicado_vehiculo = salida_viva is not None
+
+        # CR-2: la móvil que sale, contra su FK conductor (D-A10). Aplica
+        # solo si quien sale no es "disponible" y está en conductores; el
+        # alcance exacto de CR-2 se concilia con datos reales en C4.
+        duplicado_movil = False
+        movil = str(movil_sale or "").strip()
+        if movil and movil.lower() not in _DISPONIBLES:
+            conductor = Conductor.objects.filter(cedula=movil).first()
+            if conductor:
+                duplicado_movil = Salida.objects.filter(
+                    conductor=conductor, fecha_salida=fecha
+                ).exclude(estado=EstadoSalida.ELIMINADO).exists()
+
+        if not validable:
+            mensaje = MSG_FUERA_VENTANA_REPORTE
+        elif duplicado_vehiculo:
+            mensaje = MSG_DUPLICADO_VEHICULO
+        elif duplicado_movil:
+            mensaje = MSG_DUPLICADO_MOVIL
+        else:
+            mensaje = None
+
+        return {
+            "validable": validable,
+            "duplicado_vehiculo": duplicado_vehiculo,
+            "duplicado_movil": duplicado_movil,
+            "puede_registrar": mensaje is None,
+            "mensaje": mensaje,
+            "registro": registro,
+            "salida": salida_viva,
+        }
+
+    # ------------------------------------------------------------------ #
     # Consulta (B1)
     # ------------------------------------------------------------------ #
     @staticmethod

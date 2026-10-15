@@ -145,6 +145,24 @@ class FlotaService:
         placa = str(contenido or "").strip().upper()
         if not placa:
             raise ValueError("El contenido del QR está vacío.")
+        return FlotaService._vehiculo_y_salida_dia(placa, hoy)
+
+    @staticmethod
+    def vehiculo_por_placa(placa, hoy=None):
+        """
+        S4 (kiosco): consulta por placa + estado de la salida del día.
+
+        Mismo camino de resolución que S1 (`escanear`), pero recibiendo la
+        placa directamente en la ruta en vez de decodificarla de un QR.
+        """
+        placa = str(placa or "").strip().upper()
+        if not placa:
+            raise ValueError("Debe indicar la placa del vehículo.")
+        return FlotaService._vehiculo_y_salida_dia(placa, hoy)
+
+    @staticmethod
+    def _vehiculo_y_salida_dia(placa, hoy=None):
+        """Resuelve placa → vehículo + salida viva del día (comparte S1/S4)."""
         vehiculo = Vehiculo.objects.filter(placa=placa).first()
         if vehiculo is None:
             raise ValueError(f"Vehículo no encontrado con placa {placa}.")
