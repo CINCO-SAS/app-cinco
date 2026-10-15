@@ -188,3 +188,4 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-14 | A3 esqueleto ETL: comando + muestras + conciliación (126 tests) — **Tramo A completo** | `3c8a457` |
 | 2026-10-15 | Calendario de festivos portado del frontend (18 festivos, CR-9 desbloqueada) | `59c80dd` |
 | 2026-10-15 | B2 núcleo de salidas: CR-9/CR-1/CR-2, D-A11, /salidas/ + /kiosco (162 tests) | `cffd8f8` |
+| 2026-10-15 | B4 backoffice F4: novedades, historial, perfil gestión, /validaciones/ (182 tests) | `a652fc0` |
