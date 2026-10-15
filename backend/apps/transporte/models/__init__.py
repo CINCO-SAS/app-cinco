@@ -37,7 +37,7 @@ from .liquidacion import (
     PagoVehiculoMensual,
     ValidacionSalida,
 )
-from .reporte_fotografico import ReporteFotograficoVehiculo
+from .reporte_fotografico import ReporteFotograficoVehiculo, ReporteFotoImagen
 from .auditoria import AuditoriaLog
 
 __all__ = [
@@ -66,5 +66,6 @@ __all__ = [
     "JefeValidador",
     "ValidacionSalida",
     "ReporteFotograficoVehiculo",
+    "ReporteFotoImagen",
     "AuditoriaLog",
 ]

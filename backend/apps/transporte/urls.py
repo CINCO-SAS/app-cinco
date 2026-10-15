@@ -25,6 +25,7 @@ from .views import (
     JefeValidadorViewSet,
     KioscoViewSet,
     LiquidacionViewSet,
+    ReporteFotograficoViewSet,
     SalidaViewSet,
     ValidacionViewSet,
     VehiculoViewSet,
@@ -46,5 +47,9 @@ router.register(
 router.register(r"salidas", SalidaViewSet, basename="salidas")
 # F3/B2: S1 escaneo; S2–S4 llegan en entregas siguientes.
 router.register(r"kiosco", KioscoViewSet, basename="kiosco")
+# F3/B3: reporte fotográfico diario (guardar + pre-chequeo agenda + placa).
+router.register(
+    r"reportes-fotograficos", ReporteFotograficoViewSet, basename="reportes-fotograficos"
+)
 
 urlpatterns = router.urls

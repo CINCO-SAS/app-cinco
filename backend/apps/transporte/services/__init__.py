@@ -8,6 +8,7 @@ from .conductor_service import ConductorService
 from .flota_service import FlotaService
 from .liquidacion_service import LiquidacionService
 from .parametros_service import ParametrosService
+from .reporte_fotografico_service import ReporteFotograficoService
 from .salida_service import SalidaService
 from .validacion_service import ValidacionService
 
@@ -16,6 +17,7 @@ __all__ = [
     "FlotaService",
     "LiquidacionService",
     "ParametrosService",
+    "ReporteFotograficoService",
     "SalidaService",
     "ValidacionService",
 ]

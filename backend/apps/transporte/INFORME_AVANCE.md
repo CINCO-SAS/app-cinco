@@ -3,7 +3,7 @@
 > **Fecha:** 2026-10-15 · **Rama:** `feat/modulo_transporte` (commits locales, sin push)
 > **Base documental:** `PLAN_BACKEND_DJANGO_CONSOLIDADO_MODULO_TRANSPORTE.md` (especificación)
 > y `ROADMAP.md` (seguimiento vivo, §2 tramos / §6 registro).
-> **Fuente de verdad de las reglas:** los 4 PHP legacy de `MIGRACIONES/`
+> **Fuente de verdad de las reglas:** los PHP legacy de `MIGRACIONES/`
 > leídos línea por línea; cualquier regla de este informe tiene su
 > referencia de archivo/línea en el código o en el ROADMAP.
 
@@ -12,9 +12,10 @@
 ## 1. Resumen ejecutivo
 
 - **Tramo A completo** (A1 parámetros · A2 liquidaciones · A3 ETL) y
-  **B2 cerrado** — el corazón transaccional (registro de salidas con
-  CR-9, anticolisión y máquina de estados D-A11).
-- **162 tests OK** en 18 clases, `manage.py check` sin issues, DoD
+  **B2, B4 y B3 (núcleo) cerrados** — el corazón transaccional (registro
+  de salidas con CR-9, anticolisión y máquina de estados D-A11, el
+  backoffice F4 y el reporte fotográfico F3).
+- **214 tests OK** en 21 clases, `manage.py check` sin issues, DoD
   cumplido en cada hito (tests verdes → check → commit local).
 - **Cero ejecución contra MySQL real** (G2 sin conectividad); los tests
   corren en SQLite aislado (`config.settings_test_transporte`).
@@ -164,24 +165,22 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | **R2** | A2 adelantado a B2 | Cubierto: specs CR-10/D-A11 cerradas; sin rework detectado |
 | **R5** | Divergencia con legacy | Mitigado con mensajes/reglas citados; legacy intocado |
 | **Hallazgo C4** | La query CR-2 legacy comparaba columna `movil_sale` contra cédula pudiendo contener nombres (comentario del propio PHP) | El backend aplica CR-2 sobre la FK `conductor` resuelta; verificar comportamiento con datos reales en C4 |
-| **Pendientes de negocio** | Decisiones abiertas del consolidado **§8 (P1–P5)**, no del `PLAN_TECNICO` (que es spec cerrada) | **P1** verifica archivos legacy (bloquea B3); **P2/D-A1** motor MySQL vs PG (adoptado MySQL, falta cierre formal); **P3/D-A9** fuente de verdad de `asignar_movil` (bloquea S2); **P4** ventana de novedades tras cierre mensual y `fecha_egreso` al inactivar (P4a toca B4); **P5** auditoría de duplicados (bloquea F6). Detalle en consolidado §8 |
+| **Pendientes de negocio** | Decisiones abiertas del consolidado **§8 (P1–P5)**, no del `PLAN_TECNICO` (que es spec cerrada) | **P1** archivos legacy verificados (B3 desbloqueado y cerrado); aún faltan `controller_cinco.php`, `transporte_salida_datos(_fix).php` y `planilla_salida.php` para F5/C3; **P2/D-A1** motor MySQL vs PG (adoptado MySQL, falta cierre formal); **P3/D-A9** fuente de verdad de `asignar_movil` (bloquea S2); **P4** ventana de novedades tras cierre mensual y `fecha_egreso` al inactivar (P4a toca B4); **P5** auditoría de duplicados (bloquea F6). Detalle en consolidado §8 |
 | **F0 · `ValidacionSalida.datos`** | JSON cuya forma definitiva pospuse a F0 (documentado en `validacion_service.py`) | Se persiste **tal cual** hasta F0; no bloquea B4 |
 
 ---
 
 ## 8. Próximos pasos (orden del ROADMAP §3)
 
-1. **B3 · reporte fotográfico** (M) — sin dependencias; solo lectura de
-   `operaciones_agenda` + ventana 10:00–16:00.
-2. **B4 · backoffice** (M) — endpoints `aprobar-lote`, `rechazar`,
-   `DELETE /salidas/{id}/`, novedades (B6/B7) y `ValidacionSalida`;
-   el servicio de estados ya está.
-3. **B1 (resto) · tabla `common.Festivo`** en cuanto G1 decida fuente y
-   modelo → `es_festivo = algoritmo ∪ BD`.
-4. **G2 → Tramo C**: C1 migrate real · C2 auditorías y constraints
+1. **B1 (resto) · tabla `common.Festivo`** en cuanto G1 decida fuente y
+   modelo → `es_festivo = algoritmo ∪ BD`. *(B2, B3 y B4 ya cerrados sin G1.)*
+2. **Refinamientos B3 (diferidos)**: match OT-específica `validar_agenda_ot`
+   (→ junto al subsistema WFM/OT, F5) y ventana de días anteriores con
+   excepción en `programacion_parametros` (→ decisión ETL de esa tabla).
+3. **G2 → Tramo C**: C1 migrate real · C2 auditorías y constraints
    (CR-3/CR-1/CR-2/D-A12) · C3 ETL con conciliación = 0 (DoD 201.000) ·
    C4 validación con datos reales.
-5. **Tramo D**: cutover único D1 (rollback < 2 min, PHP como respaldo)
+4. **Tramo D**: cutover único D1 (rollback < 2 min, PHP como respaldo)
    → D2 estabilización e informe final.
 
 ---
@@ -202,3 +201,5 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | 2026-10-14 | A3 esqueleto ETL (126 tests) — **Tramo A completo** | `3c8a457` |
 | 2026-10-15 | Calendario de festivos portado del frontend (CR-9 desbloqueada) | `59c80dd` |
 | 2026-10-15 | B2 núcleo de salidas: CR-9/CR-1/CR-2, D-A11, /salidas/ + /kiosco (162 tests) | `cffd8f8` |
+| 2026-10-15 | B4 backoffice F4: novedades, historial, perfil gestión, /validaciones/ (182 tests) | `a652fc0` |
+| 2026-10-15 | B3 reporte fotográfico (núcleo): ventana/agenda en servidor, imágenes Pillow, /reportes-fotograficos/ (214 tests) | *(este commit)* |

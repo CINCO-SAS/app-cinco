@@ -1,0 +1,197 @@
+"""
+ReporteFotograficoViewSet — endpoints del reporte fotográfico diario (F3/B3).
+
+Contrato ADMCINCO (D-A3): la vista solo enruta y resuelve identidad; toda regla
+de negocio (ventana, agenda, duplicado, imágenes) vive en
+ReporteFotograficoService. La identidad del responsable se deriva del usuario
+autenticado (mejora sobre el legacy, que confiaba en ``dni`` doble-base64 del
+cliente).
+
+Endpoints (espejo del flujo móvil legacy):
+- ``POST /reportes-fotograficos/`` → guarda el reporte + 1..5 imágenes
+  (``guardar_img_reporte_vehiculo``).
+- ``POST /reportes-fotograficos/validar-agenda/`` → pre-chequeo de agenda del
+  responsable (``validar_agenda_responsable``).
+- ``GET  /reportes-fotograficos/vehiculo-placa/?placa=`` → resuelve placa a
+  vehículo (``get_info_placa``).
+"""
+import json
+
+from drf_spectacular.utils import extend_schema
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.viewsets import GenericViewSet
+
+from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
+
+from ..serializers.reporte_fotografico_serializer import (
+    CrearReporteFotoSerializer,
+    ReporteFotograficoSerializer,
+)
+from ..services.reporte_fotografico_service import (
+    MSG_SIN_IDENTIDAD,
+    MSG_SIN_PLACA,
+    ReporteFotograficoService,
+)
+
+
+class ReporteFotograficoViewSet(GenericViewSet):
+    permission_classes = [IsAuthenticatedOrAPIKey]
+
+    def _responsable(self, request):
+        """Resuelve el Empleado del usuario autenticado (D-A10, dos pasos)."""
+        return ReporteFotograficoService.empleado_de_usuario(request.user)
+
+    # ------------------------------------------------------------------ #
+    # POST /reportes-fotograficos/ — guardar reporte + imágenes
+    # ------------------------------------------------------------------ #
+    @extend_schema(
+        request=CrearReporteFotoSerializer,
+        responses={201: ReporteFotograficoSerializer},
+        description="Guarda el reporte fotográfico diario de un vehículo "
+                    "(1..5 imágenes). Valida ventana, agenda y duplicado "
+                    "en servidor.",
+    )
+    def create(self, request):
+        responsable = self._responsable(request)
+        if responsable is None:
+            return Response(
+                {"detail": MSG_SIN_IDENTIDAD},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = CrearReporteFotoSerializer(
+            data=self._payload_multipart(request)
+        )
+        serializer.is_valid(raise_exception=True)
+        datos = serializer.validated_data
+
+        vehiculo = ReporteFotograficoService.vehiculo_por_placa(datos["placa"])
+        if vehiculo is None:
+            return Response(
+                {"detail": MSG_SIN_PLACA}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            reporte = ReporteFotograficoService.guardar(
+                vehiculo=vehiculo,
+                responsable=responsable,
+                imagenes=datos["imagenes"],
+                ot_actividad=datos.get("ot_actividad", ""),
+                location=datos.get("location") or None,
+                observaciones=datos.get("observaciones", ""),
+                es_programacion=ReporteFotograficoService.es_programacion(
+                    request.user
+                ),
+                actor=responsable,
+            )
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response(
+            ReporteFotograficoSerializer(reporte).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    # ------------------------------------------------------------------ #
+    # POST /reportes-fotograficos/validar-agenda/ — pre-chequeo
+    # ------------------------------------------------------------------ #
+    @extend_schema(
+        request=None,
+        responses={200: dict},
+        description="Devuelve el gate de agenda del responsable para la fecha "
+                    "(hoy por defecto).",
+    )
+    @action(detail=False, methods=["post"], url_path="validar-agenda")
+    def validar_agenda(self, request):
+        responsable = self._responsable(request)
+        if responsable is None:
+            return Response(
+                {"detail": MSG_SIN_IDENTIDAD},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        fecha_raw = str(request.data.get("fecha") or "").strip()
+        try:
+            fecha = (
+                ReporteFotograficoService.hoy()
+                if not fecha_raw
+                else _parsear_fecha(fecha_raw)
+            )
+        except ValueError:
+            return Response(
+                {"detail": "Fecha inválida; use YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        resultado = ReporteFotograficoService.validar_agenda_responsable(
+            responsable,
+            fecha,
+            es_programacion=ReporteFotograficoService.es_programacion(request.user),
+        )
+        resultado["fecha"] = fecha
+        return Response(resultado)
+
+    # ------------------------------------------------------------------ #
+    # GET /reportes-fotograficos/vehiculo-placa/?placa= — resolver placa
+    # ------------------------------------------------------------------ #
+    @extend_schema(
+        responses={200: dict},
+        description="Resuelve la placa a la información del vehículo (activo).",
+    )
+    @action(detail=False, methods=["get"], url_path="vehiculo-placa")
+    def vehiculo_placa(self, request):
+        vehiculo = ReporteFotograficoService.vehiculo_por_placa(
+            request.query_params.get("placa", "")
+        )
+        if vehiculo is None:
+            return Response(
+                {"detail": MSG_SIN_PLACA}, status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response(
+            {
+                "vehiculo": {
+                    "placa": vehiculo.placa,
+                    "tipo_vehiculo": vehiculo.tipo_vehiculo,
+                    "marca": vehiculo.marca,
+                    "referencia": vehiculo.referencia,
+                    "ciudad": vehiculo.ciudad_operacion,
+                }
+            }
+        )
+
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _payload_multipart(request) -> dict:
+        """
+        Normaliza ``request.data`` (QueryDict multipart) a un dict plano.
+
+        La lista de imágenes requiere ``getlist``; ``location`` llega como
+        string JSON desde el móvil.
+        """
+        data = request.data
+        imagenes = (
+            data.getlist("imagenes") if hasattr(data, "getlist") else data.get("imagenes", [])
+        )
+        location_raw = data.get("location") or ""
+        try:
+            location = json.loads(location_raw) if location_raw else {}
+        except (TypeError, ValueError):
+            location = {}
+        return {
+            "placa": data.get("placa", ""),
+            "ot_actividad": data.get("ot_actividad", ""),
+            "observaciones": data.get("observaciones", ""),
+            "location": location,
+            "imagenes": imagenes,
+        }
+
+
+def _parsear_fecha(valor: str):
+    from datetime import date
+
+    try:
+        return date.fromisoformat(valor)
+    except ValueError:
+        raise ValueError("fecha inválida")

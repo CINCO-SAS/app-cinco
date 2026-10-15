@@ -14,14 +14,14 @@
 | F0 Diccionario y mapeo FKs | Mapeo aplicado en los modelos | ~90% (auditorías CR-3 pendientes → C2) |
 | F1 Base Django y Festivos | 16 modelos + migración; **algoritmo de festivos portado + caché** (services/calendario.py); falta la tabla `common.Festivo` | ~70% (solo falta `common.Festivo` → G1; migrate real → C1) |
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
-| F3 Kiosco y Fotos | Núcleo **CERRADO** (B2): alta de salidas S6, consulta B1, escaneo S1; fotos (B3) y kiosco S2–S4 pendientes | ~35% |
+| F3 Kiosco y Fotos | Núcleo **CERRADO** (B2): alta de salidas S6, consulta B1, escaneo S1; **fotos B3 núcleo cerrado** (ventana/agenda/imágenes en servidor); kiosco S2–S4 y refinamientos B3 pendientes | ~55% |
 | F4 Backoffice y Novedades | Backoffice **CERRADO** (B4): `aprobar-lote`, `aprobar`, `rechazar`, `validar`, `DELETE`, novedades (B6/B7), historial y `/validaciones/` (cierre por área) | ~60% (falta B11 centros de costos → G3) |
 | F5 Liquidaciones e Informes | Núcleo CERRADO (A2); planillas/informes pendientes | ~50% |
 | F6 ETL histórico | — | 0% |
 | F7 Cutover | — | 0% |
 | F8 Estabilización | — | 0% |
 
-- 182 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
+- 214 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
 - **Nada ejecutado contra MySQL real.**
 
 ---
@@ -30,7 +30,7 @@
 
 | ID | Condición | Desbloquea | Estado / responsable |
 |---|---|---|---|
-| **G1** | Decisión de negocio: fuente y modelo del calendario de festivos (`common.Festivo`) | B1 → B3 (F3); **B2 y B4 cerrados sin G1** con el algoritmo portado | Pospuesto por el negocio |
+| **G1** | Decisión de negocio: fuente y modelo del calendario de festivos (`common.Festivo`) | B1 (F3); **B2, B3 y B4 cerrados sin G1** con el algoritmo portado | Pospuesto por el negocio |
 | **G2** | Conectividad: BD `azul` (`192.168.79.10`), BD negra Nokia y `default` | C1–C4, T6 teléfonos | Sin acceso desde esta máquina |
 | **G3** | Modelo `common.Area` (viene de otro PHP) | FK de áreas en parámetros/backoffice | Pendiente de fuente |
 | **G4** | Decisiones **D-A9** (asignar móvil vía outbox asíncrono) y **D-A10** (router BD negra) — §8 | S2 asignar móvil, T6 | Pendientes de decisión técnica |
@@ -104,8 +104,15 @@
       `POST /kiosco/escanear/` (S1: QR D-A8 → placa + salida del día).
       Las transiciones vía HTTP (aprobar-lote/rechazar/validar/DELETE) y
       las novedades quedan para B4 — el servicio ya lo soporta.
-- [ ] **B3 · F3 reporte fotográfico** — validación de agenda (`operaciones_agenda`,
-      **solo lectura de módulo ajeno**) y ventana 10:00–16:00. *Tamaño M.*
+- [x] **B3 · F3 reporte fotográfico (núcleo)** — ✅ ventana 10:00–16:00 y gate de
+      agenda (`operaciones_agenda`, **solo lectura de módulo ajeno**) validados
+      EN SERVIDOR; exención de área (`transporteOmiteValidacionOt`); 1–5 imágenes
+      con compresión Pillow; dedup `(vehículo, fecha, técnico)`; identidad desde
+      `request.user` (no del cliente). Endpoints: `POST /reportes-fotograficos/`,
+      `POST .../validar-agenda/`, `GET .../vehiculo-placa/`. **Núcleo CERRADO**
+      (214 tests). *Pendiente (diferido):* match OT-específica `validar_agenda_ot`
+      (→ con WFM/OT, F5) y ventana de días anteriores con excepción en
+      `programacion_parametros` (→ decisión ETL).
 - [x] **B4 · F4 backoffice** — aprobación masiva, rechazo con motivo, eliminación
       lógica, novedades, historial (`SalidaHistorial`) y validación de jefes
       (`ValidacionSalida`, con datos de A1). *Tamaño M.* **CERRADO** (182 tests).
@@ -189,3 +196,4 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-15 | Calendario de festivos portado del frontend (18 festivos, CR-9 desbloqueada) | `59c80dd` |
 | 2026-10-15 | B2 núcleo de salidas: CR-9/CR-1/CR-2, D-A11, /salidas/ + /kiosco (162 tests) | `cffd8f8` |
 | 2026-10-15 | B4 backoffice F4: novedades, historial, perfil gestión, /validaciones/ (182 tests) | `a652fc0` |
+| 2026-10-15 | B3 reporte fotográfico (núcleo): ventana/agenda en servidor, imágenes Pillow, /reportes-fotograficos/ (214 tests) | *(este commit)* |

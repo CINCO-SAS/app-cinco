@@ -8,12 +8,14 @@ import io
 import json
 import os
 import tempfile
-from datetime import date, timedelta, timezone as dt_timezone
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from pathlib import Path
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 import qrcode
+from PIL import Image
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -22,8 +24,10 @@ from django.core.management.base import CommandError
 from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from apps.empleados.models import Empleado
+from apps.operaciones.models import Actividad, Agenda
 
 from .etl import convertidores as cv
 from .etl import normalizadores as nz
@@ -36,6 +40,8 @@ from .models import (
     JefeValidador,
     Novedad,
     PagoVehiculoMensual,
+    ReporteFotoImagen,
+    ReporteFotograficoVehiculo,
     Salida,
     SalidaHistorial,
     TipoNovedad,
@@ -51,10 +57,12 @@ from .services import (
     FlotaService,
     LiquidacionService,
     ParametrosService,
+    ReporteFotograficoService,
     SalidaService,
     ValidacionService,
 )
 from .services.flota_service import COLUMNAS_CSV_BANCARIOS
+from .services.reporte_fotografico_service import MAX_BYTES_IMAGEN
 from .services.periodos import restar_meses
 from .services.vigencia import estado_vigencia
 
@@ -2214,3 +2222,322 @@ class HistorialSalidaTests(TestCase):
     def test_historial_salida_inexistente(self):
         with self.assertRaisesMessage(ValueError, "No existe la salida"):
             SalidaService.historial(999999)
+
+
+class ReporteFotograficoReglasTests(SimpleTestCase):
+    """Reglas puras del reporte fotográfico (sin BD): normalización y exenciones."""
+
+    def test_normalizar_clave(self):
+        self.assertEqual(
+            ReporteFotograficoService.normalizar_clave("Operacion & Mant. (02)"),
+            "OPERACIONMANT02",
+        )
+
+    def test_normalizar_clave_elimina_acentos(self):
+        # Paridad legacy: el PHP no es multibyte, los acentos se descartan.
+        self.assertEqual(
+            ReporteFotograficoService.normalizar_clave("Operación"), "OPERACIN"
+        )
+
+    def test_normalizar_ot_im_solo_digitos(self):
+        # IM exige normalizar a la base numérica de la OT.
+        self.assertEqual(
+            ReporteFotograficoService.normalizar_ot_actividad(
+                "1234_ABC", area="IM", carpeta="APOYO"
+            ),
+            "1234",
+        )
+
+    def test_normalizar_ot_area_no_requerida(self):
+        self.assertEqual(
+            ReporteFotograficoService.normalizar_ot_actividad(
+                "OT-99", area="OM", carpeta="CORRECTIVO"
+            ),
+            "OT-99",
+        )
+
+    def test_omite_oy_m_correctivo(self):
+        self.assertTrue(
+            ReporteFotograficoService.omite_validacion_ot(
+                "OM", "CORRECTIVO MECANICO", "TECNICO"
+            )
+        )
+
+    def test_omite_oy_m_no_aplica_preventivo(self):
+        self.assertFalse(
+            ReporteFotograficoService.omite_validacion_ot(
+                "OM", "PREVENTIVO", "TECNICO"
+            )
+        )
+
+    def test_omite_pymes_en(self):
+        self.assertTrue(
+            ReporteFotograficoService.omite_validacion_ot("EN", "PYMES", "AUXILIAR")
+        )
+
+    def test_omite_iym_apoyo_externo(self):
+        self.assertTrue(
+            ReporteFotograficoService.omite_validacion_ot(
+                "IM", "APOYO NORTE", "APOYO EXTERNO"
+            )
+        )
+
+    def test_no_omite_transporte(self):
+        self.assertFalse(
+            ReporteFotograficoService.omite_validacion_ot(
+                "TRANSPORTE", "LOGISTICA", "TECNICO"
+            )
+        )
+
+    def test_valida_ot_en_wfm_im(self):
+        self.assertTrue(ReporteFotograficoService.valida_ot_en_wfm("IM"))
+        self.assertFalse(ReporteFotograficoService.valida_ot_en_wfm("OM"))
+
+
+class ReporteFotograficoTests(TestCase):
+    """B3: reporte fotográfico diario (ventana, agenda, imágenes, save)."""
+
+    # Relojes fijos en America/Bogota: dentro [10:00,16:00] y fuera.
+    RELOJ_OK = datetime(2026, 10, 15, 11, 0, tzinfo=ZoneInfo("America/Bogota"))
+    RELOJ_TARDE = datetime(2026, 10, 15, 17, 30, tzinfo=ZoneInfo("America/Bogota"))
+    RELOJ_TEMPRANO = datetime(2026, 10, 15, 8, 0, tzinfo=ZoneInfo("America/Bogota"))
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()  # DDL antes de las transacciones
+        super().setUpClass()
+
+    def setUp(self):
+        media = override_settings(
+            MEDIA_ROOT=tempfile.mkdtemp(prefix="transporte_test_reporte_")
+        )
+        media.enable()
+        self.addCleanup(media.disable)
+        self.user = User.objects.create_user(username="1000001", password="x")
+        self.empleado = Empleado.objects.create(
+            cedula="1000001", codigo_sap="SAP-1", nombre="TEC", apellido="UNO",
+            password="", area="TRANSPORTE", carpeta="LOGISTICA", estado="ACTIVO",
+        )
+        self.vehiculo = Vehiculo.objects.create(**self._vehiculo_datos("ABC123"))
+
+    # ------------------------------ helpers ------------------------------ #
+    @staticmethod
+    def _vehiculo_datos(placa, **extra):
+        datos = {
+            "placa": placa, "tipo_vehiculo": "CAMIONETA", "marca": "KIA",
+            "referencia": "SPORTAGE", "modelo_anio": 2023, "tipo_contrato": "PROPIO",
+            "nombre_propietario": "CINCO SAS", "cedula_propietario": "900111222",
+            "valor_dia_base": 85000,
+        }
+        datos.update(extra)
+        return datos
+
+    @staticmethod
+    def _imagen(nombre="foto.jpg", tamano=(2000, 1500)):
+        buf = io.BytesIO()
+        Image.new("RGB", tamano, color=(180, 40, 40)).save(buf, format="JPEG")
+        buf.seek(0)
+        return SimpleUploadedFile(nombre, buf.read(), content_type="image/jpeg")
+
+    @staticmethod
+    def _con_reloj(reloj):
+        return mock.patch.object(
+            ReporteFotograficoService, "ahora_local", return_value=reloj
+        )
+
+    def _agendar(self, cedula, fecha):
+        user, _ = User.objects.get_or_create(username=cedula)
+        actividad = Actividad.objects.create(responsable=user, ot="OT-77")
+        return Agenda.objects.create(
+            actividad=actividad, responsable=user,
+            fecha_inicio=fecha, fecha_fin=fecha, sede="MEDELLIN",
+        )
+
+    def _guardar(self, **extra):
+        kwargs = dict(
+            vehiculo=self.vehiculo, responsable=self.empleado,
+            imagenes=[self._imagen()],
+        )
+        kwargs.update(extra)
+        return ReporteFotograficoService.guardar(**kwargs)
+
+    # ------------------------------ ventana ------------------------------ #
+    def test_en_ventana_dentro(self):
+        self.assertTrue(ReporteFotograficoService.en_ventana(self.RELOJ_OK))
+
+    def test_en_ventana_fuera_tarde(self):
+        self.assertFalse(ReporteFotograficoService.en_ventana(self.RELOJ_TARDE))
+
+    def test_en_ventana_fuera_temprano(self):
+        self.assertFalse(ReporteFotograficoService.en_ventana(self.RELOJ_TEMPRANO))
+
+    def test_en_ventana_limites_inclusivos(self):
+        inicio = datetime(2026, 10, 15, 10, 0, tzinfo=ZoneInfo("America/Bogota"))
+        fin = datetime(2026, 10, 15, 16, 0, tzinfo=ZoneInfo("America/Bogota"))
+        self.assertTrue(ReporteFotograficoService.en_ventana(inicio))
+        self.assertTrue(ReporteFotograficoService.en_ventana(fin))
+
+    # ------------------------------ save ------------------------------ #
+    def test_guardar_ok(self):
+        self._agendar("1000001", self.RELOJ_OK.date())
+        with self._con_reloj(self.RELOJ_OK):
+            reporte = self._guardar()
+        self.assertEqual(reporte.fecha, self.RELOJ_OK.date())
+        self.assertEqual(reporte.hora, self.RELOJ_OK.time())
+        self.assertEqual(reporte.imagenes.count(), 1)
+        self.assertEqual(reporte.responsable_id, self.empleado.pk)
+
+    def test_guardar_cinco_imagenes(self):
+        self._agendar("1000001", self.RELOJ_OK.date())
+        with self._con_reloj(self.RELOJ_OK):
+            reporte = self._guardar(
+                imagenes=[self._imagen(f"f{i}.jpg") for i in range(5)]
+            )
+        self.assertEqual(reporte.imagenes.count(), 5)
+
+    def test_guardar_rechaza_fuera_ventana(self):
+        self._agendar("1000001", self.RELOJ_TARDE.date())
+        with self._con_reloj(self.RELOJ_TARDE):
+            with self.assertRaisesRegex(ValueError, "10:00"):
+                self._guardar()
+
+    def test_guardar_rechaza_sin_agenda(self):
+        # TRANSPORTE/LOGISTICA no es área exenta y no hay agenda.
+        with self._con_reloj(self.RELOJ_OK):
+            with self.assertRaisesRegex(ValueError, "agenda programada"):
+                self._guardar()
+
+    def test_guardar_permite_area_exenta_sin_agenda(self):
+        # O&M + CORRECTIVO exenta (transporteOmiteValidacionOt) → sin agenda.
+        self.empleado.area = "OM"
+        self.empleado.carpeta = "CORRECTIVO"
+        self.empleado.save()
+        with self._con_reloj(self.RELOJ_OK):
+            reporte = self._guardar()
+        self.assertTrue(reporte.validacion_ot["agenda_exenta"])
+
+    def test_guardar_rechaza_duplicado_tecnico(self):
+        self._agendar("1000001", self.RELOJ_OK.date())
+        with self._con_reloj(self.RELOJ_OK):
+            self._guardar()
+            with self.assertRaisesRegex(ValueError, "Ya existe un reporte"):
+                self._guardar()
+
+    def test_guardar_rechaza_mas_de_cinco(self):
+        self._agendar("1000001", self.RELOJ_OK.date())
+        with self._con_reloj(self.RELOJ_OK):
+            with self.assertRaisesRegex(ValueError, "m.s de 5"):
+                self._guardar(imagenes=[self._imagen(f"f{i}.jpg") for i in range(6)])
+
+    def test_guardar_rechaza_cero_imagenes(self):
+        with self._con_reloj(self.RELOJ_OK):
+            with self.assertRaisesRegex(ValueError, "al menos una imagen"):
+                self._guardar(imagenes=[])
+
+    def test_guardar_rechaza_fecha_pasada(self):
+        self._agendar("1000001", self.RELOJ_OK.date())
+        ayer = self.RELOJ_OK.date() - timedelta(days=1)
+        with self._con_reloj(self.RELOJ_OK):
+            with self.assertRaisesRegex(ValueError, "excepci"):
+                self._guardar(fecha=ayer)
+
+    # ------------------------------ agenda (lectura) ------------------------------ #
+    def test_agenda_del_dia_encuentra_agenda(self):
+        self._agendar("1000001", self.RELOJ_OK.date())
+        agendas = ReporteFotograficoService._agendas_del_dia(
+            self.empleado, self.RELOJ_OK.date()
+        )
+        self.assertEqual(len(agendas), 1)
+
+    def test_agenda_del_dia_ignora_borrada(self):
+        agenda = self._agendar("1000001", self.RELOJ_OK.date())
+        agenda.is_deleted = True
+        agenda.save()
+        agendas = ReporteFotograficoService._agendas_del_dia(
+            self.empleado, self.RELOJ_OK.date()
+        )
+        self.assertEqual(len(agendas), 0)
+
+    def test_validar_agenda_responsable_sin_identidad(self):
+        resultado = ReporteFotograficoService.validar_agenda_responsable(
+            None, self.RELOJ_OK.date()
+        )
+        self.assertFalse(resultado["tiene_agenda"])
+        self.assertEqual(resultado["origen"], "sin_identidad")
+
+    # ------------------------------ imágenes ------------------------------ #
+    def test_comprimir_re_escala_ancho(self):
+        comprimida = ReporteFotograficoService.comprimir_imagen(
+            self._imagen(tamano=(3000, 2000))
+        )
+        img = Image.open(io.BytesIO(comprimida.read()))
+        self.assertLessEqual(img.width, 1280)
+
+    def test_comprimir_rechaza_no_imagen(self):
+        malo = SimpleUploadedFile("nota.txt", b"no soy imagen", content_type="text/plain")
+        with self.assertRaisesRegex(ValueError, "no es una imagen"):
+            ReporteFotograficoService.comprimir_imagen(malo)
+
+
+class ReporteFotograficoApiTests(TestCase):
+    """Endpoints B3 (multipart): identidad derivada del usuario autenticado."""
+
+    RELOJ_OK = ReporteFotograficoTests.RELOJ_OK
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        media = override_settings(
+            MEDIA_ROOT=tempfile.mkdtemp(prefix="transporte_test_reporte_api_")
+        )
+        media.enable()
+        self.addCleanup(media.disable)
+        self.user = User.objects.create_user(username="1000002", password="x")
+        # Área exenta para no requerir agenda en el camino feliz del API.
+        self.empleado = Empleado.objects.create(
+            cedula="1000002", codigo_sap="SAP-2", nombre="API", apellido="TEST",
+            password="", area="OM", carpeta="CORRECTIVO", estado="ACTIVO",
+        )
+        self.vehiculo = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos("API123")
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def test_create_identidad_desde_usuario(self):
+        # El cliente NO envía cédula; el backend la deriva de request.user.
+        with ReporteFotograficoTests._con_reloj(self.RELOJ_OK):
+            resp = self.api.post(
+                "/transporte/reportes-fotograficos/",
+                {"placa": "API123", "imagenes": [ReporteFotograficoTests._imagen()]},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.json()["responsable_cedula"], "1000002")
+
+    def test_create_placa_inexistente(self):
+        with ReporteFotograficoTests._con_reloj(self.RELOJ_OK):
+            resp = self.api.post(
+                "/transporte/reportes-fotograficos/",
+                {"placa": "ZZZ999", "imagenes": [ReporteFotograficoTests._imagen()]},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_validar_agenda(self):
+        with ReporteFotograficoTests._con_reloj(self.RELOJ_OK):
+            resp = self.api.post(
+                "/transporte/reportes-fotograficos/validar-agenda/", {}, format="json"
+            )
+        self.assertEqual(resp.status_code, 200)
+        # OM + CORRECTIVO → exenta, no exige agenda.
+        self.assertTrue(resp.json()["tiene_agenda"])
+        self.assertEqual(resp.json()["origen"], "area_exenta")
+
+    def test_vehiculo_placa(self):
+        resp = self.api.get("/transporte/reportes-fotograficos/vehiculo-placa/?placa=API123")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["vehiculo"]["placa"], "API123")
