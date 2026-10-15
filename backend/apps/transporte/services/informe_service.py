@@ -77,7 +77,7 @@ class InformeService:
         desde, hasta = rango_mes(mes, anio)
         salidas = (
             Salida.objects.filter(
-                vehiculo=vehiculo, fecha_salida__range=(desde, hasta)
+                vehiculo=vehiculo, fecha_salida__gte=desde, fecha_salida__lt=hasta
             )
             .exclude(estado=EstadoSalida.ELIMINADO)
             .select_related("novedad")
@@ -293,3 +293,79 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
             else:
                 series.append({"name": area, "points": puntos_json})
         return {"series": series}
+
+    # ------------------------------------------------------------------ #
+    # Informe mensual de salidas (F5-3, §5.7)
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def mensual(mes, anio, filtros=None):
+        """
+        F5-3: salidas **NO eliminadas** del periodo `mes`/`anio` con filtros
+        multidimensionales server-side (§5.7 — reemplaza el `consulta` del
+        legacy, cuyo PHP `transporte_salida_controlador.php` no se tiene:
+        el contrato estaba en el JS consumidor).
+
+        `filtros` admite: `estado`, `sede`, `area`, `carpeta`, `search`.
+        - La **fecha** es el periodo pedido (`mes`/`anio`); es la
+          dimensión principal del informe de la sábana.
+        - `estado` explícito manda (permite pedir incluso ELIMINADO);
+          sin `estado` se excluyen las eliminadas (informe = lo vigente).
+        - `search` cruza placa, cédula/nombre del conductor, área y
+          observación (mismo alcance que `SalidaService.listar`, B1).
+
+        Devuelve el queryset ya `select_related` y ordenado **día a día**
+        (ascendente), como la tabla de la sábana.
+        """
+        mes, anio = validar_periodo(mes, anio)
+        desde, hasta = rango_mes(mes, anio)
+        filtros = filtros or {}
+
+        queryset = (
+            Salida.objects.select_related(
+                "vehiculo", "conductor", "tecnico_asignado", "novedad"
+            )
+            .filter(fecha_salida__gte=desde, fecha_salida__lt=hasta)
+        )
+
+        estado = str(filtros.get("estado") or "").strip().upper()
+        if estado:
+            queryset = queryset.filter(estado=estado)
+        else:
+            queryset = queryset.exclude(estado=EstadoSalida.ELIMINADO)
+
+        for campo in ("sede", "area", "carpeta"):
+            valor = str(filtros.get(campo) or "").strip()
+            if valor:
+                queryset = queryset.filter(**{f"{campo}__iexact": valor})
+
+        search = str(filtros.get("search") or "").strip()
+        if search:
+            from django.db.models import Q
+
+            queryset = queryset.filter(
+                Q(vehiculo__placa__icontains=search)
+                | Q(conductor__cedula__icontains=search)
+                | Q(conductor__nombre_completo__icontains=search)
+                | Q(area__icontains=search)
+                | Q(observacion__icontains=search)
+            )
+
+        return queryset.order_by("fecha_salida", "id")
+
+    @staticmethod
+    def areas_del_periodo(mes, anio):
+        """
+        F5-3: áreas presentes en el periodo (`arr_areas` de la sábana) —
+        sirve a la UI para poblar el filtro de área del mes.
+        """
+        mes, anio = validar_periodo(mes, anio)
+        desde, hasta = rango_mes(mes, anio)
+        return list(
+            Salida.objects.filter(fecha_salida__gte=desde, fecha_salida__lt=hasta)
+            .exclude(estado=EstadoSalida.ELIMINADO)
+            .exclude(area="")
+            .filter(area__isnull=False)
+            .values_list("area", flat=True)
+            .distinct()
+            .order_by("area")
+        )

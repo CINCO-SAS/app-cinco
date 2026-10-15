@@ -2751,6 +2751,18 @@ class CuentaCobroTests(TestCase):
         # Noviembre no debe sumar nada de octubre.
         self.assertEqual(self._cuenta(vehiculo, mes=11)["total_dias"], 0)
 
+    def test_dia_siguiente_del_mes_no_cuenta(self):
+        """Borde semiabierto [desde, hasta): el día 1 del mes siguiente
+        no se cuela en el mes pedido."""
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, 1, EstadoSalida.APROBADO)
+        Salida.objects.create(
+            vehiculo=vehiculo,
+            fecha_salida=date(self.ANIO, self.MES + 1, 1),
+            valor_dia=Decimal("85000"), estado=EstadoSalida.APROBADO,
+        )
+        self.assertEqual(self._cuenta(vehiculo)["total_dias"], 1)
+
     def test_placa_inexistente_error(self):
         with self.assertRaises(ValueError):
             InformeService.cuenta_cobro("ZZZ999", self.MES, self.ANIO)
@@ -2944,4 +2956,121 @@ class SeriesChartTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         resp = api.get("/transporte/informes/series-chart/", {"anio": 1999})
+        self.assertEqual(resp.status_code, 400)
+
+
+class InformeMensualTests(TestCase):
+    """F5-3: informe mensual día a día con filtros server-side (§5.7)."""
+
+    MES, ANIO = 10, 2026
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()  # SalidaSerializer toca Empleado (B15)
+        super().setUpClass()
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="1000444", password="x")
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.vehiculo = FlotaService.crear(
+            {
+                "placa": "INF123",
+                "tipo_vehiculo": "CAMIONETA",
+                "marca": "MAZDA",
+                "referencia": "CX5",
+                "modelo_anio": 2022,
+                "tipo_contrato": "PROPIO",
+                "nombre_propietario": "CINCO SAS",
+                "cedula_propietario": "900111222",
+                "valor_dia_base": 85000,
+                "fecha_soat": date(2027, 1, 1),
+                "fecha_cda": date(2026, 11, 15),
+            },
+            actor=None,
+        )
+
+    def _salida(self, dia, estado=EstadoSalida.APROBADO, area="OPERACIONES",
+                sede="MEDELLIN", placa=None):
+        vehiculo = self.vehiculo
+        if placa:
+            vehiculo = FlotaService.crear(
+                {
+                    "placa": placa, "tipo_vehiculo": "CAMIONETA", "marca": "MAZDA",
+                    "referencia": "CX5", "modelo_anio": 2022,
+                    "tipo_contrato": "PROPIO", "nombre_propietario": "CINCO SAS",
+                    "cedula_propietario": "900111222", "valor_dia_base": 85000,
+                    "fecha_soat": date(2027, 1, 1), "fecha_cda": date(2026, 11, 15),
+                },
+                actor=None,
+            )
+        return Salida.objects.create(
+            vehiculo=vehiculo, fecha_salida=date(self.ANIO, self.MES, dia),
+            area=area, sede=sede, valor_dia=Decimal("85000"), estado=estado,
+        )
+
+    def _mes(self, **filtros):
+        params = {"mes": self.MES, "anio": self.ANIO}
+        params.update(filtros)
+        return self.api.get("/transporte/informes/mensual/", params).json()
+
+    def test_mes_filtra_y_excluye_eliminadas(self):
+        self._salida(1)
+        self._salida(2, estado=EstadoSalida.ELIMINADO)
+        # Noviembre (mes siguiente) no debe aparecer.
+        Salida.objects.create(
+            vehiculo=self.vehiculo, fecha_salida=date(2026, 11, 1),
+            area="OPERACIONES", sede="MEDELLIN", valor_dia=Decimal("85000"),
+            estado=EstadoSalida.APROBADO,
+        )
+        results = self._mes()["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["fecha_salida"], "2026-10-01")
+
+    def test_orden_dia_a_ascendente(self):
+        self._salida(10)
+        self._salida(3)
+        self._salida(7)
+        fechas = [r["fecha_salida"] for r in self._mes()["results"]]
+        self.assertEqual(fechas, ["2026-10-03", "2026-10-07", "2026-10-10"])
+
+    def test_estado_explicito_puede_incluir_eliminadas(self):
+        self._salida(1, estado=EstadoSalida.REPORTADO)
+        self._salida(2, estado=EstadoSalida.APROBADO)
+        self.assertEqual(len(self._mes(estado="REPORTADO")["results"]), 1)
+        self.assertEqual(len(self._mes(estado="ELIMINADO")["results"]), 0)
+        self.assertEqual(len(self._mes()["results"]), 2)
+
+    def test_filtros_sede_y_area(self):
+        self._salida(1, area="OPERACIONES", sede="MEDELLIN")
+        self._salida(2, area="LOGISTICA", sede="BOGOTA")
+        self.assertEqual(len(self._mes(area="LOGISTICA")["results"]), 1)
+        self.assertEqual(len(self._mes(sede="BOGOTA")["results"]), 1)
+        self.assertEqual(len(self._mes(area="LOGISTICA", sede="MEDELLIN")["results"]), 0)
+
+    def test_search_por_placa(self):
+        self._salida(1, placa="OTR789")
+        self.assertEqual(len(self._mes(search="OTR789")["results"]), 1)
+        self.assertEqual(len(self._mes(search="ZZZ")["results"]), 0)
+
+    def test_areas_del_periodo(self):
+        self._salida(1, area="OPERACIONES")
+        self._salida(2, area="LOGISTICA")
+        self._salida(3, area="OPERACIONES")
+        self._salida(4, area="")
+        resp = self.api.get(
+            "/transporte/informes/areas/", {"mes": self.MES, "anio": self.ANIO}
+        ).json()
+        self.assertEqual(resp["areas"], ["LOGISTICA", "OPERACIONES"])
+
+    def test_expose_placa_y_total(self):
+        self._salida(1)
+        fila = self._mes()["results"][0]
+        self.assertEqual(fila["vehiculo_placa"], "INF123")
+        self.assertEqual(float(fila["total_a_pagar"]), 85000.0)
+
+    def test_periodo_invalido(self):
+        resp = self.api.get("/transporte/informes/mensual/", {"mes": 13, "anio": 2026})
+        self.assertEqual(resp.status_code, 400)
+        resp = self.api.get("/transporte/informes/areas/", {"mes": 10, "anio": 1999})
         self.assertEqual(resp.status_code, 400)

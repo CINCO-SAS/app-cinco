@@ -34,3 +34,20 @@ class SeriesChartSerializer(serializers.Serializer):
         max_value=2100,
         help_text="Sin año se grafica todo el histórico.",
     )
+
+
+class PeriodoSerializer(serializers.Serializer):
+    """Entrada mínima con periodo (mes/año) — F5-3 y áreas del periodo."""
+
+    mes = serializers.IntegerField(min_value=1, max_value=12)
+    anio = serializers.IntegerField(min_value=2000, max_value=2100)
+
+
+class InformeMensualSerializer(PeriodoSerializer):
+    """Entrada F5-3: periodo + filtros multidimensionales del informe."""
+
+    estado = serializers.CharField(required=False, allow_blank=True, default="")
+    sede = serializers.CharField(required=False, allow_blank=True, default="")
+    area = serializers.CharField(required=False, allow_blank=True, default="")
+    carpeta = serializers.CharField(required=False, allow_blank=True, default="")
+    search = serializers.CharField(required=False, allow_blank=True, default="")

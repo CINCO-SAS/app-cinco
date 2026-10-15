@@ -36,6 +36,7 @@ from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 from ..models import Salida
 from ..serializers import salida_serializer
 from ..services import SalidaService
+from .paginacion import PaginacionTransporte
 
 
 class _PermisosGestionSalida(DjangoModelPermissions):
@@ -58,6 +59,9 @@ class SalidaViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
     queryset = Salida.objects.all()
     serializer_class = salida_serializer.SalidaSerializer
     permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
+    # Sin paginación declarada `get_paginated_response` daba 500 (ver
+    # views/paginacion.py); ahora /salidas/ pagina de verdad.
+    pagination_class = PaginacionTransporte
 
     def get_permissions(self):
         if self.action in (

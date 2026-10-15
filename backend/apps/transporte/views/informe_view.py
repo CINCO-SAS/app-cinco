@@ -19,14 +19,16 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 
-from ..serializers import informe_serializer
+from ..serializers import informe_serializer, salida_serializer
 from ..services import InformeService
+from .paginacion import PaginacionTransporte
 
 
 class InformeViewSet(GenericViewSet):
     """InformeService: solo lectura de sábanas (Tab 2)."""
 
     permission_classes = [IsAuthenticatedOrAPIKey]
+    pagination_class = PaginacionTransporte
 
     # ------------------------------------------------------------------ #
     # Cuenta de cobro (F5-1)
@@ -78,3 +80,53 @@ class InformeViewSet(GenericViewSet):
         serializer.is_valid(raise_exception=True)
         serie = InformeService.series_chart(serializer.validated_data.get("anio"))
         return Response(serie)
+
+    # ------------------------------------------------------------------ #
+    # Informe mensual de salidas (F5-3, §5.7)
+    # ------------------------------------------------------------------ #
+    @extend_schema(
+        auth=[{"sessionAuth": [], "apiKeyAuth": []}],
+        responses={200: salida_serializer.SalidaSerializer(many=True)},
+        description=(
+            "Informe mensual (día a día) de salidas no eliminadas del "
+            "periodo, con filtros estado/sede/área/carpeta/search "
+            "server-side. Paginado."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="mensual")
+    def mensual(self, request):
+        serializer = informe_serializer.InformeMensualSerializer(
+            data=request.query_params
+        )
+        serializer.is_valid(raise_exception=True)
+        datos = serializer.validated_data
+        filtros = {
+            clave: datos[clave]
+            for clave in ("estado", "sede", "area", "carpeta", "search")
+        }
+        queryset = InformeService.mensual(datos["mes"], datos["anio"], filtros)
+        page = self.paginate_queryset(queryset)
+        serializador = salida_serializer.SalidaSerializer(
+            page, many=True, context={"request": request}
+        )
+        return self.get_paginated_response(serializador.data)
+
+    @extend_schema(
+        auth=[{"sessionAuth": [], "apiKeyAuth": []}],
+        responses={200: dict},
+        description="Áreas presentes en el periodo (para poblar el filtro).",
+    )
+    @action(detail=False, methods=["get"], url_path="areas")
+    def areas(self, request):
+        serializer = informe_serializer.PeriodoSerializer(
+            data=request.query_params
+        )
+        serializer.is_valid(raise_exception=True)
+        datos = serializer.validated_data
+        return Response(
+            {
+                "areas": InformeService.areas_del_periodo(
+                    datos["mes"], datos["anio"]
+                )
+            }
+        )

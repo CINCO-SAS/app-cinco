@@ -15,7 +15,7 @@
   **B2, B4 y B3 (núcleo) cerrados** — el corazón transaccional (registro
   de salidas con CR-9, anticolisión y máquina de estados D-A11, el
   backoffice F4 y el reporte fotográfico F3).
-- **246 tests OK**, `manage.py check` sin issues, DoD
+- **255 tests OK**, `manage.py check` sin issues, DoD
   cumplido en cada hito (tests verdes → check → commit local).
 - **Cero ejecución contra MySQL real** (G2 sin conectividad); los tests
   corren en SQLite aislado (`config.settings_test_transporte`).
@@ -33,7 +33,7 @@
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | Núcleo cerrado (B2): alta S6, consulta B1, escaneo S1; fotos y S2–S4 pendientes | ~35% |
 | F4 Backoffice y Novedades | Modelos listos; servicio de estados listo (B2), faltan endpoints | 0% |
-| F5 Liquidaciones e Informes | Núcleo cerrado (A2); **F5-1 cuenta de cobro y F5-2 gráfico cerrados**; resto troceado F5-3…F5-7 | ~60% |
+| F5 Liquidaciones e Informes | Núcleo cerrado (A2); **F5-1, F5-2 y F5-3 cerrados**; resto F5-4…F5-7 | ~70% |
 | F6 ETL histórico | Esqueleto cerrado (A3); corrida real → C3 | ~40% |
 | F7 Cutover / F8 Estabilización | — | 0% |
 
@@ -103,7 +103,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | §5.4 `ConductorService` | ABM, licencia, edad derivada | ✅ |
 | §5.5 `ReporteFotograficoService` | agenda + horario 10–16 | ⬜ → B3 |
 | §5.6 `PlanillaService` (CR-11) | planillas con exclusión de motos | ⬜ |
-| §5.7 `InformeService` | sábanas con filtros server-side + export | 🟡 **F5-1 cuenta de cobro ✅ · F5-2 series_chart ✅**; informe mensual/export ⬜ (F5-3…F5-4) |
+| §5.7 `InformeService` | sábanas con filtros server-side + export | 🟡 **F5-1 cuenta de cobro ✅ · F5-2 series_chart ✅ · F5-3 informe mensual ✅** (filtros estado/sede/área/carpeta/search + /areas/); export ⬜ (F5-4) |
 | §5.8 `ParametrosService` | cierres + jefes | ✅ A1 |
 | §5.9 `PermisoService` | grupos/permisos vs cédulas hardcodeadas | 🟡 referenciado (`has_perm`), declaración → E3 |
 
@@ -165,6 +165,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | **R2** | A2 adelantado a B2 | Cubierto: specs CR-10/D-A11 cerradas; sin rework detectado |
 | **R5** | Divergencia con legacy | Mitigado con mensajes/reglas citados; legacy intocado |
 | **Hallazgo C4** | La query CR-2 legacy comparaba columna `movil_sale` contra cédula pudiendo contener nombres (comentario del propio PHP) | El backend aplica CR-2 sobre la FK `conductor` resuelta; verificar comportamiento con datos reales en C4 |
+| **Hallazgo F5-3** | No existía `DEFAULT_PAGINATION_CLASS` en `settings.py`, así que `get_paginated_response` revienta con `AssertionError` → **HTTP 500** en los endpoints que paginan (`GET /salidas/` B1/B4 e `/informes/mensual/`). Latente: los tests de B1 iban a nivel servicio, no por HTTP | **Corregido** en F5-3: `views/paginacion.py` (`PaginacionTransporte`, page_size 50 / `?page_size=` / máx 1000) aplicado a `SalidaViewSet` e `InformeViewSet` |
 | **Pendientes de negocio** | Decisiones abiertas del consolidado **§8 (P1–P5)**, no del `PLAN_TECNICO` (que es spec cerrada) | **P1** archivos legacy verificados (B3 desbloqueado y cerrado); aún faltan `controller_cinco.php`, `transporte_salida_datos(_fix).php` y `planilla_salida.php` para F5/C3; **P2/D-A1** motor MySQL vs PG (adoptado MySQL, falta cierre formal); **P3/D-A9** fuente de verdad de `asignar_movil` (bloquea S2); **P4** ventana de novedades tras cierre mensual y `fecha_egreso` al inactivar (P4a toca B4); **P5** auditoría de duplicados (bloquea F6). Detalle en consolidado §8 |
 | **F0 · `ValidacionSalida.datos`** | JSON cuya forma definitiva pospuse a F0 (documentado en `validacion_service.py`) | Se persiste **tal cual** hasta F0; no bloquea B4 |
 
@@ -205,4 +206,5 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | 2026-10-15 | B3 reporte fotográfico (núcleo): ventana/agenda en servidor, imágenes Pillow, /reportes-fotograficos/ (214 tests) | `d510271` |
 | 2026-10-15 | Kiosco S3/S4: pre-chequeo /kiosco/validar/ y consulta /kiosco/vehiculo/{placa}/ (225 tests) | `bac53fe` |
 | 2026-10-15 | F5-1 cuenta de cobro: /informes/cuenta-cobro/ HTML imprimible con importe/pagador en servidor (238 tests) | `ec9b2db` |
-| 2026-10-15 | F5-2 gráfico por área: /informes/series-chart/ con año como filtro (corrige hardcode 2024) (246 tests) | *(este commit)* |
+| 2026-10-15 | F5-2 gráfico por área: /informes/series-chart/ con año como filtro (corrige hardcode 2024) (246 tests) | `eb2656f` |
+| 2026-10-15 | F5-3 informe mensual: /informes/mensual/ + /areas/ con filtros server-side; fix paginación (500 latente en GET /salidas/) (255 tests) | *(este commit)* |
