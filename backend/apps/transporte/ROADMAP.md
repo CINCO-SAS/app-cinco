@@ -14,14 +14,14 @@
 | F0 Diccionario y mapeo FKs | Mapeo aplicado en los modelos | ~90% (auditorías CR-3 pendientes → C2) |
 | F1 Base Django y Festivos | 16 modelos + migración; **algoritmo de festivos portado + caché** (services/calendario.py); falta la tabla `common.Festivo` | ~70% (solo falta `common.Festivo` → G1; migrate real → C1) |
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
-| F3 Kiosco y Fotos | — | 0% |
+| F3 Kiosco y Fotos | Núcleo **CERRADO** (B2): alta de salidas S6, consulta B1, escaneo S1; fotos (B3) y kiosco S2–S4 pendientes | ~35% |
 | F4 Backoffice y Novedades | Modelos listos | 0% |
 | F5 Liquidaciones e Informes | Núcleo CERRADO (A2); planillas/informes pendientes | ~50% |
 | F6 ETL histórico | — | 0% |
 | F7 Cutover | — | 0% |
 | F8 Estabilización | — | 0% |
 
-- 134 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
+- 162 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
 - **Nada ejecutado contra MySQL real.**
 
 ---
@@ -30,7 +30,7 @@
 
 | ID | Condición | Desbloquea | Estado / responsable |
 |---|---|---|---|
-| **G1** | Decisión de negocio: fuente y modelo del calendario de festivos (`common.Festivo`) | B1 → B2 → B3 → B4 (F3 y F4 completas) | Pospuesto por el negocio |
+| **G1** | Decisión de negocio: fuente y modelo del calendario de festivos (`common.Festivo`) | B1 → B3 → B4 (F3 y F4 completas; **B2 cerrado sin G1** con el algoritmo portado) | Pospuesto por el negocio |
 | **G2** | Conectividad: BD `azul` (`192.168.79.10`), BD negra Nokia y `default` | C1–C4, T6 teléfonos | Sin acceso desde esta máquina |
 | **G3** | Modelo `common.Area` (viene de otro PHP) | FK de áreas en parámetros/backoffice | Pendiente de fuente |
 | **G4** | Decisiones **D-A9** (asignar móvil vía outbox asíncrono) y **D-A10** (router BD negra) — §8 | S2 asignar móvil, T6 | Pendientes de decisión técnica |
@@ -90,11 +90,20 @@
       **Paridad verificada:** el legacy CR-9 excluía sábados
       (`base_salida_transporte.php` 77–96) → la ventana usará
       `sabado_habil=False` explícito.
-- [ ] **B2 · F3 núcleo: registro de salidas** — `SalidaService`:
-      ventana CR-9, anticolisión CR-1 `(vehículo, fecha)` y CR-2 `(conductor, fecha)`
-      excluyendo `ELIMINADO`, snapshots de datos en la salida, máquina de estados
-      `REPORTADO → APROBADO/RECHAZADO/ELIMINADO` y `APROBADO → VALIDADO` (D-A11),
-      endpoints `/salidas/` + `POST /kiosco/escanear/` (S1). *Tamaño L · El corazón transaccional.*
+- [x] **B2 · F3 núcleo: registro de salidas** — ✅ **CERRADO** (`cffd8f8`, 162 tests).
+      `SalidaService`: ventana CR-9 con `calendario` (−2 días hábiles,
+      sábados NO hábiles; bypass programación/admin y jefe del área,
+      mensajes legacy literales), anticolisión CR-1 `(vehículo, fecha)` y
+      CR-2 `(conductor, fecha)` excluyendo `ELIMINADO` (liberados por
+      borrado lógico), snapshots `area/carpeta/sede/valor_dia`,
+      exigencia estricta de personal / área manual en "disponible",
+      máquina de estados `REPORTADO → APROBADO/RECHAZADO/ELIMINADO` y
+      `APROBADO → VALIDADO` (D-A11; `RECHAZADO` terminal) con
+      `SalidaHistorial` por fila + `AuditoriaLog`. Endpoints:
+      `GET/POST /salidas/`, `GET /salidas/{id}/` (S6/B1) y
+      `POST /kiosco/escanear/` (S1: QR D-A8 → placa + salida del día).
+      Las transiciones vía HTTP (aprobar-lote/rechazar/validar/DELETE) y
+      las novedades quedan para B4 — el servicio ya lo soporta.
 - [ ] **B3 · F3 reporte fotográfico** — validación de agenda (`operaciones_agenda`,
       **solo lectura de módulo ajeno**) y ventana 10:00–16:00. *Tamaño M.*
 - [ ] **B4 · F4 backoffice** — aprobación masiva, rechazo con motivo, eliminación
