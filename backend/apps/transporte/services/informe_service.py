@@ -49,6 +49,13 @@ NIT = "811042087-2"
 class InformeService:
     """Única capa de reglas de informes (Tab 2) del módulo transporte."""
 
+    # `series_chart` (F5-2): como el legacy para todo dato posterior al
+    # 01-08-2024 — solo VALIDADO y APROBADO cuentan en el gráfico.
+    ESTADOS_GRAFICO = (EstadoSalida.VALIDADO, EstadoSalida.APROBADO)
+
+    # Área que la sábana dibuja en el eje y secundario (derecha).
+    AREA_EJE_SECUNDARIO = "I&M"
+
     # ------------------------------------------------------------------ #
     # Cuenta de cobro (F5-1)
     # ------------------------------------------------------------------ #
@@ -216,3 +223,73 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
 <p style="padding-top: 12pt;"><span class="linea-firma">&nbsp;</span><br />Firma autorización:</p>
 </body>
 </html>"""
+
+    # ------------------------------------------------------------------ #
+    # Serie del gráfico "Pagos por Mes, por Área" (F5-2)
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def series_chart(anio=None):
+        """
+        F5-2: series del gráfico "Pagos por Mes, por Área" de la sábana
+        (legacy `series_chart`, controlador 37–125).
+
+        Devuelve ``{"series": [...]}``: una serie por área, con puntos
+        ``["<mes>/1/<anio>", valor]`` (formato de tiempo que lee el eje X
+        de la sábana) ordenados cronológicamente. El valor es la suma de
+        ``total_a_pagar`` (valor_dia ± novedad) por (área, mes). El área
+        **I&M** va al eje secundario con su estilo de línea/marcador.
+
+        **Corrección sobre el legacy:** el PHP recibía ``mes``/``yyyy`` y
+        luego ejecutaba ``execute([2024])``: fijaba 2024 a mano, ignoraba
+        ambos parámetros y la sábana ni siquiera los enviaba. Aquí el año
+        es un filtro opcional **respetado**; sin año, todo el histórico.
+
+        **Estados:** como el legacy para todo dato posterior al 01-08-2024
+        (la rama anterior, que sumaba también REPORTADO/RECHAZADO, es
+        histórica): VALIDADO + APROBADO.
+        """
+        salidas = Salida.objects.filter(
+            estado__in=InformeService.ESTADOS_GRAFICO
+        ).filter(area__isnull=False).exclude(area="")
+        if anio:
+            salidas = salidas.filter(fecha_salida__year=anio)
+        salidas = salidas.select_related("novedad")
+
+        acumulado = {}
+        for salida in salidas:
+            clave = (
+                salida.area,
+                salida.fecha_salida.year,
+                salida.fecha_salida.month,
+            )
+            acumulado[clave] = acumulado.get(clave, CERO) + salida.total_a_pagar
+
+        por_area = {}
+        for (area, anio_dia, mes), valor in acumulado.items():
+            por_area.setdefault(area, []).append((anio_dia, mes, int(valor)))
+
+        series = []
+        for area, puntos in por_area.items():
+            puntos.sort()  # cronológico: (anio, mes, valor)
+            puntos_json = [
+                [f"{mes}/1/{anio_dia}", valor] for anio_dia, mes, valor in puntos
+            ]
+            if area == InformeService.AREA_EJE_SECUNDARIO:
+                series.append(
+                    {
+                        "name": area,
+                        "yAxis": "a2",
+                        "defaultPoint": {
+                            "type": "line",
+                            "marker": {
+                                "size": 10,
+                                "type": "circle",
+                                "outline": {"color": "black", "width": 4},
+                            },
+                        },
+                        "points": puntos_json,
+                    }
+                )
+            else:
+                series.append({"name": area, "points": puntos_json})
+        return {"series": series}

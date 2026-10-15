@@ -21,3 +21,16 @@ class CuentaCobroSerializer(serializers.Serializer):
         if not valor:
             raise serializers.ValidationError("Debe indicar la placa.")
         return valor
+
+
+class SeriesChartSerializer(serializers.Serializer):
+    """Entrada F5-2: año opcional para acotar el gráfico por área."""
+
+    anio = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        default=None,
+        min_value=2000,
+        max_value=2100,
+        help_text="Sin año se grafica todo el histórico.",
+    )

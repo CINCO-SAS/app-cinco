@@ -16,12 +16,12 @@
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | Núcleo **CERRADO** (B2): alta de salidas S6, consulta B1, escaneo S1; **fotos B3 núcleo cerrado** (ventana/agenda/imágenes en servidor); **kiosco S3 (pre-chequeo) y S4 (consulta por placa) cerrados**; pendiente solo S2 (gated G4) y refinamientos B3 | ~70% |
 | F4 Backoffice y Novedades | Backoffice **CERRADO** (B4): `aprobar-lote`, `aprobar`, `rechazar`, `validar`, `DELETE`, novedades (B6/B7), historial y `/validaciones/` (cierre por área) | ~60% (falta B11 centros de costos → G3) |
-| F5 Liquidaciones e Informes | Núcleo CERRADO (A2); **F5-1 cuenta de cobro cerrada**; resto troceado en F5-2…F5-7 (gráfico, informe mensual, export, WFM, planillas, agregados) | ~55% |
+| F5 Liquidaciones e Informes | Núcleo CERRADO (A2); **F5-1 cuenta de cobro y F5-2 gráfico por área cerrados**; resto troceado F5-3…F5-7 (informe mensual, export, WFM, planillas, agregados) | ~60% |
 | F6 ETL histórico | — | 0% |
 | F7 Cutover | — | 0% |
 | F8 Estabilización | — | 0% |
 
-- 238 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
+- 246 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
 - **Nada ejecutado contra MySQL real.**
 
 ---
@@ -152,9 +152,14 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
       (`valor_base = Σ total_a_pagar`; retefuente 1 %; `pagar = base − rete`)
       y el pagador se lee de `DatosBancariosVehiculo` (fallback: propietario).
       Consecutivo tomado de `ConsecutivoMensual` si existe. *Tamaño S.*
-- [ ] **F5-2 · Gráfico mensual por área** — `series_chart` del
-      `controlador_transporte_salida_informe.php` (datos del chart de la
-      sábana). *Tamaño S · sin bloqueos.*
+- [x] **F5-2 · Gráfico mensual por área** — ✅ `GET /informes/series-chart/?anio=`
+      devuelve `{"series": ...}` para el gráfico "Pagos por Mes, por Área"
+      (suma de `total_a_pagar` por (área, mes); I&M al eje secundario a2 con
+      su estilo). **Corrección del bug legacy:** el PHP recibía `mes`/`yyyy`
+      y hacía `execute([2024])` — fijaba 2024 a mano e ignoraba ambos; el año
+      ahora es un filtro opcional **respetado** (sin año: histórico completo).
+      Estados como el legacy post-01/08/2024 (VALIDADO + APROBADO).
+      *Tamaño S.*
 - [ ] **F5-3 · Informe mensual + filtros** — §5.7 `InformeService`:
       `GET /informes/mensual/?mes=&anio=` = salidas no eliminadas del mes +
       filtros (fecha, estado, sede, área) server-side. Es la **fundación**
@@ -236,4 +241,5 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-15 | B4 backoffice F4: novedades, historial, perfil gestión, /validaciones/ (182 tests) | `a652fc0` |
 | 2026-10-15 | B3 reporte fotográfico (núcleo): ventana/agenda en servidor, imágenes Pillow, /reportes-fotograficos/ (214 tests) | `d510271` |
 | 2026-10-15 | Kiosco S3/S4: pre-chequeo /kiosco/validar/ (CR-9/CR-1/CR-2) y consulta /kiosco/vehiculo/{placa}/ (225 tests) | `bac53fe` |
-| 2026-10-15 | F5-1 cuenta de cobro: /informes/cuenta-cobro/ HTML imprimible, importe y pagador en servidor (238 tests) | *(este commit)* |
+| 2026-10-15 | F5-1 cuenta de cobro: /informes/cuenta-cobro/ HTML imprimible, importe y pagador en servidor (238 tests) | `ec9b2db` |
+| 2026-10-15 | F5-2 gráfico por área: /informes/series-chart/ corrige el hardcode 2024 del legacy; año como filtro (246 tests) | *(este commit)* |

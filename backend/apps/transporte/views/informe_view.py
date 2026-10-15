@@ -57,3 +57,24 @@ class InformeViewSet(GenericViewSet):
             )
         html = InformeService.html_cuenta_cobro(cuenta)
         return HttpResponse(html, content_type="text/html; charset=utf-8")
+
+    # ------------------------------------------------------------------ #
+    # Serie del gráfico por área (F5-2)
+    # ------------------------------------------------------------------ #
+    @extend_schema(
+        auth=[{"sessionAuth": [], "apiKeyAuth": []}],
+        responses={200: dict},
+        description=(
+            "Series del gráfico 'Pagos por Mes, por Área' de la sábana: "
+            "suma de total_a_pagar por (área, mes). I&M va al eje "
+            "secundario. Año opcional."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="series-chart")
+    def series_chart(self, request):
+        serializer = informe_serializer.SeriesChartSerializer(
+            data=request.query_params
+        )
+        serializer.is_valid(raise_exception=True)
+        serie = InformeService.series_chart(serializer.validated_data.get("anio"))
+        return Response(serie)

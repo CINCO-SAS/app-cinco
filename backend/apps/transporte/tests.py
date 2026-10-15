@@ -2832,3 +2832,116 @@ class CuentaCobroTests(TestCase):
         )
         self.assertEqual(resp.status_code, 400)
         self.assertIn("no encontrado", resp.json()["detail"])
+
+
+class SeriesChartTests(TestCase):
+    """F5-2: gráfico "Pagos por Mes, por Área" (§5.7, legacy series_chart)."""
+
+    def _vehiculo(self):
+        return FlotaService.crear(
+            {
+                "placa": "GRA123",
+                "tipo_vehiculo": "CAMIONETA",
+                "marca": "MAZDA",
+                "referencia": "CX5",
+                "modelo_anio": 2022,
+                "tipo_contrato": "PROPIO",
+                "nombre_propietario": "CINCO SAS",
+                "cedula_propietario": "900111222",
+                "valor_dia_base": 85000,
+                "fecha_soat": date(2027, 1, 1),
+                "fecha_cda": date(2026, 11, 15),
+            },
+            actor=None,
+        )
+
+    def _salida(self, vehiculo, fecha, area, estado, valor):
+        return Salida.objects.create(
+            vehiculo=vehiculo, fecha_salida=fecha, area=area,
+            valor_dia=Decimal(valor), estado=estado,
+        )
+
+    def _por_area(self, anio=None):
+        serie = InformeService.series_chart(anio)
+        return {s["name"]: s for s in serie["series"]}
+
+    def test_agrupa_por_area_y_mes(self):
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, date(2026, 1, 5), "OPERACIONES", EstadoSalida.APROBADO, "100000")
+        self._salida(vehiculo, date(2026, 1, 10), "OPERACIONES", EstadoSalida.APROBADO, "200000")
+        self._salida(vehiculo, date(2026, 2, 5), "OPERACIONES", EstadoSalida.APROBADO, "50000")
+        self._salida(vehiculo, date(2026, 1, 5), "LOGISTICA", EstadoSalida.APROBADO, "70000")
+        areas = self._por_area()
+        self.assertEqual(
+            areas["OPERACIONES"]["points"],
+            [["1/1/2026", 300000], ["2/1/2026", 50000]],
+        )
+        self.assertEqual(areas["LOGISTICA"]["points"], [["1/1/2026", 70000]])
+
+    def test_novedad_ajusta_el_valor(self):
+        vehiculo = self._vehiculo()
+        salida = self._salida(
+            vehiculo, date(2026, 3, 5), "OPERACIONES", EstadoSalida.APROBADO, "100000"
+        )
+        Novedad.objects.create(
+            salida=salida, tipo=TipoNovedad.ADICIONAL,
+            valor=Decimal("20000"), descripcion="adicional",
+        )
+        self.assertEqual(
+            self._por_area()["OPERACIONES"]["points"], [["3/1/2026", 120000]]
+        )
+
+    def test_solo_validado_y_aprobado(self):
+        """Como el legacy post-01/08/2024: no cuentan REPORTADO/RECHAZADO."""
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, date(2026, 1, 5), "OPERACIONES", EstadoSalida.APROBADO, "100000")
+        self._salida(vehiculo, date(2026, 1, 6), "OPERACIONES", EstadoSalida.VALIDADO, "50000")
+        self._salida(vehiculo, date(2026, 1, 7), "OPERACIONES", EstadoSalida.REPORTADO, "99999")
+        self._salida(vehiculo, date(2026, 1, 8), "OPERACIONES", EstadoSalida.RECHAZADO, "99999")
+        self._salida(vehiculo, date(2026, 1, 9), "OPERACIONES", EstadoSalida.ELIMINADO, "99999")
+        self.assertEqual(
+            self._por_area()["OPERACIONES"]["points"], [["1/1/2026", 150000]]
+        )
+
+    def test_anio_filtra(self):
+        """Corrección del hardcode `execute([2024])` del legacy."""
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, date(2025, 1, 5), "OPERACIONES", EstadoSalida.APROBADO, "10000")
+        self._salida(vehiculo, date(2026, 1, 5), "OPERACIONES", EstadoSalida.APROBADO, "20000")
+        self.assertEqual(self._por_area(2025)["OPERACIONES"]["points"], [["1/1/2025", 10000]])
+        self.assertEqual(self._por_area(2026)["OPERACIONES"]["points"], [["1/1/2026", 20000]])
+        # Sin año: todo el histórico.
+        self.assertEqual(len(self._por_area()["OPERACIONES"]["points"]), 2)
+
+    def test_im_va_al_eje_secundario(self):
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, date(2026, 1, 5), "I&M", EstadoSalida.APROBADO, "100000")
+        serie_im = self._por_area()["I&M"]
+        self.assertEqual(serie_im["yAxis"], "a2")
+        self.assertEqual(serie_im["defaultPoint"]["type"], "line")
+        self.assertEqual(serie_im["defaultPoint"]["marker"]["type"], "circle")
+        self.assertEqual(serie_im["points"], [["1/1/2026", 100000]])
+
+    def test_area_vacia_excluida(self):
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, date(2026, 1, 5), "", EstadoSalida.APROBADO, "100000")
+        self.assertEqual(self._por_area(), {})
+
+    def test_http_series_chart(self):
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, date(2026, 1, 5), "OPERACIONES", EstadoSalida.APROBADO, "100000")
+        user = User.objects.create_user(username="1000222", password="x")
+        api = APIClient()
+        api.force_authenticate(user=user)
+        resp = api.get("/transporte/informes/series-chart/", {"anio": 2026})
+        self.assertEqual(resp.status_code, 200)
+        serie = resp.json()["series"]
+        self.assertEqual(serie[0]["name"], "OPERACIONES")
+        self.assertEqual(serie[0]["points"], [["1/1/2026", 100000]])
+
+    def test_http_anio_invalido(self):
+        user = User.objects.create_user(username="1000333", password="x")
+        api = APIClient()
+        api.force_authenticate(user=user)
+        resp = api.get("/transporte/informes/series-chart/", {"anio": 1999})
+        self.assertEqual(resp.status_code, 400)
