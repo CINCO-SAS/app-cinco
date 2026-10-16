@@ -23,6 +23,7 @@ Permisos: lectura a autenticados; la alta exige `transporte.add_salida`
 `transporte.delete_salida`. El control por FILA (jefe del área/carpeta,
 CR-9) lo hace el servicio y se expone en el serializer (B15).
 """
+from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
@@ -35,7 +36,7 @@ from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 
 from ..models import Salida
 from ..serializers import salida_serializer
-from ..services import SalidaService
+from ..services import InformeService, SalidaService
 from .paginacion import PaginacionTransporte
 
 
@@ -85,6 +86,41 @@ class SalidaViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
         page = self.paginate_queryset(salidas)
         serializer = self.get_serializer(page, many=True)
         return self.get_paginated_response(serializer.data)
+
+    # ------------------------------------------------------------------ #
+    # Export server-side (B4 / §5.7)
+    # ------------------------------------------------------------------ #
+    @extend_schema(
+        auth=[{"sessionAuth": [], "apiKeyAuth": []}],
+        responses={200: None},
+        description=(
+            "Export server-side de salidas (B4, §5.7): ?formato=xlsx|csv con "
+            "los mismos filtros server-side que B1. El parámetro se llama "
+            "`formato` porque DRF reserva `format` para su content "
+            "negotiation (?format=) y lo devolvería 404."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="export")
+    def export(self, request):
+        try:
+            salidas = SalidaService.listar(request.query_params)
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            contenido, content_type, extension = InformeService.exportar(
+                salidas, request.query_params.get("formato", "xlsx")
+            )
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        respuesta = HttpResponse(contenido, content_type=content_type)
+        respuesta["Content-Disposition"] = (
+            f'attachment; filename="salidas.{extension}"'
+        )
+        return respuesta
 
     def retrieve(self, request, *args, **kwargs):
         try:

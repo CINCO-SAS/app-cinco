@@ -19,8 +19,12 @@ Fórmula (idéntica a la liquidación de la sábana, JS 4270–4336):
 - retefuente = 1 % de valor_base; pagar = valor_base − retefuente
 """
 import calendar
-from decimal import Decimal
+import csv
+import io
+from decimal import Decimal, InvalidOperation
 from html import escape
+
+from openpyxl import Workbook
 
 from ..models import (
     ConsecutivoMensual,
@@ -44,6 +48,26 @@ MESES = (
 # Encabezado legal de la cuenta de cobro (plantilla legacy).
 EMPRESA = "COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA S.A.S"
 NIT = "811042087-2"
+
+# Cabecera del export (F5-4), en el orden de la tabla de la sábana.
+COLUMNAS_EXPORT = (
+    "FECHA", "PLACA", "CEDULA CONDUCTOR", "NOMBRE CONDUCTOR", "AREA",
+    "CARPETA", "SEDE", "VALOR DIA", "NOVEDAD", "VALOR NOVEDAD",
+    "TOTAL A PAGAR", "ESTADO", "OBSERVACION",
+)
+
+
+def _a_numero(valor):
+    """
+    Convierte una cadena numérica a `Decimal` para que las celdas XLSX
+    queden como número real; si no es número, la deja tal cual.
+    """
+    if not isinstance(valor, str):
+        return valor
+    try:
+        return Decimal(valor)
+    except InvalidOperation:
+        return valor
 
 
 class InformeService:
@@ -369,3 +393,84 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
             .distinct()
             .order_by("area")
         )
+
+    # ------------------------------------------------------------------ #
+    # Export server-side (F5-4, fila B4 / §5.7)
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def exportar(queryset, formato="xlsx"):
+        """
+        F5-4: export **server-side** de un queryset de salidas (reemplaza
+        el export client-side de DataTables, §5.7).
+
+        Devuelve `(contenido, content_type, extension)`. `formato`:
+        - `xlsx`: openpyxl, columnas de la sábana (números reales).
+        - `csv`: separador `;` + BOM utf-8 — Excel en español abre los
+          acentos y separa sin configuración adicional.
+        """
+        formato = str(formato or "xlsx").strip().lower()
+        filas = InformeService._filas_export(queryset)
+        if formato == "csv":
+            return (
+                InformeService._csv_export(filas),
+                "text/csv; charset=utf-8",
+                "csv",
+            )
+        if formato == "xlsx":
+            return (
+                InformeService._xlsx_export(filas),
+                "application/vnd.openxmlformats-officedocument"
+                ".spreadsheetml.sheet",
+                "xlsx",
+            )
+        raise ValueError("Formato no soportado: use xlsx o csv.")
+
+    @staticmethod
+    def _filas_export(queryset):
+        """Cabecera + filas del export por salida (sin N+1)."""
+        filas = []
+        for salida in queryset.select_related("vehiculo", "conductor", "novedad"):
+            novedad = getattr(salida, "novedad", None)
+            filas.append(
+                [
+                    salida.fecha_salida.isoformat(),
+                    salida.vehiculo.placa,
+                    salida.conductor.cedula if salida.conductor else "",
+                    salida.conductor.nombre_completo if salida.conductor else "",
+                    salida.area or "",
+                    salida.carpeta or "",
+                    salida.sede or "",
+                    str(salida.valor_dia),
+                    novedad.tipo if novedad else "",
+                    str(novedad.valor) if novedad else "",
+                    str(salida.total_a_pagar),
+                    salida.estado,
+                    salida.observacion or "",
+                ]
+            )
+        return [list(COLUMNAS_EXPORT)] + filas
+
+    @staticmethod
+    def _csv_export(filas):
+        """CSV con `;` y BOM utf-8 (compatibilidad con Excel español)."""
+        buffer = io.StringIO()
+        escritor = csv.writer(buffer, delimiter=";")
+        escritor.writerows(filas)
+        return ("﻿" + buffer.getvalue()).encode("utf-8")
+
+    @staticmethod
+    def _xlsx_export(filas):
+        """Libro XLSX con una hoja y los valores numéricos reales."""
+        libro = Workbook()
+        hoja = libro.active
+        hoja.title = "Transporte"
+        for indice, fila in enumerate(filas):
+            hoja.append(
+                [
+                    _a_numero(valor) if indice > 0 else valor
+                    for valor in fila
+                ]
+            )
+        salida = io.BytesIO()
+        libro.save(salida)
+        return salida.getvalue()

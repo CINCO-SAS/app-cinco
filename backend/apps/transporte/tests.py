@@ -15,6 +15,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 import qrcode
+from openpyxl import load_workbook
 from PIL import Image
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -3074,3 +3075,86 @@ class InformeMensualTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         resp = self.api.get("/transporte/informes/areas/", {"mes": 10, "anio": 1999})
         self.assertEqual(resp.status_code, 400)
+
+
+class ExportTests(TestCase):
+    """F5-4: export server-side xlsx/csv (fila B4, §5.7)."""
+
+    @classmethod
+    def setUpClass(cls):
+        # listar() hace select_related(tecnico_asignado) → FK a Empleado (azul).
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="1000555", password="x")
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.vehiculo = FlotaService.crear(
+            {
+                "placa": "EXP123", "tipo_vehiculo": "CAMIONETA", "marca": "MAZDA",
+                "referencia": "CX5", "modelo_anio": 2022, "tipo_contrato": "PROPIO",
+                "nombre_propietario": "CINCO SAS", "cedula_propietario": "900111222",
+                "valor_dia_base": 85000, "fecha_soat": date(2027, 1, 1),
+                "fecha_cda": date(2026, 11, 15),
+            },
+            actor=None,
+        )
+
+    def _salida(self, dia, estado=EstadoSalida.APROBADO):
+        return Salida.objects.create(
+            vehiculo=self.vehiculo, fecha_salida=date(2026, 10, dia),
+            area="OPERACIONES", valor_dia=Decimal("85000"), estado=estado,
+        )
+
+    def _get(self, **params):
+        return self.api.get("/transporte/salidas/export/", params)
+
+    def test_xlsx_con_filas_y_numeros_reales(self):
+        self._salida(1)
+        resp = self._get(formato="xlsx")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("spreadsheetml", resp["Content-Type"])
+        self.assertIn('attachment; filename="salidas.xlsx"', resp["Content-Disposition"])
+        self.assertTrue(resp.content.startswith(b"PK"))  # es un zip
+        libro = load_workbook(io.BytesIO(resp.content))
+        filas = list(libro.active.iter_rows(values_only=True))
+        self.assertEqual(filas[0][1], "PLACA")
+        self.assertEqual(filas[1][1], "EXP123")
+        # VALOR DIA y TOTAL A PAGAR quedan como número real, no texto.
+        self.assertEqual(filas[1][7], 85000.0)
+        self.assertEqual(filas[1][10], 85000.0)
+
+    def test_csv_con_bom_y_separador_punto_y_coma(self):
+        self._salida(1)
+        resp = self._get(formato="csv")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/csv", resp["Content-Type"])
+        self.assertTrue(resp.content.startswith(b"\xef\xbb\xbf"))  # BOM utf-8
+        texto = resp.content.decode("utf-8-sig")
+        self.assertIn("FECHA;PLACA", texto)
+        self.assertIn("EXP123", texto)
+
+    def test_filtros_server_side(self):
+        self._salida(1, EstadoSalida.APROBADO)
+        self._salida(2, EstadoSalida.ELIMINADO)
+        # Sin estado se excluyen las eliminadas: cabecera + 1 fila.
+        lineas = self._get(formato="csv").content.decode("utf-8-sig").strip().splitlines()
+        self.assertEqual(len(lineas), 2)
+        # Filtro por estado explícito.
+        lineas = self._get(formato="csv", estado="ELIMINADO").content.decode("utf-8-sig").strip().splitlines()
+        self.assertEqual(len(lineas), 2)
+        self.assertIn("ELIMINADO", lineas[1])
+
+    def test_formato_no_soportado(self):
+        self.assertEqual(self._get(formato="pdf").status_code, 400)
+
+    def test_csv_con_novedad(self):
+        salida = self._salida(1)
+        Novedad.objects.create(
+            salida=salida, tipo=TipoNovedad.DESCUENTO,
+            valor=Decimal("5000"), descripcion="descuento",
+        )
+        texto = self._get(formato="csv").content.decode("utf-8-sig")
+        self.assertIn("DESCUENTO", texto)
+        self.assertIn("80000.00", texto)  # 85000 − 5000

@@ -15,7 +15,7 @@
   **B2, B4 y B3 (núcleo) cerrados** — el corazón transaccional (registro
   de salidas con CR-9, anticolisión y máquina de estados D-A11, el
   backoffice F4 y el reporte fotográfico F3).
-- **255 tests OK**, `manage.py check` sin issues, DoD
+- **260 tests OK**, `manage.py check` sin issues, DoD
   cumplido en cada hito (tests verdes → check → commit local).
 - **Cero ejecución contra MySQL real** (G2 sin conectividad); los tests
   corren en SQLite aislado (`config.settings_test_transporte`).
@@ -33,7 +33,7 @@
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | Núcleo cerrado (B2): alta S6, consulta B1, escaneo S1; fotos y S2–S4 pendientes | ~35% |
 | F4 Backoffice y Novedades | Modelos listos; servicio de estados listo (B2), faltan endpoints | 0% |
-| F5 Liquidaciones e Informes | Núcleo cerrado (A2); **F5-1, F5-2 y F5-3 cerrados**; resto F5-4…F5-7 | ~70% |
+| F5 Liquidaciones e Informes | Núcleo cerrado (A2); **F5-1…F5-4 cerrados**; resto F5-5…F5-7 | ~75% |
 | F6 ETL histórico | Esqueleto cerrado (A3); corrida real → C3 | ~40% |
 | F7 Cutover / F8 Estabilización | — | 0% |
 
@@ -103,7 +103,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | §5.4 `ConductorService` | ABM, licencia, edad derivada | ✅ |
 | §5.5 `ReporteFotograficoService` | agenda + horario 10–16 | ⬜ → B3 |
 | §5.6 `PlanillaService` (CR-11) | planillas con exclusión de motos | ⬜ |
-| §5.7 `InformeService` | sábanas con filtros server-side + export | 🟡 **F5-1 cuenta de cobro ✅ · F5-2 series_chart ✅ · F5-3 informe mensual ✅** (filtros estado/sede/área/carpeta/search + /areas/); export ⬜ (F5-4) |
+| §5.7 `InformeService` | sábanas con filtros server-side + export | 🟡 **F5-1 cuenta de cobro ✅ · F5-2 series_chart ✅ · F5-3 informe mensual ✅ · F5-4 export ✅** (`GET /salidas/export/?formato=xlsx|csv`, 13 columnas, mismos filtros B1) |
 | §5.8 `ParametrosService` | cierres + jefes | ✅ A1 |
 | §5.9 `PermisoService` | grupos/permisos vs cédulas hardcodeadas | 🟡 referenciado (`has_perm`), declaración → E3 |
 
@@ -113,8 +113,8 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 
 | Bloque | Entregado | Pendiente |
 |---|---|---|
-| **B (gestión)** | B1 filtros `?desde=&hasta=` ✅ · B2 ver cierres ✅ · B8 ficha+semáforo ✅ · B10 valor día/total ✅ (`total_a_pagar`) · B14 badge reportado ✅ · B5/B12/B13 🟡 servicio, falta HTTP (B4) | B3 ruta cierres `{mes}/{anio}/` · B4 export xlsx · B6/B7 novedades · B9 `buscar_movil` (G2/G4) · B11 centros de costos (G3) · B15 permisos por fila |
-| **S (kiosco)** | S1 escanear ✅ · S6 grabar salida ✅ | S2 asignar móvil (G4/D-A9) · S3 validar · S4 consulta por placa · S5 planillas |
+| **B (gestión)** | B1 filtros `?desde=&hasta=` ✅ · B2 ver cierres ✅ · B8 ficha+semáforo ✅ · B10 valor día/total ✅ (`total_a_pagar`) · B14 badge reportado ✅ · **B4 export xlsx ✅ (F5-4)** · B6/B7 novedades ✅ · B5/B12/B13 🟡 servicio, falta HTTP | B3 ruta cierres `{mes}/{anio}/` · B9 `buscar_movil` (G2/G4) · B11 centros de costos (G3) · B15 permisos por fila |
+| **S (kiosco)** | S1 escanear ✅ · S6 grabar salida ✅ · S3 pre-chequeo ✅ · S4 consulta por placa ✅ | S2 asignar móvil (G4/D-A9) · S5 planillas |
 | **T (flota)** | T1 ficha · T2 fotos/docs · T3 bancarios · T4 CSV · T5 QR ✅ | T6 teléfonos (G2 + D-A9/D-A10) |
 | **D (backoffice/tabla3)** | D1 jefes · D2 cierres · D3 liquidaciones · D4 pagos ✅ | — |
 | **C/F** | C1 conductores ✅ | F1 reporte fotográfico → B3 |
@@ -207,4 +207,5 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | 2026-10-15 | Kiosco S3/S4: pre-chequeo /kiosco/validar/ y consulta /kiosco/vehiculo/{placa}/ (225 tests) | `bac53fe` |
 | 2026-10-15 | F5-1 cuenta de cobro: /informes/cuenta-cobro/ HTML imprimible con importe/pagador en servidor (238 tests) | `ec9b2db` |
 | 2026-10-15 | F5-2 gráfico por área: /informes/series-chart/ con año como filtro (corrige hardcode 2024) (246 tests) | `eb2656f` |
-| 2026-10-15 | F5-3 informe mensual: /informes/mensual/ + /areas/ con filtros server-side; fix paginación (500 latente en GET /salidas/) (255 tests) | *(este commit)* |
+| 2026-10-15 | F5-3 informe mensual: /informes/mensual/ + /areas/ con filtros server-side; fix paginación (500 latente en GET /salidas/) (255 tests) | `7f0f362` |
+| 2026-10-15 | F5-4 export server-side: /salidas/export/?formato=xlsx|csv, 13 columnas, mismos filtros B1 (260 tests) | *(este commit)* |
