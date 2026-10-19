@@ -19,7 +19,7 @@
   export server-side, **WFM masivo (cola + lote + worker CLI)**,
   **planilla oficial de salida** (consecutivo atómico + QR) y
   **agregados de sábana** (día/área/matriz/nómina/liquidación).
-- **353 tests OK**, `manage.py check` sin issues, DoD
+- **355 tests OK**, `manage.py check` sin issues, DoD
   cumplido en cada hito (tests verdes → check → commit local).
 - **Cero ejecución contra MySQL real** (G2 sin conectividad); los tests
   corren en SQLite aislado (`config.settings_test_transporte`).
@@ -131,7 +131,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 
 | Métrica | Valor |
 |---|---|
-| Tests | **353 OK** (evolución 87 → 105 → 126 → 134 → 162 → 182 → 214 → 225 → 238 → 246 → 255 → 260 → 330 → 339 → 351 → 353) |
+| Tests | **355 OK** (evolución 87 → 105 → 126 → 134 → 162 → 182 → 214 → 225 → 238 → 246 → 255 → 260 → 330 → 339 → 351 → 353 → 355) |
 | Modelos Django | 16 (+ `0001_initial`–`0005`, choices, admin) |
 | Endpoints activos | 12 recursos router (`/conductores/`, `/vehiculos/`, `/parametros/cierres/`, `/parametros/jefes/`, `/liquidaciones/`, `/planillas/`, `/informes/`, `/salidas/`, `/kiosco/`, `/reportes-fotograficos/`, `/validaciones/`, `/wfm/`) + acciones (`resumen`, `documentos`, `importar-bancarios`, `qr.png`, `inactivar`×2, `pago-mensual`, `pronto-pago`, `sabana`, `consecutivo`, `pago`, `escanear`, `identificar`, `vehiculo/{placa}`, `validar`×3, `aprobar-lote`, `aprobar`, `rechazar`, `novedad`, `historial`, `export`, `cuenta-cobro`, `series-chart`, `mensual`, `areas`, `dia`, `area`, `areas-mes`, `nomina`, `liquidacion`, `generar`, `validar-agenda`, `vehiculo-placa`, `wfm/validar`, `wfm/crear-job`, `wfm/estado-job`) |
 | Comandos CLI | `migrate_transporte_legacy` (ETL) · **`wfm_worker` (cola WFM)** |
@@ -218,4 +218,5 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | 2026-10-19 | F5-5 WFM + F5-6 planillas: cola+lote WFM con worker y planilla oficial con consecutivo y QR (330 tests) | `6c2e10c` |
 | 2026-10-19 | Hallazgos de calidad: permisos de modelo en /planillas/, tecnico_cedula real, filtro duro MOTO, worker `wfm_worker`, `.venv` raíz eliminado (339 tests) | `33e8d7e` |
 | 2026-10-19 | F5-7 agregados de sábana: /informes/dia, /area, /areas-mes, /nomina y /liquidacion server-side (351 tests) | `c39ee9a` |
-| 2026-10-19 | Revisión de cambios subidos: registro real de `/validaciones/` (desde B4 devolvía 404), `serializer_class` en cierres/jefes (500 latente), fix clave duplicada `tipo_vinculacion` en ETL, paginación canónica en 6 listados, inline bancarios en admin (353 tests) | *(este commit)* |
+| 2026-10-19 | Revisión de cambios subidos: registro real de `/validaciones/` (desde B4 devolvía 404), `serializer_class` en cierres/jefes (500 latente), fix clave duplicada `tipo_vinculacion` en ETL, paginación canónica en 6 listados, inline bancarios en admin (353 tests) | `91615d4` |
+| 2026-10-19 | Refactor F5-7 (mejora sobre el legacy): claves de estado reales (`reportado`/`total`), RENTING separado de PROPIO, importes en `Decimal` (355 tests) | *(este commit)* |

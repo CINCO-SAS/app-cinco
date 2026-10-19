@@ -398,46 +398,56 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
     # ------------------------------------------------------------------ #
     # Agregados de sábana (F5-7)
     # ------------------------------------------------------------------ #
-    # Clave del contador de estado en el `arr_estado` del JS de la sábana:
-    # "pendiente" es REPORTADO (JS 3007–3011).
+    # Contadores por estado en `arr_estado`. El legacy llamaba "pendiente"
+    # a REPORTADO (JS 3007–3011); se usa el nombre real del estado.
     CLAVES_ESTADO = {
         EstadoSalida.APROBADO: "aprobado",
         EstadoSalida.VALIDADO: "validado",
-        EstadoSalida.REPORTADO: "pendiente",
+        EstadoSalida.REPORTADO: "reportado",
         EstadoSalida.RECHAZADO: "rechazado",
     }
 
     @staticmethod
     def _bloque_vacio():
-        """Fila de agregado con las claves exactas del JS legacy."""
+        """Fila de agregado: contadores por tipo de contrato y por estado."""
         return {
             "propios": 0,
+            "renting": 0,
             "externos": 0,
             "total_vehi": 0,
-            "total_dia": 0,
+            "total_dia": CERO,
             "arr_estado": {
-                "aprobado": {"cnt": 0, "valor": 0},
-                "validado": {"cnt": 0, "valor": 0},
-                "pendiente": {"cnt": 0, "valor": 0},
-                "rechazado": {"cnt": 0, "valor": 0},
-                "total_est": {"cnt": 0, "valor": 0},
+                "aprobado": {"cnt": 0, "valor": CERO},
+                "validado": {"cnt": 0, "valor": CERO},
+                "reportado": {"cnt": 0, "valor": CERO},
+                "rechazado": {"cnt": 0, "valor": CERO},
+                "total": {"cnt": 0, "valor": CERO},
             },
         }
+
+    @staticmethod
+    def _dinero(valor):
+        """`Decimal` a 2 decimales (el legacy truncaba con `parseInt`)."""
+        return (valor if valor is not None else CERO).quantize(Decimal("0.01"))
 
     @staticmethod
     def _acumular(bloque, salida, valor, contar=True):
         """
         Acumula una salida en un bloque de agregado (JS 2986–3154).
 
-        `propios`/`externos`: EXTERNO es externo; PROPIO y RENTING son
-        propios (`tipo_contrato !== 'EXTERNO'`). Los importes van en
-        pesos enteros como el `parseInt` del legacy. `arr_estado` se
-        acumula SIEMPRE (aunque `contar` sea False), como el legacy que
-        filtraba los totales pero no el desglose de estados.
+        Cuenta por tipo de contrato por separado: PROPIO, RENTING y
+        EXTERNO (el legacy metía RENTING dentro de `propios`). Los
+        importes son `Decimal` a 2 decimales (el legacy los truncaba a
+        entero con `parseInt`). `arr_estado` se acumula SIEMPRE (aunque
+        `contar` sea False), como el legacy que filtraba los totales
+        pero no el desglose de estados.
         """
         if contar:
-            if salida.vehiculo.tipo_contrato == TipoContrato.EXTERNO:
+            contrato = salida.vehiculo.tipo_contrato
+            if contrato == TipoContrato.EXTERNO:
                 bloque["externos"] += 1
+            elif contrato == TipoContrato.RENTING:
+                bloque["renting"] += 1
             else:
                 bloque["propios"] += 1
             bloque["total_vehi"] += 1
@@ -446,8 +456,8 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
         if clave is not None:
             bloque["arr_estado"][clave]["cnt"] += 1
             bloque["arr_estado"][clave]["valor"] += valor
-        bloque["arr_estado"]["total_est"]["cnt"] += 1
-        bloque["arr_estado"]["total_est"]["valor"] += valor
+        bloque["arr_estado"]["total"]["cnt"] += 1
+        bloque["arr_estado"]["total"]["valor"] += valor
 
     @staticmethod
     def _area_de(salida):
@@ -474,7 +484,7 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
         for salida in salidas:
             nombre_area = InformeService._area_de(salida)
             nombre_carpeta = InformeService._carpeta_de(salida)
-            valor = int(salida.total_a_pagar)
+            valor = InformeService._dinero(salida.total_a_pagar)
             contar = (not solo_aprobados) or salida.estado in (
                 EstadoSalida.APROBADO,
                 EstadoSalida.VALIDADO,
@@ -569,13 +579,22 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
         matriz = {}
         for salida in salidas:
             nombre_area = InformeService._area_de(salida)
-            valor = int(salida.total_a_pagar)
+            valor = InformeService._dinero(salida.total_a_pagar)
             bloque = matriz.setdefault(nombre_area, {}).setdefault(
                 salida.fecha_salida.month,
-                {"propios": 0, "externos": 0, "total_vehi": 0, "total_dia": 0},
+                {
+                    "propios": 0,
+                    "renting": 0,
+                    "externos": 0,
+                    "total_vehi": 0,
+                    "total_dia": CERO,
+                },
             )
-            if salida.vehiculo.tipo_contrato == TipoContrato.EXTERNO:
+            contrato = salida.vehiculo.tipo_contrato
+            if contrato == TipoContrato.EXTERNO:
                 bloque["externos"] += 1
+            elif contrato == TipoContrato.RENTING:
+                bloque["renting"] += 1
             else:
                 bloque["propios"] += 1
             bloque["total_vehi"] += 1
@@ -642,7 +661,7 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
                     "cedula_pago": pagador["cedula_pago"],
                     "nombre_pago": pagador["nombre_pago"],
                     "total_dias": 0,
-                    "valor_dia": int(salida.valor_dia),
+                    "valor_dia": InformeService._dinero(salida.valor_dia),
                     "valor_base": CERO,
                     "estado": salida.estado,
                     "observacion": salida.observacion or "",
@@ -692,7 +711,7 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
                     "propietario": vehiculo.nombre_propietario or "SIN PROPIETARIO",
                     "tipo_contrato": vehiculo.tipo_contrato,
                     "total_dias": 0,
-                    "valor_dia": int(salida.valor_dia),
+                    "valor_dia": InformeService._dinero(salida.valor_dia),
                     "valor_base": CERO,
                     "cedula_pago": pagador["cedula_pago"],
                     "nombre_pago": pagador["nombre_pago"],

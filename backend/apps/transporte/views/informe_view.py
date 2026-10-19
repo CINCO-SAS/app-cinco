@@ -143,8 +143,8 @@ class InformeViewSet(GenericViewSet):
         responses={200: dict},
         description=(
             "Agregado 'día a día' de UNA fecha: áreas con desglose por "
-            "carpetas (propios/externos, total_dia) y contadores por "
-            "estado (arr_estado: aprobado/validado/pendiente/rechazado)."
+            "carpetas (propios/renting/externos, total_dia) y contadores "
+            "por estado (arr_estado: aprobado/validado/reportado/rechazado)."
         ),
     )
     @action(detail=False, methods=["get"], url_path="dia")

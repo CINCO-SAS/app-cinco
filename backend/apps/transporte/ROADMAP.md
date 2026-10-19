@@ -202,7 +202,7 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
       QR en disco. Permisos: exige `add_consecutivomensual` (generar
       planilla ESCRIBE consecutivos). *Pendiente menor (P1): el formato
       físico definitivo requiere `planilla_salida.php` verificado.*
-- [x] **F5-7 · Agregados de sábana** — ✅ **CERRADO** (351 tests). Agregaciones
+- [x] **F5-7 · Agregados de sábana** — ✅ **CERRADO** (355 tests). Agregaciones
       server-side del JS de la sábana (`transporte_salida_informes.php`):
       `GET /informes/dia/?fecha=` (día → área → carpetas con `arr_estado`),
       `GET /informes/area/?mes=&anio=&solo_aprobados=` (totales del mes,
@@ -212,10 +212,13 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
       pagador en servidor CR-13; **`centro_costo` vacío hasta G3/B11** —
       el legacy lo tomaba de `map_carpetas` en JS) y
       `GET /informes/liquidacion/?mes=&anio=` (por placa, rete 1 %,
-      consecutivo). Fidelidad: `pendiente` = REPORTADO, EXTERNO es el
-      único "externo" (PROPIO/RENTING son propios), importes en pesos
-      enteros (`parseInt`), REPORTADO/ELIMINADO excluidos en nómina y
-      liquidación. *El "pronto pago" ya existía en A2 (`/liquidaciones/pronto-pago/`).*
+      consecutivo). REPORTADO/ELIMINADO excluidos en nómina y liquidación.
+      *Mejorado vs. legacy (no se replican sus rarezas):* claves de
+      estado con el nombre real (`reportado`, `total`; el legacy decía
+      `pendiente`/`total_est`), RENTING contado **aparte** de PROPIO (el
+      legacy lo metía en `propios`) e importes en `Decimal` con 2
+      decimales (el legacy los truncaba a entero con `parseInt`).
+      *El "pronto pago" ya existía en A2 (`/liquidaciones/pronto-pago/`).*
 
 ---
 
@@ -285,4 +288,5 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-19 | F5-5 WFM + F5-6 planillas: cola+lote WFM con worker y planilla oficial con consecutivo y QR (330 tests) | `6c2e10c` |
 | 2026-10-19 | Hallazgos de calidad: permisos de modelo en /planillas/, tecnico_cedula real, filtro duro MOTO (CR-11), worker `wfm_worker`, .venv raíz roto eliminado (339 tests) | `33e8d7e` |
 | 2026-10-19 | F5-7 agregados de sábana: /informes/dia, /area, /areas-mes, /nomina y /liquidacion server-side (351 tests) | `c39ee9a` |
-| 2026-10-19 | Revisión de cambios subidos: registro real de `/validaciones/` (desde B4 el ViewSet existía pero la ruta devolvía 404), `serializer_class` en cierres/jefes (500 latente en GET), fix clave duplicada `tipo_vinculacion` en ETL de conductores, paginación canónica en 6 listados, inline de datos bancarios en admin (353 tests) | *(este commit)* |
+| 2026-10-19 | Revisión de cambios subidos: registro real de `/validaciones/` (desde B4 el ViewSet existía pero la ruta devolvía 404), `serializer_class` en cierres/jefes (500 latente en GET), fix clave duplicada `tipo_vinculacion` en ETL de conductores, paginación canónica en 6 listados, inline de datos bancarios en admin (353 tests) | `91615d4` |
+| 2026-10-19 | Refactor F5-7 (mejora sobre el legacy): claves de estado reales (`reportado`/`total`), RENTING separado de PROPIO, importes en `Decimal` con 2 decimales (355 tests) | *(este commit)* |

@@ -3314,6 +3314,16 @@ class InformeAgregadosTests(TestCase):
             },
             actor=None,
         )
+        self.renting = FlotaService.crear(
+            {
+                "placa": "AGR300", "tipo_vehiculo": "VANS_CARGA",
+                "marca": "RENAULT", "referencia": "KANGOO", "modelo_anio": 2023,
+                "tipo_contrato": "RENTING", "nombre_propietario": "ARRENDADORA",
+                "cedula_propietario": "700111222", "valor_dia_base": 90000,
+                "fecha_soat": date(2027, 1, 1), "fecha_cda": date(2026, 11, 15),
+            },
+            actor=None,
+        )
 
     def _salida(self, vehiculo, dia, estado, area="OPERACIONES",
                 carpeta="LOGISTICA", valor="100000"):
@@ -3337,10 +3347,10 @@ class InformeAgregadosTests(TestCase):
         self.assertEqual(area["externos"], 1)
         self.assertEqual(area["total_vehi"], 2)
         self.assertEqual(area["total_dia"], 200000)
-        # arr_estado: "pendiente" es REPORTADO (JS 3007).
+        # arr_estado: "reportado" es el estado REPORTADO.
         self.assertEqual(area["arr_estado"]["aprobado"]["cnt"], 1)
-        self.assertEqual(area["arr_estado"]["pendiente"]["cnt"], 1)
-        self.assertEqual(area["arr_estado"]["total_est"]["cnt"], 2)
+        self.assertEqual(area["arr_estado"]["reportado"]["cnt"], 1)
+        self.assertEqual(area["arr_estado"]["total"]["cnt"], 2)
         carpetas = {c["carpeta"]: c for c in area["carpetas"]}
         self.assertEqual(set(carpetas), {"LOGISTICA", "ASEO"})
         self.assertEqual(carpetas["ASEO"]["externos"], 1)
@@ -3363,7 +3373,27 @@ class InformeAgregadosTests(TestCase):
             valor=Decimal("15000"), descripcion="adicional",
         )
         datos = InformeService.por_dia(date(2026, 10, 5))
-        self.assertEqual(datos["areas"][0]["total_dia"], 115000)
+        self.assertEqual(datos["areas"][0]["total_dia"], Decimal("115000.00"))
+
+    def test_por_dia_separa_renting_de_propios(self):
+        """RENTING ya no se cuenta dentro de `propios` (refactor vs legacy)."""
+        self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.APROBADO)
+        self._salida(self.renting, date(2026, 10, 5), EstadoSalida.APROBADO)
+        self._salida(self.externo, date(2026, 10, 5), EstadoSalida.APROBADO)
+        area = self._area(InformeService.por_dia(date(2026, 10, 5)), "OPERACIONES")
+        self.assertEqual(area["propios"], 1)
+        self.assertEqual(area["renting"], 1)
+        self.assertEqual(area["externos"], 1)
+        self.assertEqual(area["total_vehi"], 3)
+
+    def test_por_dia_importes_con_decimales(self):
+        """Los importes conservan centavos (el legacy los truncaba a entero)."""
+        self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.APROBADO,
+                     valor="1000.25")
+        area = self._area(InformeService.por_dia(date(2026, 10, 5)), "OPERACIONES")
+        self.assertEqual(area["total_dia"], Decimal("1000.25"))
+        self.assertEqual(area["arr_estado"]["aprobado"]["valor"], Decimal("1000.25"))
+        self.assertEqual(area["arr_estado"]["total"]["valor"], Decimal("1000.25"))
 
     # ------------------------------ por_area ---------------------------- #
     def test_por_area_mes_y_solo_aprobados(self):
@@ -3382,8 +3412,8 @@ class InformeAgregadosTests(TestCase):
         self.assertEqual(solo["total_vehi"], 2)
         self.assertEqual(solo["total_dia"], 200000)
         # …pero arr_estado sigue reflejando todas las filas (JS 2860–2909).
-        self.assertEqual(solo["arr_estado"]["pendiente"]["cnt"], 1)
-        self.assertEqual(solo["arr_estado"]["total_est"]["cnt"], 3)
+        self.assertEqual(solo["arr_estado"]["reportado"]["cnt"], 1)
+        self.assertEqual(solo["arr_estado"]["total"]["cnt"], 3)
 
     def test_por_area_excluye_otro_mes(self):
         self._salida(self.vehiculo, date(2026, 9, 30), EstadoSalida.APROBADO)
