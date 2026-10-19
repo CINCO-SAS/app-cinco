@@ -14,19 +14,30 @@ Respuesta estandarizada:
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
 from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 
+from ..models import ConsecutivoMensual
 from ..serializers import planilla_serializer
 from ..services import PlanillaService
 
 
 class PlanillaViewSet(GenericViewSet):
-    """Genera la Planilla Oficial de Salida para uno o varios vehículos."""
+    """Genera la Planilla Oficial de Salida para uno o varios vehículos.
 
-    permission_classes = [IsAuthenticatedOrAPIKey]
+    Generar una planilla ESCRIBE: crea el ``ConsecutivoMensual`` que la
+    respalda, así que el POST exige ``add_consecutivomensual`` (Django lo
+    crea al migrar), igual que el resto del módulo exige permiso de modelo
+    para escribir (WFM → ``change_salida``; cierres/jefes → sus modelos).
+    Sin este gate cualquier usuario autenticado podía generar consecutivos.
+    """
+
+    # DjangoModelPermissions lo exige para resolver el modelo.
+    queryset = ConsecutivoMensual.objects.all()
+    permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
 
     @extend_schema(
         request=planilla_serializer.PlanillaInputSerializer,

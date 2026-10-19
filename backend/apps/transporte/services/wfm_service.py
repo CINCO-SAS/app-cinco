@@ -53,7 +53,7 @@ from datetime import date, datetime, time, timedelta
 import uuid
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, When
 from django.utils import timezone
 
 from apps.empleados.models import Empleado
@@ -619,6 +619,54 @@ class WfmService:
                 edad = (ahora - job.locked_at).total_seconds()
                 if edad <= stale_after:
                     return None  # otro worker lo tiene
+            job.estado = EstadoWfmJob.PROCESANDO
+            job.locked_at = ahora
+            job.locked_by = str(worker_id or "")
+            job.started_at = job.started_at or ahora
+            job.mensaje = "Procesando job WFM"
+            job.save(
+                update_fields=[
+                    "estado", "locked_at", "locked_by", "started_at",
+                    "mensaje", "updated_at",
+                ]
+            )
+            return job
+
+    @classmethod
+    def reclamar_siguiente(cls, worker_id, locked_before=None):
+        """
+        Reclama el siguiente job de la cola (legacy ClaimNextJob 590–626).
+
+        Candidatos: ``PENDIENTE`` o ``PROCESANDO`` sin lock fresco (el
+        legacy excluye locks de menos de 10 minutos). Precedencia legada:
+        un ``PROCESANDO`` huérfano se retoma antes que un ``PENDIENTE``
+        nuevo (``ORDER BY estado='procesando' DESC, updated_at, id``).
+
+        Devuelve el job reclamado o ``None`` si la cola está vacía.
+        """
+        ahora = timezone.now()
+        locked_before = locked_before or (ahora - timedelta(minutes=10))
+        with transaction.atomic():
+            job = (
+                WfmJob.objects.select_for_update()
+                .filter(
+                    estado__in=[EstadoWfmJob.PENDIENTE, EstadoWfmJob.PROCESANDO],
+                )
+                .filter(Q(locked_at__isnull=True) | Q(locked_at__lt=locked_before))
+                .order_by(
+                    # CASE WHEN estado='PROCESANDO' THEN 0 ELSE 1 END
+                    Case(
+                        When(estado=EstadoWfmJob.PROCESANDO, then=0),
+                        default=1,
+                        output_field=IntegerField(),
+                    ),
+                    "updated_at",
+                    "id",
+                )
+                .first()
+            )
+            if job is None:
+                return None
             job.estado = EstadoWfmJob.PROCESANDO
             job.locked_at = ahora
             job.locked_by = str(worker_id or "")

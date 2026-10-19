@@ -16,12 +16,12 @@
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | Núcleo **CERRADO** (B2): alta de salidas S6, consulta B1, escaneo S1; **fotos B3 núcleo cerrado** (ventana/agenda/imágenes en servidor); **kiosco S3 (pre-chequeo) y S4 (consulta por placa) cerrados**; pendiente solo S2 (gated G4) y refinamientos B3 | ~70% |
 | F4 Backoffice y Novedades | Backoffice **CERRADO** (B4): `aprobar-lote`, `aprobar`, `rechazar`, `validar`, `DELETE`, novedades (B6/B7), historial y `/validaciones/` (cierre por área) | ~60% (falta B11 centros de costos → G3) |
-| F5 Liquidaciones e Informes | Núcleo CERRADO (A2); **F5-1…F5-4 cerrados** (cuenta de cobro, gráfico, informe mensual, export); resto F5-5…F5-7 (WFM, planillas, agregados) | ~75% |
-| F6 ETL histórico | — | 0% |
+| F5 Liquidaciones e Informes | Núcleo CERRADO (A2); **F5-1…F5-6 cerrados** (cuenta de cobro, gráfico, informe mensual, export, WFM + worker, planillas); resto F5-7 (agregados) | ~85% |
+| F6 ETL histórico | Esqueleto cerrado (A3); corrida real → C3 | ~40% |
 | F7 Cutover | — | 0% |
 | F8 Estabilización | — | 0% |
 
-- 260 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
+- 339 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
 - **Nada ejecutado contra MySQL real.**
 
 ---
@@ -182,15 +182,26 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
       ⚠️ El parámetro se llama `formato`, **no** `format`: DRF reserva
       `format` para su content negotiation (`?format=`) y lo convertía en
       **404**.
-- [ ] **F5-5 · WFM** — cola de jobs `reportado→validado` + worker/cron
-      (`transporte_validacion_wfm_service.php` 836 L + worker, ya disponibles).
-      *Tamaño M ·* ⚠️ **requiere decisión D-A11** (WFM hace
-      `reportado→validado` directo; las `TRANSICIONES` actuales no lo permiten).
-- [ ] **F5-6 · Planillas** — `POST /planillas/?alcance=&fecha=` (S5, CR-11:
-      alcance PLACA/PROPIO/EXTERNO/RENTING + **exclusión MOTOS** +
-      consecutivo + QR). El alcance (`generar_planilla_scope`,
-      `transporte_salida.php` 640–682) ya está en el legado disponible.
-      *Tamaño M ·* ⚠️ formato final requiere `planilla_salida.php` (falta, P1).
+- [x] **F5-5 · WFM** — ✅ **CERRADO** (330 tests). `WfmService` (§5.10): ventana
+      de 2 días hábiles, elegibilidad WFM primaria + agenda como respaldo
+      (hallazgo: los mapas "completado"/"any" del legacy eran idénticos),
+      lote síncrono con `select_for_update` (el UPDATE a ciegas del
+      legacy permitía carreras) y cola de jobs idempotente por chunk
+      (`chunkDays=1`). Transición `REPORTADO → VALIDADO` incorporada a
+      `TRANSICIONES` (D-A11 extendido con evidencia legacy 426–445).
+      Endpoints: `POST /wfm/validar/`, `/wfm/crear-job/`, `/wfm/estado-job/`
+      (con respaldo síncrono). **Worker**: `manage.py wfm_worker`
+      (port de `transporte_validacion_wfm_worker.php`: `reclamar_siguiente`
+      con precedencia PROCESANDO-huérfano, 1 chunk por defecto,
+      `--hasta-completar` / `--job <uuid>`; cron sugerido cada 5 min).
+- [x] **F5-6 · Planillas** — ✅ **CERRADO** (330 tests). `POST /planillas/generar/`
+      (S5, CR-11): alcances PLACA/PROPIO/EXTERNO/RENTING/TODAS,
+      **filtro duro `tipo != 'MOTO'` explícito en todos los alcances**
+      (legacy `transporte_salida.php` 597/608/663; los choices no bastan
+      contra datos legacy de la ETL), consecutivo atómico por vehículo y
+      QR en disco. Permisos: exige `add_consecutivomensual` (generar
+      planilla ESCRIBE consecutivos). *Pendiente menor (P1): el formato
+      físico definitivo requiere `planilla_salida.php` verificado.*
 - [ ] **F5-7 · Agregados de sábana** — día a día, área, área/carpeta,
       áreas×mes, nómina, pronto pago y liquidación por placa (agregaciones
       server-side sobre F5-3). *Tamaño L · al final.*
@@ -229,8 +240,9 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 
 ## 5. DoD estándar de cada hito
 
-1. Tests en verde: `python backend/manage.py test apps.transporte --settings=config.settings_test_transporte`
-2. `python backend/manage.py check` sin issues
+1. Tests en verde: `backend\.venv\Scripts\python.exe backend\manage.py test apps.transporte --settings=config.settings_test_transporte`
+   *(el venv canónico es `backend/.venv` — `backend/README.md`; el `.venv` de la raíz se eliminó el 19-oct por estar roto: apuntaba a un Python 3.14 inexistente)*
+2. `backend\.venv\Scripts\python.exe backend\manage.py check` sin issues
 3. Commit local (**sin push**)
 4. Marcar el hito en la §6 y actualizar la fecha de este documento
 
@@ -258,4 +270,6 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-15 | F5-1 cuenta de cobro: /informes/cuenta-cobro/ HTML imprimible, importe y pagador en servidor (238 tests) | `ec9b2db` |
 | 2026-10-15 | F5-2 gráfico por área: /informes/series-chart/ corrige el hardcode 2024 del legacy; año como filtro (246 tests) | `eb2656f` |
 | 2026-10-15 | F5-3 informe mensual: /informes/mensual/ + /areas/ con filtros server-side; fix paginación (500 latente en /salidas/) (255 tests) | `7f0f362` |
-| 2026-10-15 | F5-4 export server-side: /salidas/export/?formato=xlsx|csv, 13 columnas, mismos filtros B1 (260 tests) | *(este commit)* |
+| 2026-10-15 | F5-4 export server-side: /salidas/export/?formato=xlsx|csv, 13 columnas, mismos filtros B1 (260 tests) | `3013df2` |
+| 2026-10-19 | F5-5 WFM + F5-6 planillas: cola+lote WFM con worker y planilla oficial con consecutivo y QR (330 tests) | `6c2e10c` |
+| 2026-10-19 | Hallazgos de calidad: permisos de modelo en /planillas/, tecnico_cedula real, filtro duro MOTO (CR-11), worker `wfm_worker`, .venv raíz roto eliminado (339 tests) | *(este commit)* |

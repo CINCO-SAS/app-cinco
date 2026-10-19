@@ -3667,6 +3667,74 @@ class WfmServiceTests(TestCase):
         self.assertIsNotNone(retomado)
         self.assertEqual(retomado.locked_by, "worker-2")
 
+    # ------------------------- worker (H5) ------------------------- #
+    def test_reclamar_siguiente_toma_el_unico_pendiente(self):
+        """H5: ClaimNextJob legacy — la cola vacía devuelve None y un
+        pendiente se reclama con precedencia PROCESANDO-huérfano."""
+        self.assertIsNone(WfmService.reclamar_siguiente("worker-1"))
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        reclamado = WfmService.reclamar_siguiente("worker-1")
+        self.assertIsNotNone(reclamado)
+        self.assertEqual(reclamado.pk, job.pk)
+        self.assertEqual(reclamado.estado, EstadoWfmJob.PROCESANDO)
+        self.assertEqual(reclamado.locked_by, "worker-1")
+
+    def test_reclamar_siguiente_prefiere_procesando_huerfano(self):
+        """El legacy ordena PROCESANDO antes que PENDIENTE: retoma un
+        job huérfano antes que encolar uno nuevo."""
+        viejo, _ = WfmService.crear_job(
+            mes=11, yyyy=2026, area="OPERACIONES", hoy=self.hoy
+        )
+        WfmService.reclamar_job(viejo.job_uuid, "worker-caido")
+        WfmJob.objects.filter(pk=viejo.pk).update(
+            locked_at=timezone.now() - timedelta(minutes=30)
+        )
+        # Otra área ⇒ otro job (crear_job reutiliza el vigente por área).
+        nuevo, _ = WfmService.crear_job(
+            mes=11, yyyy=2026, area="LOGISTICA", hoy=self.hoy
+        )
+        reclamado = WfmService.reclamar_siguiente("worker-2")
+        self.assertEqual(reclamado.pk, viejo.pk)
+        # El nuevo sigue esperando su turno.
+        self.assertEqual(
+            WfmJob.objects.get(pk=nuevo.pk).estado, EstadoWfmJob.PENDIENTE
+        )
+
+    def test_reclamar_siguiente_no_toma_lock_fresco(self):
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        WfmService.reclamar_job(job.job_uuid, "worker-1")
+        # Lock recién puesto: otro worker no lo roba.
+        self.assertIsNone(WfmService.reclamar_siguiente("worker-2"))
+
+    def test_comando_wfm_worker_sin_jobs_da_mensaje(self):
+        stdout = io.StringIO()
+        call_command("wfm_worker", stdout=stdout)
+        self.assertIn("No hay jobs pendientes", stdout.getvalue())
+
+    def test_comando_wfm_worker_procesa_hasta_completar(self):
+        """H5: el comando reclama y procesa chunks como el worker PHP
+        (`chunkDays=1, batch=15`), pero con --hasta-completar corre
+        todos los días del job en una sola pasada."""
+        self._salida()
+        self._wfm(external_id="111222333", dia=self.hoy)
+        WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        stdout = io.StringIO()
+        call_command("wfm_worker", "--hasta-completar", stdout=stdout)
+
+        job = WfmJob.objects.get()
+        self.assertEqual(job.estado, EstadoWfmJob.COMPLETADO)
+        self.assertEqual(job.total_validados, 1)
+        salida = Salida.objects.get()
+        self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
+        # La respuesta del worker es JSON por línea (legado CLI).
+        cuerpo = json.loads(stdout.getvalue().strip().splitlines()[-1])
+        self.assertTrue(cuerpo["success"])
+        self.assertEqual(cuerpo["estado"], "COMPLETADO")
+
+    def test_comando_wfm_worker_job_inexistente(self):
+        with self.assertRaises(CommandError):
+            call_command("wfm_worker", "--job", "no-existe", stdout=io.StringIO())
+
     def test_procesar_job_avanza_dia_a_dia_hasta_completar(self):
         """Un chunk es UN día (legacy `chunkDays = 1`): el worker itera."""
         for dia in (date(2026, 11, 9), date(2026, 11, 11)):
@@ -4020,6 +4088,44 @@ class PlanillaServiceTests(TestCase):
         self.assertIn("PLA111", placas)
         self.assertIn("EXT222", placas)
 
+    def test_planilla_excluye_motos(self):
+        """H4 / CR-11: el filtro duro tipo != 'MOTO' aplica aunque el
+        valor venga de datos legacy (fuera de los choices)."""
+        Vehiculo.objects.create(
+            placa="MOT001", tipo_vehiculo="MOTO", marca="AKT",
+            referencia="NKD", modelo_anio=2020, tipo_contrato="PROPIO",
+            nombre_propietario="DUEÑO MOTO", cedula_propietario="777",
+            valor_dia_base=Decimal("30000"),
+        )
+        resultado = PlanillaService.generar_planilla(
+            fecha="2026-10-16", alcance="TODAS"
+        )
+        placas = [v["placa"] for v in resultado["vehiculos"]]
+        self.assertNotIn("MOT001", placas)
+        self.assertIn("PLA111", placas)
+
+    def test_salida_del_dia_incluye_cedula_del_tecnico(self):
+        """H3: el formato físico imprime la CÉDULA del técnico asignado,
+        no el id de la FK (bug: 'tecnico_cedula' devolvía el ID)."""
+        persona = Empleado.objects.create(
+            cedula="555666777", codigo_sap="SAP-555666777",
+            nombre="TEC", apellido="NICO", area="OPERACIONES",
+            carpeta="LOGISTICA", sede="MEDELLIN", movil="MOVIL-9",
+            password="",
+        )
+        Salida.objects.create(
+            vehiculo=self.v_propio, fecha_salida=date(2026, 10, 16),
+            tecnico_asignado=persona, area="OPERACIONES",
+            carpeta="LOGISTICA", sede="MEDELLIN",
+            valor_dia=Decimal("120000"),
+        )
+        resultado = PlanillaService.generar_planilla(
+            fecha="2026-10-16", alcance="PLACA", placa="PLA111"
+        )
+        salidas = resultado["vehiculos"][0]["salidas_del_dia"]
+        self.assertEqual(len(salidas), 1)
+        self.assertEqual(salidas[0]["tecnico_cedula"], "555666777")
+
 class PlanillaAPITests(TestCase):
     """Pruebas del endpoint HTTP consolidado de la Planilla Oficial de Salida."""
 
@@ -4040,6 +4146,12 @@ class PlanillaAPITests(TestCase):
             actor=None,
         )
         self.user = User.objects.create_user(username="test_planilla", password="x")
+        # H2: /planillas/generar/ escribe consecutivos ⇒ exige
+        # add_consecutivomensual (igual que el resto del módulo).
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="add_consecutivomensual")
+        )
+        self.user = User.objects.get(pk=self.user.pk)
         self.api = APIClient()
 
     def test_endpoint_sin_autenticacion_falla(self):
@@ -4049,6 +4161,18 @@ class PlanillaAPITests(TestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, 401)
+
+    def test_endpoint_sin_permiso_de_modelo_falla(self):
+        """H2: autenticado SIN permiso de modelo no puede generar (403)."""
+        self.api.force_authenticate(
+            user=User.objects.create_user(username="sin_permiso", password="x")
+        )
+        resp = self.api.post(
+            "/transporte/planillas/generar/",
+            {"fecha": "2026-10-16", "alcance": "PLACA", "placa": "API999"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 403)
 
     def test_endpoint_generar_exitoso_estandarizado(self):
         self.api.force_authenticate(user=self.user)

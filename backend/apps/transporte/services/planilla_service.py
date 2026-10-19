@@ -97,11 +97,16 @@ class PlanillaService:
     def _resolver_vehiculos(alcance, placa):
         """Devuelve el queryset base de vehículos según el alcance.
 
-        CR-11: el filtro duro 'tipo_vehiculo != MOTO' se garantiza por los
-        choices de TipoVehiculo (que no incluyen MOTO). Se añade el filtro
-        activo=True para excluir vehículos dados de baja.
+        CR-11 — filtro excluyente duro (legacy `transporte_salida.php`
+        597/608/663: ``AND tipo != 'MOTO'``): aunque los choices de
+        ``TipoVehiculo`` no incluyen MOTO, la carga histórica (ETL) puede
+        traer ese valor en filas viejas, así que el filtro se aplica de
+        forma explícita en TODOS los alcances, como en el legacy.
+        Solo aplica a flota automotor de 4+ ruedas (D-A13).
         """
-        qs = Vehiculo.objects.filter(activo=True)
+        qs = Vehiculo.objects.filter(activo=True).exclude(
+            tipo_vehiculo__iexact="MOTO"
+        )
 
         if alcance == ALCANCE_PLACA:
             qs = qs.filter(placa=placa.upper())
@@ -162,6 +167,9 @@ class PlanillaService:
         # Salidas serializadas (datos mínimos para el formato físico).
         salidas_datos = []
         for salida in salidas_dia:
+            # El técnico asignado es personal de nómina (FK Empleado
+            # cross-DB); el formato físico imprime la CÉDULA, no el id.
+            tecnico = salida.tecnico_asignado
             salidas_datos.append(
                 {
                     "id": salida.pk,
@@ -169,7 +177,9 @@ class PlanillaService:
                     "conductor_cedula": (
                         salida.conductor.cedula if salida.conductor_id else None
                     ),
-                    "tecnico_cedula": salida.tecnico_asignado_id,
+                    "tecnico_cedula": (
+                        tecnico.cedula if tecnico is not None else None
+                    ),
                     "area": salida.area,
                     "carpeta": salida.carpeta,
                     "observacion": salida.observacion,

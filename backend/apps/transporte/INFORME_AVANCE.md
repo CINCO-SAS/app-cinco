@@ -15,7 +15,10 @@
   **B2, B4 y B3 (núcleo) cerrados** — el corazón transaccional (registro
   de salidas con CR-9, anticolisión y máquina de estados D-A11, el
   backoffice F4 y el reporte fotográfico F3).
-- **260 tests OK**, `manage.py check` sin issues, DoD
+- **F5-1…F5-6 cerrados**: cuenta de cobro, gráfico, informe mensual,
+  export server-side, **WFM masivo (cola + lote + worker CLI)** y
+  **planilla oficial de salida** (consecutivo atómico + QR).
+- **339 tests OK**, `manage.py check` sin issues, DoD
   cumplido en cada hito (tests verdes → check → commit local).
 - **Cero ejecución contra MySQL real** (G2 sin conectividad); los tests
   corren en SQLite aislado (`config.settings_test_transporte`).
@@ -32,8 +35,8 @@
 | F1 Base Django y Festivos | 16 modelos + migración; algoritmo de festivos portado; falta tabla `common.Festivo` | ~70% (→ G1 / C1) |
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | Núcleo cerrado (B2): alta S6, consulta B1, escaneo S1; fotos y S2–S4 pendientes | ~35% |
-| F4 Backoffice y Novedades | Modelos listos; servicio de estados listo (B2), faltan endpoints | 0% |
-| F5 Liquidaciones e Informes | Núcleo cerrado (A2); **F5-1…F5-4 cerrados**; resto F5-5…F5-7 | ~75% |
+| F4 Backoffice y Novedades | CERRADO (B4): aprobar-lote, rechazar, validar, eliminar, novedades, historial | ~60% (falta B11 → G3) |
+| F5 Liquidaciones e Informes | Núcleo cerrado (A2); **F5-1…F5-6 cerrados**; resto F5-7 (agregados) | ~85% |
 | F6 ETL histórico | Esqueleto cerrado (A3); corrida real → C3 | ~40% |
 | F7 Cutover / F8 Estabilización | — | 0% |
 
@@ -75,7 +78,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | CR-8 | Reemplazar cédulas hardcodeadas por permisos | ⬜ → E3/§5.9 (permisos ya referenciados en código) |
 | CR-9 | Ventana −2 días hábiles + bypass por rol | ✅ `calendario` + `SalidaService.ventana_validacion` (con mensajes legacy literales) |
 | CR-10 | Sábanas mensual/pronto-pago con estados exactos | ✅ A2 |
-| CR-11 | Planillas con exclusión de motos y consecutivo | ⬜ → `PlanillaService` (tras B4) |
+| CR-11 | Planillas con exclusión de motos y consecutivo | ✅ F5-6 (**filtro duro `tipo != 'MOTO'` explícito**, no solo choices) |
 | CR-12 | Esquemas SQL quemados → portabilidad | ✅ `DatabaseRouter` (D-A10) |
 | CR-13 | Import CSV bancarios con upsert | ✅ F2 |
 
@@ -102,10 +105,11 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | §5.3 `FlotaService` | ABM, semáforo, documentos, CSV, QR | ✅ |
 | §5.4 `ConductorService` | ABM, licencia, edad derivada | ✅ |
 | §5.5 `ReporteFotograficoService` | agenda + horario 10–16 | ⬜ → B3 |
-| §5.6 `PlanillaService` (CR-11) | planillas con exclusión de motos | ⬜ |
+| §5.6 `PlanillaService` (CR-11) | planillas con exclusión de motos | ✅ F5-6 (alcances PLACA/PROPIO/EXTERNO/RENTING/TODAS, consecutivo atómico, QR) |
 | §5.7 `InformeService` | sábanas con filtros server-side + export | 🟡 **F5-1 cuenta de cobro ✅ · F5-2 series_chart ✅ · F5-3 informe mensual ✅ · F5-4 export ✅** (`GET /salidas/export/?formato=xlsx|csv`, 13 columnas, mismos filtros B1) |
 | §5.8 `ParametrosService` | cierres + jefes | ✅ A1 |
 | §5.9 `PermisoService` | grupos/permisos vs cédulas hardcodeadas | 🟡 referenciado (`has_perm`), declaración → E3 |
+| §5.10 `WfmService` | validación WFM masiva (lote + cola + worker) | ✅ F5-5 (`manage.py wfm_worker`) |
 
 ---
 
@@ -114,7 +118,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | Bloque | Entregado | Pendiente |
 |---|---|---|
 | **B (gestión)** | B1 filtros `?desde=&hasta=` ✅ · B2 ver cierres ✅ · B8 ficha+semáforo ✅ · B10 valor día/total ✅ (`total_a_pagar`) · B14 badge reportado ✅ · **B4 export xlsx ✅ (F5-4)** · B6/B7 novedades ✅ · B5/B12/B13 🟡 servicio, falta HTTP | B3 ruta cierres `{mes}/{anio}/` · B9 `buscar_movil` (G2/G4) · B11 centros de costos (G3) · B15 permisos por fila |
-| **S (kiosco)** | S1 escanear ✅ · S6 grabar salida ✅ · S3 pre-chequeo ✅ · S4 consulta por placa ✅ | S2 asignar móvil (G4/D-A9) · S5 planillas |
+| **S (kiosco)** | S1 escanear ✅ · S6 grabar salida ✅ · S3 pre-chequeo ✅ · S4 consulta por placa ✅ · **S5 planillas ✅ (F5-6)** | S2 asignar móvil (G4/D-A9) |
 | **T (flota)** | T1 ficha · T2 fotos/docs · T3 bancarios · T4 CSV · T5 QR ✅ | T6 teléfonos (G2 + D-A9/D-A10) |
 | **D (backoffice/tabla3)** | D1 jefes · D2 cierres · D3 liquidaciones · D4 pagos ✅ | — |
 | **C/F** | C1 conductores ✅ | F1 reporte fotográfico → B3 |
@@ -126,14 +130,12 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 
 | Métrica | Valor |
 |---|---|
-| Tests | **162 OK** (18 clases; evolución 87 → 105 → 126 → 134 → 162) |
-| Código Python del módulo | 46 archivos · ~6.700 LOC (1.617 líneas de tests) |
-| Cambio acumulado en rama | 56 archivos · +8.057 líneas (incluye config y docs) |
-| Modelos Django | 16 (+ `0001_initial`, choices, admin) |
-| Endpoints activos | 7 recursos router (`/conductores/`, `/vehiculos/`, `/parametros/cierres/`, `/parametros/jefes/`, `/liquidaciones/`, `/salidas/`, `/kiosco/`) + 11 acciones (`resumen`, `documentos`, `importar-bancarios`, `qr.png`, `inactivar`×2, `pago-mensual`, `pronto-pago`, `consecutivo`, `pago`, `escanear`) |
-| Commits del módulo | 18 + este informe (locales, sin push) |
-| Ejecuciones contra BD real | **0** |
+| Tests | **339 OK** (evolución 87 → 105 → 126 → 134 → 162 → 182 → 214 → 225 → 238 → 246 → 255 → 260 → 330 → 339) |
+| Modelos Django | 16 (+ `0001_initial`–`0005`, choices, admin) |
+| Endpoints activos | 12 recursos router (`/conductores/`, `/vehiculos/`, `/parametros/cierres/`, `/parametros/jefes/`, `/liquidaciones/`, `/planillas/`, `/informes/`, `/salidas/`, `/kiosco/`, `/reportes-fotograficos/`, `/validaciones/`, `/wfm/`) + acciones (`resumen`, `documentos`, `importar-bancarios`, `qr.png`, `inactivar`×2, `pago-mensual`, `pronto-pago`, `sabana`, `consecutivo`, `pago`, `escanear`, `identificar`, `vehiculo/{placa}`, `validar`×3, `aprobar-lote`, `aprobar`, `rechazar`, `novedad`, `historial`, `export`, `cuenta-cobro`, `series-chart`, `mensual`, `areas`, `generar`, `validar-agenda`, `vehiculo-placa`, `wfm/validar`, `wfm/crear-job`, `wfm/estado-job`) |
+| Comandos CLI | `migrate_transporte_legacy` (ETL) · **`wfm_worker` (cola WFM)** |
 | Archivos PHP legacy modificados | **0** |
+| Ejecuciones contra BD real | **0** |
 
 ---
 
@@ -178,10 +180,14 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 2. **Refinamientos B3 (diferidos)**: match OT-específica `validar_agenda_ot`
    (→ junto al subsistema WFM/OT, F5) y ventana de días anteriores con
    excepción en `programacion_parametros` (→ decisión ETL de esa tabla).
-3. **G2 → Tramo C**: C1 migrate real · C2 auditorías y constraints
+3. **F5-7 agregados de sábana** (único hito de código grande pendiente:
+   día a día, área, área/carpeta, áreas×mes, nómina, liquidación por placa).
+4. **E3 PermisoService** — grupos y permisos granulares (CR-8), y
+   **E1** `/vehiculos/catalogo-operativo/`.
+5. **G2 → Tramo C**: C1 migrate real · C2 auditorías y constraints
    (CR-3/CR-1/CR-2/D-A12) · C3 ETL con conciliación = 0 (DoD 201.000) ·
    C4 validación con datos reales.
-4. **Tramo D**: cutover único D1 (rollback < 2 min, PHP como respaldo)
+6. **Tramo D**: cutover único D1 (rollback < 2 min, PHP como respaldo)
    → D2 estabilización e informe final.
 
 ---
@@ -208,4 +214,6 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | 2026-10-15 | F5-1 cuenta de cobro: /informes/cuenta-cobro/ HTML imprimible con importe/pagador en servidor (238 tests) | `ec9b2db` |
 | 2026-10-15 | F5-2 gráfico por área: /informes/series-chart/ con año como filtro (corrige hardcode 2024) (246 tests) | `eb2656f` |
 | 2026-10-15 | F5-3 informe mensual: /informes/mensual/ + /areas/ con filtros server-side; fix paginación (500 latente en GET /salidas/) (255 tests) | `7f0f362` |
-| 2026-10-15 | F5-4 export server-side: /salidas/export/?formato=xlsx|csv, 13 columnas, mismos filtros B1 (260 tests) | *(este commit)* |
+| 2026-10-15 | F5-4 export server-side: /salidas/export/?formato=xlsx|csv, 13 columnas, mismos filtros B1 (260 tests) | `3013df2` |
+| 2026-10-19 | F5-5 WFM + F5-6 planillas: cola+lote WFM con worker y planilla oficial con consecutivo y QR (330 tests) | `6c2e10c` |
+| 2026-10-19 | Hallazgos de calidad: permisos de modelo en /planillas/, tecnico_cedula real, filtro duro MOTO, worker `wfm_worker`, `.venv` raíz eliminado (339 tests) | *(este commit)* |

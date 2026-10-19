@@ -62,7 +62,7 @@ class SalidaDiaSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     estado = serializers.CharField()
     conductor_cedula = serializers.CharField(allow_null=True)
-    tecnico_cedula = serializers.IntegerField(allow_null=True)
+    tecnico_cedula = serializers.CharField(allow_null=True)
     area = serializers.CharField(allow_null=True)
     carpeta = serializers.CharField(allow_null=True)
     observacion = serializers.CharField()
