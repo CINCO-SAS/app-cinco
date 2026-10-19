@@ -67,6 +67,13 @@ class Salida(AuditoriaModel):
         db_table = "transporte_salida"
         verbose_name = "Salida"
         verbose_name_plural = "Salidas"
+        # Permisos granulares que reemplazan las cédulas hardcodeadas del
+        # legacy (CR-8 / §5.9). Se leen vía PermisoService (E3).
+        permissions = [
+            ("puede_programar", "Programación (reemplaza $permi_programacion)"),
+            ("permiso_especial", "Permiso especial (reemplaza permi_especial)"),
+            ("editar_tras_cierre", "Editar tras cierre (reemplaza permi_editar_fecha)"),
+        ]
         # TODO(D-A12 + §7.1): tras auditoría de duplicados históricos, añadir
         # UNIQUE vía columna virtual STORED ~Q(estado='ELIMINADO') para
         # (vehiculo, fecha_salida) y (conductor, fecha_salida) [CR-1, CR-2].

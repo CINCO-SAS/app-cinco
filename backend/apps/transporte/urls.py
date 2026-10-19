@@ -26,6 +26,7 @@ from .views import (
     JefeValidadorViewSet,
     KioscoViewSet,
     LiquidacionViewSet,
+    PermisoViewSet,
     PlanillaViewSet,
     ReporteFotograficoViewSet,
     SalidaViewSet,
@@ -64,5 +65,7 @@ router.register(
 router.register(r"validaciones", ValidacionViewSet, basename="validaciones")
 # F5-5: validación WFM masiva (lote síncrono + cola de jobs).
 router.register(r"wfm", WfmViewSet, basename="wfm")
+# E3/CR-8: estado de permisos del usuario (reemplaza cédulas hardcodeadas).
+router.register(r"permisos", PermisoViewSet, basename="permisos")
 
 urlpatterns = router.urls

@@ -63,6 +63,7 @@ from .services import (
     InformeService,
     LiquidacionService,
     ParametrosService,
+    PermisoService,
     PlanillaService,
     ReporteFotograficoService,
     SalidaService,
@@ -4608,4 +4609,158 @@ class TransportePaginacionYValidacionAPITests(TestCase):
         self.assertEqual(cuerpo["area"], "OPERACIONES")
         self.assertEqual(cuerpo["mes"], 10)
         self.assertEqual(cuerpo["anio"], 2026)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# E3 / CR-8: PermisoService y GET /permisos/estado/
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _perm(codename):
+    """Permiso custom por codename (creado por la migración 0006)."""
+    return Permission.objects.get(
+        codename=codename, content_type__app_label="transporte"
+    )
+
+
+class PermisoServiceYEstadoTests(TestCase):
+    """E3: las cédulas hardcodeadas del legacy se traducen a grupos y
+    permisos Django (§5.9); GET /permisos/estado/ expone el snapshot."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def _user(self, username="u1"):
+        return User.objects.create_user(username=username, password="x")
+
+    def test_anonimo_todo_false(self):
+        estado = PermisoService.estado(None)
+        self.assertFalse(estado["autenticado"])
+        for flag in ("es_admin", "es_operador", "puede_programar",
+                     "permiso_especial", "editar_tras_cierre", "es_jefe"):
+            self.assertFalse(estado[flag], flag)
+
+    def test_superuser_tiene_todo(self):
+        user = User.objects.create_superuser(username="root", password="x")
+        estado = PermisoService.estado(user)
+        self.assertTrue(estado["es_admin"])
+        self.assertTrue(estado["puede_programar"])
+        self.assertTrue(estado["permiso_especial"])
+        self.assertTrue(estado["editar_tras_cierre"])
+
+    def test_permiso_puede_programar_concedido(self):
+        user = self._user("prog")
+        self.assertFalse(PermisoService.puede_programar(user))
+        user.user_permissions.add(_perm("puede_programar"))
+        user = User.objects.get(pk=user.pk)  # recachea permisos
+        self.assertTrue(PermisoService.puede_programar(user))
+        self.assertTrue(PermisoService.estado(user)["puede_programar"])
+
+    def test_grupo_admin_da_permisos_de_admin(self):
+        user = self._user("adm")
+        user.groups.create(name="transporte_admin")
+        estado = PermisoService.estado(user)
+        self.assertTrue(estado["es_admin"])
+        self.assertTrue(estado["puede_programar"])
+        self.assertTrue(estado["permiso_especial"])
+        self.assertTrue(estado["editar_tras_cierre"])
+
+    def test_grupo_operador_marca_es_operador(self):
+        user = self._user("ope")
+        user.groups.create(name="transporte_operador")
+        estado = PermisoService.estado(user)
+        self.assertTrue(estado["es_operador"])
+        self.assertFalse(estado["puede_programar"])
+
+    def test_permiso_especial_y_editar_tras_cierre(self):
+        user = self._user("esp")
+        self.assertFalse(PermisoService.permiso_especial(user))
+        self.assertFalse(PermisoService.puede_editar_tras_cierre(user))
+        user.user_permissions.add(_perm("permiso_especial"))
+        user.user_permissions.add(_perm("editar_tras_cierre"))
+        user = User.objects.get(pk=user.pk)
+        self.assertTrue(PermisoService.permiso_especial(user))
+        self.assertTrue(PermisoService.puede_editar_tras_cierre(user))
+
+    def test_jefe_expone_areas(self):
+        empleado = Empleado.objects.create(
+            cedula="555444333", codigo_sap="SAP-555444333",
+            nombre="JEFE", apellido="AREA", password="",
+        )
+        ParametrosService.crear_jefe(
+            {"empleado": empleado, "areas": ["OPERACIONES", "LOGISTICA"],
+             "carpetas_por_area": {"OPERACIONES": []}},
+            actor=None,
+        )
+        user = self._user("555444333")
+        estado = PermisoService.estado(user)
+        self.assertTrue(estado["es_jefe"])
+        self.assertEqual(estado["areas_jefe"], ["LOGISTICA", "OPERACIONES"])
+
+    def test_endpoint_permisos_estado(self):
+        user = self._user("front")
+        user.groups.create(name="transporte_operador")
+        api = APIClient()
+        api.force_authenticate(user=user)
+        resp = api.get("/transporte/permisos/estado/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        datos = resp.json()["data"]
+        self.assertTrue(datos["autenticado"])
+        self.assertTrue(datos["es_operador"])
+        self.assertEqual(datos["username"], "front")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# E1: catálogo operativo de vehículos
+# ═════════════════════════════════════════════════════════════════════════════
+
+class CatalogoOperativoTests(TestCase):
+    """E1: GET /vehiculos/catalogo-operativo/ reemplaza al controlador
+    externo get_vehiculos_transp; solo vehículos activos."""
+
+    def setUp(self):
+        self.activo = FlotaService.crear(
+            {
+                "placa": "CAT100", "tipo_vehiculo": "CAMIONETA",
+                "marca": "MAZDA", "referencia": "CX5", "modelo_anio": 2022,
+                "tipo_contrato": "PROPIO", "nombre_propietario": "CINCO SAS",
+                "cedula_propietario": "900111222", "valor_dia_base": 100000,
+                "fecha_soat": date(2027, 1, 1), "fecha_cda": date(2026, 11, 15),
+            },
+            actor=None,
+        )
+        self.inactivo = FlotaService.crear(
+            {
+                "placa": "CAT999", "tipo_vehiculo": "FURGON",
+                "marca": "CHEVROLET", "referencia": "NKR", "modelo_anio": 2021,
+                "tipo_contrato": "EXTERNO", "nombre_propietario": "TERCERO",
+                "cedula_propietario": "800111222", "valor_dia_base": 80000,
+                "fecha_soat": date(2027, 1, 1), "fecha_cda": date(2026, 11, 15),
+            },
+            actor=None,
+        )
+        FlotaService.inactivar(self.inactivo.pk, actor=None)
+        self.api = APIClient()
+        self.api.force_authenticate(
+            user=User.objects.create_superuser(username="op", password="x")
+        )
+
+    def test_solo_devuelve_activos(self):
+        resp = self.api.get("/transporte/vehiculos/catalogo-operativo/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        placas = [v["placa"] for v in resp.json()["results"]]
+        self.assertIn("CAT100", placas)
+        self.assertNotIn("CAT999", placas)  # inactivo excluido
+
+    def test_incluye_campos_y_semaforo(self):
+        resp = self.api.get("/transporte/vehiculos/catalogo-operativo/")
+        fila = next(
+            v for v in resp.json()["results"] if v["placa"] == "CAT100"
+        )
+        self.assertEqual(fila["tipo_vehiculo"], "CAMIONETA")
+        self.assertEqual(fila["tipo_contrato"], "PROPIO")
+        self.assertIn("estado_soat", fila)
+        self.assertIn("estado_cda", fila)
+        self.assertIn("conductor_habitual_detalle", fila)
 

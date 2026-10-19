@@ -108,6 +108,24 @@ class FlotaService:
             raise ValueError(f"No existe un vehículo con id {vehiculo_id}.")
 
     @staticmethod
+    def catalogo_operativo():
+        """
+        E1 (§6): reemplaza al controlador externo ``get_vehiculos_transp``
+        (``gerencia_informes_vehiculos_controlador.php``) que el backoffice
+        llamaba para poblar el DataTable y el calendario de salidas.
+
+        Devuelve SOLO vehículos activos (los inactivos no operan), con los
+        campos que el front consume: icono por ``tipo_vehiculo``, semáforo
+        SOAT/CDA **calculado en servidor** (el legacy lo hacía en JS con
+        aritmética de fechas frágil) y el conductor habitual.
+        """
+        return (
+            Vehiculo.objects.select_related("conductor_habitual")
+            .filter(activo=True)
+            .order_by("placa")
+        )
+
+    @staticmethod
     def ficha_documental(vehiculo_id, hoy=None):
         """
         Ficha + semáforo SOAT/CDA en servidor (§5.3, B8).

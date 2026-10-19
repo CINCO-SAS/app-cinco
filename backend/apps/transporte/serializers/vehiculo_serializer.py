@@ -131,6 +131,57 @@ class VehiculoListSerializer(serializers.ModelSerializer):
         return estado_vigencia(obj.fecha_cda)
 
 
+class VehiculoCatalogoOperativoSerializer(serializers.ModelSerializer):
+    """
+    E1: catálogo operativo que reemplaza ``get_vehiculos_transp``.
+
+    El semáforo SOAT/CDA se calcula aquí (en servidor) en vez de la
+    aritmética de fechas del JS legacy, y el icono por tipo se resuelve
+    con ``tipo_vehiculo`` (nombre real, no el ``tipo`` del PHP).
+    """
+
+    estado_soat = serializers.SerializerMethodField()
+    estado_cda = serializers.SerializerMethodField()
+    conductor_habitual_detalle = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Vehiculo
+        fields = [
+            "id",
+            "placa",
+            "tipo_vehiculo",
+            "marca",
+            "referencia",
+            "modelo_anio",
+            "municipio_matricula",
+            "tipo_contrato",
+            "ciudad_operacion",
+            "fecha_soat",
+            "fecha_cda",
+            "estado_soat",
+            "estado_cda",
+            "valor_dia_base",
+            "conductor_habitual",
+            "conductor_habitual_detalle",
+        ]
+
+    def get_estado_soat(self, obj):
+        return estado_vigencia(obj.fecha_soat)
+
+    def get_estado_cda(self, obj):
+        return estado_vigencia(obj.fecha_cda)
+
+    def get_conductor_habitual_detalle(self, obj):
+        conductor = obj.conductor_habitual
+        if not conductor:
+            return None
+        return {
+            "id": conductor.pk,
+            "cedula": conductor.cedula,
+            "nombre_completo": conductor.nombre_completo,
+        }
+
+
 class DocumentoVehiculoSerializer(serializers.ModelSerializer):
     """Alta/edición de documentos; el service valida tipo y tamaño."""
 

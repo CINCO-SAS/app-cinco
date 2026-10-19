@@ -124,6 +124,26 @@ class VehiculoViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
             | {"semaforo": ficha["semaforo"]}
         )
 
+    # ------------------------------------------------------------------ #
+    # E1: catálogo operativo (reemplaza get_vehiculos_transp del backoffice)
+    # ------------------------------------------------------------------ #
+    @extend_schema(
+        responses={200: vehiculo_serializer.VehiculoCatalogoOperativoSerializer},
+        description=(
+            "Catálogo de vehículos ACTIVOS para el backoffice (E1). "
+            "Reemplaza al controlador externo get_vehiculos_transp; el "
+            "semáforo SOAT/CDA se calcula en servidor."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="catalogo-operativo")
+    def catalogo_operativo(self, request):
+        queryset = FlotaService.catalogo_operativo()
+        page = self.paginate_queryset(queryset)
+        serializer = vehiculo_serializer.VehiculoCatalogoOperativoSerializer(
+            page, many=True
+        )
+        return self.get_paginated_response(serializer.data)
+
     @extend_schema(
         request=vehiculo_serializer.DocumentoVehiculoSerializer,
         responses={200: vehiculo_serializer.DocumentoVehiculoSerializer},

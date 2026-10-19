@@ -9,6 +9,7 @@ from .flota_service import FlotaService
 from .informe_service import InformeService
 from .liquidacion_service import LiquidacionService
 from .parametros_service import ParametrosService
+from .permiso_service import PermisoService
 from .planilla_service import PlanillaService
 from .reporte_fotografico_service import ReporteFotograficoService
 from .salida_service import SalidaService
@@ -21,6 +22,7 @@ __all__ = [
     "InformeService",
     "LiquidacionService",
     "ParametrosService",
+    "PermisoService",
     "PlanillaService",
     "ReporteFotograficoService",
     "SalidaService",

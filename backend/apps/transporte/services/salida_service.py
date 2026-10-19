@@ -71,6 +71,7 @@ from ..models import (
 )
 from . import calendario
 from .parametros_service import ParametrosService
+from .permiso_service import PermisoService
 
 # Sentinellas legacy de `movil_sale` (transporte_salida.php 432, ETL A3).
 _DISPONIBLES = ("disponible", "0", "")
@@ -213,18 +214,8 @@ class SalidaService:
 
     @staticmethod
     def _puede_programar(usuario):
-        """Programación/admin (§5.9): staff, grupo transporte_admin o el
-        permiso `transporte.puede_programar` (ambos se declaran en E3;
-        hoy `has_perm` devuelve False)."""
-        if usuario is None:
-            return False
-        if getattr(usuario, "is_superuser", False) or getattr(
-            usuario, "is_staff", False
-        ):
-            return True
-        if usuario.has_perm("transporte.puede_programar"):
-            return True
-        return usuario.groups.filter(name="transporte_admin").exists()
+        """Programación/admin (§5.9 / E3): delega en PermisoService."""
+        return PermisoService.puede_programar(usuario)
 
     @staticmethod
     def _es_jefe_de(usuario, area, carpeta=None):

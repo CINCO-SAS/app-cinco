@@ -274,6 +274,30 @@ class ParametrosService:
                 return True
         return False
 
+    @staticmethod
+    def jefes_de_cedula(cedula):
+        """
+        Jefes validadores ACTIVOS de una cédula (misma resolución en dos
+        pasos de ``es_jefe_validador``, D-A10). Devuelve una lista de
+        dicts ``{"areas": [...], "carpetas_por_area": {...}}`` para que
+        ``PermisoService.estado`` exponga la jefatura al frontend (E3).
+        """
+        if not cedula:
+            return []
+        try:
+            empleado_id = Empleado.objects.values_list("id", flat=True).get(
+                cedula=str(cedula).strip()
+            )
+        except Empleado.DoesNotExist:
+            return []
+        return [
+            {"areas": list(jefe.areas or []),
+             "carpetas_por_area": dict(jefe.carpetas_por_area or {})}
+            for jefe in JefeValidador.objects.filter(
+                empleado_id=empleado_id, activo=True
+            )
+        ]
+
     # ------------------------------------------------------------------ #
     # Validaciones internas
     # ------------------------------------------------------------------ #

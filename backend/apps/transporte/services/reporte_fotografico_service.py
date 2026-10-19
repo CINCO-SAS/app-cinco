@@ -124,14 +124,11 @@ class ReporteFotograficoService:
     @staticmethod
     def es_programacion(user) -> bool:
         """
-        ¿Es programación/admin? (§5.9, hasta E3: staff/superuser; el permiso
-        ``transporte.puede_programar`` se declara en E3 y hoy devuelve False).
+        ¿Es programación/admin? (§5.9 / E3): delega en PermisoService.
         """
-        if user is None or isinstance(user, AnonymousUser):
-            return False
-        if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False):
-            return True
-        return bool(user.has_perm("transporte.puede_programar"))
+        from .permiso_service import PermisoService
+
+        return PermisoService.puede_programar(user)
 
     @classmethod
     def normalizar_ot_actividad(cls, ot, area="", carpeta="") -> str:

@@ -19,7 +19,7 @@
   export server-side, **WFM masivo (cola + lote + worker CLI)**,
   **planilla oficial de salida** (consecutivo atómico + QR) y
   **agregados de sábana** (día/área/matriz/nómina/liquidación).
-- **355 tests OK**, `manage.py check` sin issues, DoD
+- **365 tests OK**, `manage.py check` sin issues, DoD
   cumplido en cada hito (tests verdes → check → commit local).
 - **Cero ejecución contra MySQL real** (G2 sin conectividad); los tests
   corren en SQLite aislado (`config.settings_test_transporte`).
@@ -76,7 +76,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | CR-5 | `area` nullable por carga histórica | ✅ (snapshot + TODO FK `common.Area` → G3) |
 | CR-6 | Conductor externo ≠ Empleado nómina (D-A2) | ✅ modelos + ETL |
 | CR-7 | Absorber las 3 pestañas + kiosco + flota + fotos + planilla | 🟡 matriz §6: ver §4 |
-| CR-8 | Reemplazar cédulas hardcodeadas por permisos | ⬜ → E3/§5.9 (permisos ya referenciados en código) |
+| CR-8 | Reemplazar cédulas hardcodeadas por permisos | ✅ `PermisoService` + `GET /permisos/estado/` (E3, migración 0006) |
 | CR-9 | Ventana −2 días hábiles + bypass por rol | ✅ `calendario` + `SalidaService.ventana_validacion` (con mensajes legacy literales) |
 | CR-10 | Sábanas mensual/pronto-pago con estados exactos | ✅ A2 |
 | CR-11 | Planillas con exclusión de motos y consecutivo | ✅ F5-6 (**filtro duro `tipo != 'MOTO'` explícito**, no solo choices) |
@@ -109,7 +109,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | §5.6 `PlanillaService` (CR-11) | planillas con exclusión de motos | ✅ F5-6 (alcances PLACA/PROPIO/EXTERNO/RENTING/TODAS, consecutivo atómico, QR) |
 | §5.7 `InformeService` | sábanas con filtros server-side + export | ✅ **F5-1…F5-7 cerrados**: cuenta de cobro · series_chart · informe mensual · export (`GET /salidas/export/?formato=xlsx|csv`) · **agregados** (`/informes/dia/`, `/area/`, `/areas-mes/`, `/nomina/`, `/liquidacion/`) |
 | §5.8 `ParametrosService` | cierres + jefes | ✅ A1 |
-| §5.9 `PermisoService` | grupos/permisos vs cédulas hardcodeadas | 🟡 referenciado (`has_perm`), declaración → E3 |
+| §5.9 `PermisoService` | grupos/permisos vs cédulas hardcodeadas | ✅ `services/permiso_service.py` + migración 0006 (permisos `puede_programar`/`permiso_especial`/`editar_tras_cierre`) |
 | §5.10 `WfmService` | validación WFM masiva (lote + cola + worker) | ✅ F5-5 (`manage.py wfm_worker`) |
 
 ---
@@ -123,7 +123,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | **T (flota)** | T1 ficha · T2 fotos/docs · T3 bancarios · T4 CSV · T5 QR ✅ | T6 teléfonos (G2 + D-A9/D-A10) |
 | **D (backoffice/tabla3)** | D1 jefes · D2 cierres · D3 liquidaciones · D4 pagos ✅ | — |
 | **C/F** | C1 conductores ✅ | F1 reporte fotográfico → B3 |
-| **E (reemplazos)** | — | E1 `catalogo-operativo` · E2 helpers JS · E3 `/permisos/estado/` |
+| **E (reemplazos)** | E1 `catalogo-operativo` ✅ · E3 `/permisos/estado/` ✅ | E2 helpers JS (frontend) |
 
 ---
 
@@ -131,9 +131,9 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 
 | Métrica | Valor |
 |---|---|
-| Tests | **355 OK** (evolución 87 → 105 → 126 → 134 → 162 → 182 → 214 → 225 → 238 → 246 → 255 → 260 → 330 → 339 → 351 → 353 → 355) |
+| Tests | **365 OK** (evolución 87 → 105 → 126 → 134 → 162 → 182 → 214 → 225 → 238 → 246 → 255 → 260 → 330 → 339 → 351 → 353 → 355 → 365) |
 | Modelos Django | 16 (+ `0001_initial`–`0005`, choices, admin) |
-| Endpoints activos | 12 recursos router (`/conductores/`, `/vehiculos/`, `/parametros/cierres/`, `/parametros/jefes/`, `/liquidaciones/`, `/planillas/`, `/informes/`, `/salidas/`, `/kiosco/`, `/reportes-fotograficos/`, `/validaciones/`, `/wfm/`) + acciones (`resumen`, `documentos`, `importar-bancarios`, `qr.png`, `inactivar`×2, `pago-mensual`, `pronto-pago`, `sabana`, `consecutivo`, `pago`, `escanear`, `identificar`, `vehiculo/{placa}`, `validar`×3, `aprobar-lote`, `aprobar`, `rechazar`, `novedad`, `historial`, `export`, `cuenta-cobro`, `series-chart`, `mensual`, `areas`, `dia`, `area`, `areas-mes`, `nomina`, `liquidacion`, `generar`, `validar-agenda`, `vehiculo-placa`, `wfm/validar`, `wfm/crear-job`, `wfm/estado-job`) |
+| Endpoints activos | 13 recursos router (`/conductores/`, `/vehiculos/`, `/parametros/cierres/`, `/parametros/jefes/`, `/liquidaciones/`, `/planillas/`, `/informes/`, `/salidas/`, `/kiosco/`, `/reportes-fotograficos/`, `/validaciones/`, `/wfm/`, `/permisos/`) + acciones (`catalogo-operativo`, `permisos/estado`, `resumen`, `documentos`, `importar-bancarios`, `qr.png`, `inactivar`×2, `pago-mensual`, `pronto-pago`, `sabana`, `consecutivo`, `pago`, `escanear`, `identificar`, `vehiculo/{placa}`, `validar`×3, `aprobar-lote`, `aprobar`, `rechazar`, `novedad`, `historial`, `export`, `cuenta-cobro`, `series-chart`, `mensual`, `areas`, `dia`, `area`, `areas-mes`, `nomina`, `liquidacion`, `generar`, `validar-agenda`, `vehiculo-placa`, `wfm/validar`, `wfm/crear-job`, `wfm/estado-job`) |
 | Comandos CLI | `migrate_transporte_legacy` (ETL) · **`wfm_worker` (cola WFM)** |
 | Archivos PHP legacy modificados | **0** |
 | Ejecuciones contra BD real | **0** |
@@ -176,19 +176,23 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 
 ## 8. Próximos pasos (orden del ROADMAP §3)
 
+> **E1 y E3 ya cerrados.** Ya no queda código de backend sin gates: lo
+> único que falta está bloqueado por decisión de negocio (G1/G3), acceso
+> a BD (G2) o decisión técnica (G4).
+
 1. **B1 (resto) · tabla `common.Festivo`** en cuanto G1 decida fuente y
-   modelo → `es_festivo = algoritmo ∪ BD`. *(B2, B3 y B4 ya cerrados sin G1.)*
+   modelo → `es_festivo = algoritmo ∪ BD`. *(B2, B3 y B4 ya cerrados sin G1; el
+   cálculo de los 18 festivos estatutarios ya funciona en `calendario.py`.)*
 2. **Refinamientos B3 (diferidos)**: match OT-específica `validar_agenda_ot`
    (→ junto al subsistema WFM/OT, F5) y ventana de días anteriores con
    excepción en `programacion_parametros` (→ decisión ETL de esa tabla).
-3. **E3 PermisoService** — grupos y permisos granulares (CR-8), y
-   **E1** `/vehiculos/catalogo-operativo/`.
-   *(F5-7 agregados de sábana ya cerrado.)*
-4. **G2 → Tramo C**: C1 migrate real · C2 auditorías y constraints
-   (CR-3/CR-1/CR-2/D-A12) · C3 ETL con conciliación = 0 (DoD 201.000) ·
-   C4 validación con datos reales.
-5. **Tramo D**: cutover único D1 (rollback < 2 min, PHP como respaldo)
+3. **G2 → Tramo C**: C1 migrate real (incluye migración 0006 de permisos) ·
+   C2 auditorías y constraints (CR-3/CR-1/CR-2/D-A12) · C3 ETL con
+   conciliación = 0 (DoD 201.000) · C4 validación con datos reales.
+4. **Tramo D**: cutover único D1 (rollback < 2 min, PHP como respaldo)
    → D2 estabilización e informe final.
+
+*(G3 → B11 centros de costos; G4 → S2 asignar móvil y T6 teléfonos.)*
 
 ---
 
@@ -219,4 +223,5 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | 2026-10-19 | Hallazgos de calidad: permisos de modelo en /planillas/, tecnico_cedula real, filtro duro MOTO, worker `wfm_worker`, `.venv` raíz eliminado (339 tests) | `33e8d7e` |
 | 2026-10-19 | F5-7 agregados de sábana: /informes/dia, /area, /areas-mes, /nomina y /liquidacion server-side (351 tests) | `c39ee9a` |
 | 2026-10-19 | Revisión de cambios subidos: registro real de `/validaciones/` (desde B4 devolvía 404), `serializer_class` en cierres/jefes (500 latente), fix clave duplicada `tipo_vinculacion` en ETL, paginación canónica en 6 listados, inline bancarios en admin (353 tests) | `91615d4` |
-| 2026-10-19 | Refactor F5-7 (mejora sobre el legacy): claves de estado reales (`reportado`/`total`), RENTING separado de PROPIO, importes en `Decimal` (355 tests) | *(este commit)* |
+| 2026-10-19 | Refactor F5-7 (mejora sobre el legacy): claves de estado reales (`reportado`/`total`), RENTING separado de PROPIO, importes en `Decimal` (355 tests) | `76c140f` |
+| 2026-10-19 | E1 catálogo operativo + E3 PermisoService (cierra CR-8): `/vehiculos/catalogo-operativo/` (solo activos, semáforo en servidor) y `/permisos/estado/` (grupos/permisos en vez de cédulas, migración 0006) (365 tests) | *(este commit)* |
