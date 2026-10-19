@@ -16,7 +16,7 @@
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | Núcleo **CERRADO** (B2): alta de salidas S6, consulta B1, escaneo S1; **fotos B3 núcleo cerrado** (ventana/agenda/imágenes en servidor); **kiosco S3 (pre-chequeo) y S4 (consulta por placa) cerrados**; pendiente solo S2 (gated G4) y refinamientos B3 | ~70% |
 | F4 Backoffice y Novedades | Backoffice **CERRADO** (B4): `aprobar-lote`, `aprobar`, `rechazar`, `validar`, `DELETE`, novedades (B6/B7), historial y `/validaciones/` (cierre por área) | ~60% (falta B11 centros de costos → G3) |
-| F5 Liquidaciones e Informes | **F5-1…F5-7 CERRADOS** (cuenta de cobro, gráfico, informe mensual, export, WFM + worker, planillas, agregados de sábana) | ~95% |
+| F5 Liquidaciones e Informes | **F5-1…F5-7 CERRADOS** (cuenta de cobro, gráfico, informe mensual, export, WFM + worker, planillas con **formato físico F-104**, agregados de sábana) | **100%** |
 | F6 ETL histórico | Esqueleto cerrado (A3); corrida real → C3 | ~40% |
 | F7 Cutover | — | 0% |
 | F8 Estabilización | — | 0% |
@@ -205,8 +205,15 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
       (legacy `transporte_salida.php` 597/608/663; los choices no bastan
       contra datos legacy de la ETL), consecutivo atómico por vehículo y
       QR en disco. Permisos: exige `add_consecutivomensual` (generar
-      planilla ESCRIBE consecutivos). *Pendiente menor (P1): el formato
-      físico definitivo requiere `planilla_salida.php` verificado.*
+      planilla ESCRIBE consecutivos). **P1 CERRADO (19-oct):** verificado
+      `planilla_salida.php` y **formato físico F-104 implementado** en
+      `POST /planillas/formato/` (HTML autocontenido LETTER horizontal, una
+      hoja por vehículo, QR en base64, casillas en blanco para firmas de
+      salida/retorno). Mejoras sobre el legacy: FECHA real (imprimía
+      "16/02/2022" fijo), CONDUCTOR/TELÉFONO y VALOR DÍA reales (la consulta
+      del legacy estaba *comentada* y salían vacíos), CONSECUTIVO impreso
+      (PLAN_TECNICO §3.6 lo exige y el formato no lo mostraba) y sin código
+      de barras (D-A8 lo eliminó como artefacto regenerable).
 - [x] **F5-7 · Agregados de sábana** — ✅ **CERRADO** (355 tests). Agregaciones
       server-side del JS de la sábana (`transporte_salida_informes.php`):
       `GET /informes/dia/?fecha=` (día → área → carpetas con `arr_estado`),
@@ -239,14 +246,13 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
  │ F5-1…F5-7 · CR-8 cerrados   │
  └─────────────────────────────┘
    Gates restantes (todo gated, ninguno bloquea el resto): G3 (common.Area → B11)
-   · G4 (outbox D-A9/D-A10 → S2/T6) · P1 (formato físico de la planilla) · G1 solo
-   aportaría la tabla BD opcional para decretar festivos en caliente.
+   · G4 (outbox D-A9/D-A10 → S2/T6) · G1 solo aportaría la tabla BD opcional
+   para decretar festivos en caliente. P1 (formato físico) CERRADO el 19-oct.
 ```
 
 **Recomendación:** no queda trabajo de backend sin gate. Lo único que mueve la
 aguja ahora es **G2** (conectividad a BD → Tramo C completo con datos reales);
 G3 y G4 desbloquean los últimos dos puntos sueltos (B11 y S2/T6).
-
 ---
 
 ## 4. Riesgos
@@ -300,4 +306,5 @@ G3 y G4 desbloquean los últimos dos puntos sueltos (B11 y S2/T6).
 | 2026-10-19 | Revisión de cambios subidos: registro real de `/validaciones/` (desde B4 el ViewSet existía pero la ruta devolvía 404), `serializer_class` en cierres/jefes (500 latente en GET), fix clave duplicada `tipo_vinculacion` en ETL de conductores, paginación canónica en 6 listados, inline de datos bancarios en admin (353 tests) | `91615d4` |
 | 2026-10-19 | Refactor F5-7 (mejora sobre el legacy): claves de estado reales (`reportado`/`total`), RENTING separado de PROPIO, importes en `Decimal` con 2 decimales (355 tests) | `76c140f` |
 | 2026-10-19 | E1 catálogo operativo + E3 PermisoService (cierra CR-8): `/vehiculos/catalogo-operativo/` (solo activos, semáforo en servidor) y `/permisos/estado/` (grupos/permisos en vez de cédulas hardcodeadas, migración 0006) (365 tests) | `65c2709` |
-| 2026-10-19 | Calendario reutilizable (G1 parcial): `apps/common/festivos/` con el algoritmo + catálogo editable `festivos_colombia.json` (2022–2030, feriado decretado 2026-07-13 incluido); `es_festivo` = algoritmo ∪ catálogo (agregar festivo = editar JSON y `recargar_catalogo()`, sin código ni migración); transporte queda como shim sin cambio de comportamiento; corrección del JSON de origen: San Pedro y San Pablo 2027 estaba en el lunes anterior (2027-06-28) → 2027-07-05 según Emiliani; +10 tests en `apps.common` (377 tests) | *(este commit)* |
+| 2026-10-19 | Calendario reutilizable (G1 parcial): `apps/common/festivos/` con el algoritmo + catálogo editable `festivos_colombia.json` (2022–2030, feriado decretado 2026-07-13 incluido); `es_festivo` = algoritmo ∪ catálogo (agregar festivo = editar JSON y `recargar_catalogo()`, sin código ni migración); transporte queda como shim sin cambio de comportamiento; corrección del JSON de origen: San Pedro y San Pablo 2027 estaba en el lunes anterior (2027-06-28) → 2027-07-05 según Emiliani; +10 tests en `apps.common` (377 tests) | `6f3e837` |
+| 2026-10-19 | P1 CERRADO: formato físico F-104 en `POST /planillas/formato/` verificado contra `planilla_salida.php` (LETTER horizontal, hoja por vehículo, QR en base64, casillas en blanco para firmas); mejora sobre el legacy: fecha real (el legacy imprimía 16/02/2022 fijo), conductor/teléfono/valor día reales (la consulta del legacy estaba comentada), consecutivo impreso (§3.6) y sin código de barras (D-A8); +12 tests (389 tests) | *(este commit)* |

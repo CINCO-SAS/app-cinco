@@ -4447,6 +4447,178 @@ class PlanillaAPITests(TestCase):
         self.assertIn("No existe un vehículo", cuerpo["error"])
 
 
+class PlanillaFormatoFisicoTests(TestCase):
+    """P1 cerrado: formato físico F-104 (reemplaza `planilla_salida.php`).
+
+    Verificado contra el archivo legacy adjunto en la carpeta de migraciones:
+    rótulo F-104, período mensual, casillas de firmas en blanco, tabla de
+    2 bloques × 7 columnas con 16 filas y LETTER horizontal.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        super().setUp()
+        self.vehiculo = FlotaService.crear(
+            {
+                "placa": "F104AA", "tipo_vehiculo": "CAMIONETA",
+                "marca": "TOYOTA", "referencia": "HILUX", "modelo_anio": 2024,
+                "tipo_contrato": "PROPIO", "nombre_propietario": "PROPIETARIO F104",
+                "cedula_propietario": "333444", "valor_dia_base": 120000,
+            },
+            actor=None,
+        )
+        self.user = User.objects.create_user(username="f104", password="x")
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="add_consecutivomensual")
+        )
+        self.user = User.objects.get(pk=self.user.pk)
+        self.api = APIClient()
+
+    def _planilla(self, fecha="2026-10-16", alcance="PLACA", placa="F104AA"):
+        return PlanillaService.generar_planilla(
+            fecha=fecha, alcance=alcance, placa=placa
+        )
+
+    def _html(self, fecha="2026-10-16", alcance="PLACA", placa="F104AA"):
+        return PlanillaService.html_formato(self._planilla(fecha, alcance, placa))
+
+    # --------------------------- formato base --------------------------- #
+    def test_rubrica_periodo_y_consecutivo(self):
+        html = self._html()
+        self.assertIn(
+            "F-104 PLANILLA CONTROL DE VEHÍCULOS CINCO S.A.S MENSUAL", html
+        )
+        self.assertIn("VERSIÓN: 01", html)
+        # Período del mes completo de la fecha (el legacy lo calculaba igual).
+        self.assertIn("DEL 01 DE OCTUBRE AL 31 DE OCTUBRE DE 2026", html)
+        self.assertIn("CONSECUTIVO: 1000", html)
+
+    def test_no_imprime_la_fecha_fija_del_legacy(self):
+        # planilla_salida.php 131 imprimía "FECHA: 16/02/2022" hardcodeado.
+        html = self._html()
+        self.assertNotIn("16/02/2022", html)
+        self.assertIn("FECHA:", html)
+
+    def test_casillas_de_valores_y_qr(self):
+        html = self._html()
+        self.assertIn("F104AA", html)
+        self.assertIn("PROPIETARIO F104", html)
+        self.assertIn("$ 120.000", html)                    # valor_día real
+        self.assertIn("data:image/png;base64,", html)      # QR autocontenido
+        self.assertIn("LETTER landscape", html)             # impresión horizontal
+        # Sin código de barras: D-A8 lo eliminó como artefacto regenerable.
+        self.assertNotIn("codigo_barras", html)
+        self.assertNotIn("barras_", html)
+
+    def test_tabla_de_firmas_16_filas_y_2_bloques(self):
+        html = self._html()
+        self.assertEqual(html.count("<th>DÍA</th>"), 2)     # 2 bloques de 7 cols
+        self.assertEqual(html.count("<tr><td>1</td>"), 1)   # fila del día 1
+        self.assertIn("<td>16</td>", html)
+        # Octubre tiene 31 días ⇒ la columna derecha llega al 31, no al 32.
+        self.assertIn("<td>31</td>", html)
+        self.assertNotIn("<td>32</td>", html)
+
+    def test_febrero_recorta_las_celdas_sin_dia(self):
+        html = self._html(fecha="2026-02-15")
+        self.assertIn("DEL 01 DE FEBRERO AL 28 DE FEBRERO DE 2026", html)
+        self.assertIn("<td>28</td>", html)
+        self.assertNotIn("<td>29</td>", html)
+        self.assertIn('class="vacio"', html)                # celdas sin borde
+
+    def test_casillas_en_blanco_para_diligenciar_a_mano(self):
+        # TOTAL DÍAS / DESCUENTOS / ADICIONALES / VALOR TOTAL se escriben
+        # a mano durante el mes (el importe se liquida en la sábana).
+        html = self._html()
+        for rotulo in ("TOTAL DÍAS:", "DESCUENTOS:", "ADICIONALES:", "VALOR TOTAL:"):
+            self.assertIn(rotulo, html)
+
+    # -------------------------- datos reales ---------------------------- #
+    def test_conductor_y_telefono_reales(self):
+        """El legacy dejaba esas casillas VACÍAS (su consulta estaba comentada)."""
+        conductor = Conductor.objects.create(
+            cedula="777888999", nombre_completo="LUIS EXTERNO",
+            celular="3001112233", fecha_ingreso=date(2026, 1, 1),
+        )
+        self.vehiculo.conductor_habitual = conductor
+        self.vehiculo.save(update_fields=["conductor_habitual"])
+
+        html = self._html()
+        self.assertIn("LUIS EXTERNO", html)
+        self.assertIn("3001112233", html)
+
+    def test_escapa_lo_que_el_usuario_escriba(self):
+        """El legacy imprimía entrada del usuario sin escapar."""
+        vehiculo = FlotaService.crear(
+            {
+                "placa": "XSS001", "tipo_vehiculo": "CAMIONETA", "marca": "M",
+                "referencia": "R", "modelo_anio": 2024, "tipo_contrato": "PROPIO",
+                "nombre_propietario": "<script>alert(1)</script>",
+                "cedula_propietario": "1", "valor_dia_base": 1000,
+            },
+            actor=None,
+        )
+        html = PlanillaService.html_formato(
+            PlanillaService.generar_planilla(
+                fecha="2026-10-16", alcance="PLACA", placa=vehiculo.placa
+            )
+        )
+        self.assertNotIn("<script>alert(1)</script>", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+
+    def test_una_hoja_por_vehiculo(self):
+        FlotaService.crear(
+            {
+                "placa": "F104BB", "tipo_vehiculo": "FURGON", "marca": "M",
+                "referencia": "R", "modelo_anio": 2023, "tipo_contrato": "PROPIO",
+                "nombre_propietario": "PROPIETARIO 2", "cedula_propietario": "555",
+                "valor_dia_base": 90000,
+            },
+            actor=None,
+        )
+        html = self._html(alcance="TODAS", placa="")
+        self.assertEqual(html.count('<section class="hoja">'), 2)
+        self.assertIn("F104AA", html)
+        self.assertIn("F104BB", html)
+
+    # ------------------------------ HTTP -------------------------------- #
+    def test_formato_http_devuelve_html(self):
+        self.api.force_authenticate(user=self.user)
+        resp = self.api.post(
+            "/transporte/planillas/formato/",
+            {"fecha": "2026-10-16", "alcance": "PLACA", "placa": "F104AA"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/html", resp["Content-Type"])
+        self.assertIn("F-104 PLANILLA", resp.content.decode())
+
+    def test_formato_http_exige_permiso_de_modelo(self):
+        self.api.force_authenticate(
+            user=User.objects.create_user(username="f104_sin", password="x")
+        )
+        resp = self.api.post(
+            "/transporte/planillas/formato/",
+            {"fecha": "2026-10-16", "alcance": "PLACA", "placa": "F104AA"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_formato_http_error_estandarizado(self):
+        self.api.force_authenticate(user=self.user)
+        resp = self.api.post(
+            "/transporte/planillas/formato/",
+            {"fecha": "2026-10-16", "alcance": "PLACA", "placa": "NOEXISTE"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.json()["ok"])
+
+
 class KioscoAPITests(TestCase):
     """Pruebas de los endpoints consolidados del kiosco."""
 

@@ -89,6 +89,7 @@ class VehiculoPlanillaSerializer(serializers.Serializer):
     color = serializers.CharField(allow_null=True)
     nombre_propietario = serializers.CharField()
     cedula_propietario = serializers.CharField()
+    valor_dia_base = serializers.DecimalField(max_digits=12, decimal_places=2)
     conductor = ConductorPlanillaSerializer(allow_null=True)
     consecutivo = serializers.IntegerField()
     consecutivo_creado = serializers.BooleanField()
