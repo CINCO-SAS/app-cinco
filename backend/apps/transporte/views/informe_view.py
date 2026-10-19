@@ -134,3 +134,128 @@ class InformeViewSet(GenericViewSet):
                 },
             }
         )
+
+    # ------------------------------------------------------------------ #
+    # Agregados de sábana (F5-7)
+    # ------------------------------------------------------------------ #
+    @extend_schema(
+        auth=[{"sessionAuth": [], "apiKeyAuth": []}],
+        responses={200: dict},
+        description=(
+            "Agregado 'día a día' de UNA fecha: áreas con desglose por "
+            "carpetas (propios/externos, total_dia) y contadores por "
+            "estado (arr_estado: aprobado/validado/pendiente/rechazado)."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="dia")
+    def dia(self, request):
+        serializer = informe_serializer.FechaSerializer(
+            data=request.query_params
+        )
+        serializer.is_valid(raise_exception=True)
+        try:
+            datos = InformeService.por_dia(serializer.validated_data["fecha"])
+        except ValueError as exc:
+            return Response(
+                {"ok": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response({"ok": True, "data": datos})
+
+    @extend_schema(
+        auth=[{"sessionAuth": [], "apiKeyAuth": []}],
+        responses={200: dict},
+        description=(
+            "Agregado del mes por área con desglose por carpetas. "
+            "solo_aprobados restringe los totales a APROBADO/VALIDADO "
+            "(interruptor de la sábana)."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="area")
+    def area(self, request):
+        serializer = informe_serializer.PeriodoAprobadosSerializer(
+            data=request.query_params
+        )
+        serializer.is_valid(raise_exception=True)
+        datos = serializer.validated_data
+        try:
+            agregado = InformeService.por_area(
+                datos["mes"], datos["anio"],
+                solo_aprobados=datos["solo_aprobados"],
+            )
+        except ValueError as exc:
+            return Response(
+                {"ok": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response({"ok": True, "data": agregado})
+
+    @extend_schema(
+        auth=[{"sessionAuth": [], "apiKeyAuth": []}],
+        responses={200: dict},
+        description=(
+            "Matriz área × meses del año: conteos e importes de salidas "
+            "no eliminadas por (área, mes)."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="areas-mes")
+    def areas_mes(self, request):
+        serializer = informe_serializer.AnioSerializer(
+            data=request.query_params
+        )
+        serializer.is_valid(raise_exception=True)
+        try:
+            matriz = InformeService.areas_por_mes(serializer.validated_data["anio"])
+        except ValueError as exc:
+            return Response(
+                {"ok": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response({"ok": True, "data": matriz})
+
+    @extend_schema(
+        auth=[{"sessionAuth": [], "apiKeyAuth": []}],
+        responses={200: dict},
+        description=(
+            "Agregado de nómina del mes: por (carpeta, placa) con días, "
+            "valor base, retefuente 1 % y total a pagar. Excluye "
+            "REPORTADO/ELIMINADO; pagador desde datos bancarios (servidor)."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="nomina")
+    def nomina(self, request):
+        serializer = informe_serializer.PeriodoSerializer(
+            data=request.query_params
+        )
+        serializer.is_valid(raise_exception=True)
+        datos = serializer.validated_data
+        try:
+            agregado = InformeService.nomina(datos["mes"], datos["anio"])
+        except ValueError as exc:
+            return Response(
+                {"ok": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response({"ok": True, "data": agregado})
+
+    @extend_schema(
+        auth=[{"sessionAuth": [], "apiKeyAuth": []}],
+        responses={200: dict},
+        description=(
+            "Liquidación por placa del mes: días, valor base, retefuente "
+            "1 %, pagar, pagador y consecutivo si ya existe. Excluye "
+            "REPORTADO/ELIMINADO."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="liquidacion")
+    def liquidacion(self, request):
+        serializer = informe_serializer.PeriodoSerializer(
+            data=request.query_params
+        )
+        serializer.is_valid(raise_exception=True)
+        datos = serializer.validated_data
+        try:
+            agregado = InformeService.liquidacion_placa(
+                datos["mes"], datos["anio"]
+            )
+        except ValueError as exc:
+            return Response(
+                {"ok": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response({"ok": True, "data": agregado})

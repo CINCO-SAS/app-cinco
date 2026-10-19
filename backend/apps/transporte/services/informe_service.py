@@ -21,6 +21,7 @@ Fórmula (idéntica a la liquidación de la sábana, JS 4270–4336):
 import calendar
 import csv
 import io
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from html import escape
 
@@ -32,7 +33,7 @@ from ..models import (
     Salida,
     Vehiculo,
 )
-from ..models.choices import EstadoSalida
+from ..models.choices import EstadoSalida, TipoContrato
 from .periodos import rango_mes, validar_periodo
 
 # Retefuente del legacy (sábana: `valor_base * 0.01`).
@@ -393,6 +394,324 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
             .distinct()
             .order_by("area")
         )
+
+    # ------------------------------------------------------------------ #
+    # Agregados de sábana (F5-7)
+    # ------------------------------------------------------------------ #
+    # Clave del contador de estado en el `arr_estado` del JS de la sábana:
+    # "pendiente" es REPORTADO (JS 3007–3011).
+    CLAVES_ESTADO = {
+        EstadoSalida.APROBADO: "aprobado",
+        EstadoSalida.VALIDADO: "validado",
+        EstadoSalida.REPORTADO: "pendiente",
+        EstadoSalida.RECHAZADO: "rechazado",
+    }
+
+    @staticmethod
+    def _bloque_vacio():
+        """Fila de agregado con las claves exactas del JS legacy."""
+        return {
+            "propios": 0,
+            "externos": 0,
+            "total_vehi": 0,
+            "total_dia": 0,
+            "arr_estado": {
+                "aprobado": {"cnt": 0, "valor": 0},
+                "validado": {"cnt": 0, "valor": 0},
+                "pendiente": {"cnt": 0, "valor": 0},
+                "rechazado": {"cnt": 0, "valor": 0},
+                "total_est": {"cnt": 0, "valor": 0},
+            },
+        }
+
+    @staticmethod
+    def _acumular(bloque, salida, valor, contar=True):
+        """
+        Acumula una salida en un bloque de agregado (JS 2986–3154).
+
+        `propios`/`externos`: EXTERNO es externo; PROPIO y RENTING son
+        propios (`tipo_contrato !== 'EXTERNO'`). Los importes van en
+        pesos enteros como el `parseInt` del legacy. `arr_estado` se
+        acumula SIEMPRE (aunque `contar` sea False), como el legacy que
+        filtraba los totales pero no el desglose de estados.
+        """
+        if contar:
+            if salida.vehiculo.tipo_contrato == TipoContrato.EXTERNO:
+                bloque["externos"] += 1
+            else:
+                bloque["propios"] += 1
+            bloque["total_vehi"] += 1
+            bloque["total_dia"] += valor
+        clave = InformeService.CLAVES_ESTADO.get(salida.estado)
+        if clave is not None:
+            bloque["arr_estado"][clave]["cnt"] += 1
+            bloque["arr_estado"][clave]["valor"] += valor
+        bloque["arr_estado"]["total_est"]["cnt"] += 1
+        bloque["arr_estado"]["total_est"]["valor"] += valor
+
+    @staticmethod
+    def _area_de(salida):
+        """Área normalizada: mayúsculas y 'SIN AREA' (PHP 60 del legacy)."""
+        return (salida.area or "").strip().upper() or "SIN AREA"
+
+    @staticmethod
+    def _carpeta_de(salida):
+        """Carpeta normalizada con fallback 'SIN CARPETA' (JS 2983)."""
+        return (salida.carpeta or "").strip() or "SIN CARPETA"
+
+    @staticmethod
+    def _agregar_area_carpeta(salidas, solo_aprobados=False):
+        """
+        Agrupa salidas en áreas con desglose por carpetas usando los
+        contadores del JS de la sábana (`formatPlusRow`).
+
+        `solo_aprobados` replica el interruptor de la sábana (JS 2910):
+        los totales solo suman APROBADO/VALIDADO, pero `arr_estado`
+        refleja todas las filas (el legacy acumulaba el desglose antes
+        del filtro).
+        """
+        areas = {}
+        for salida in salidas:
+            nombre_area = InformeService._area_de(salida)
+            nombre_carpeta = InformeService._carpeta_de(salida)
+            valor = int(salida.total_a_pagar)
+            contar = (not solo_aprobados) or salida.estado in (
+                EstadoSalida.APROBADO,
+                EstadoSalida.VALIDADO,
+            )
+            bloque_area = areas.setdefault(
+                nombre_area,
+                {
+                    "area": nombre_area,
+                    **InformeService._bloque_vacio(),
+                    "_carpetas": {},
+                },
+            )
+            InformeService._acumular(bloque_area, salida, valor, contar)
+            bloque_carpeta = bloque_area["_carpetas"].setdefault(
+                nombre_carpeta,
+                {"carpeta": nombre_carpeta, **InformeService._bloque_vacio()},
+            )
+            InformeService._acumular(bloque_carpeta, salida, valor, contar)
+
+        resultado = []
+        for nombre_area in sorted(areas):
+            bloque = areas[nombre_area]
+            bloque["carpetas"] = [
+                bloque["_carpetas"][c] for c in sorted(bloque["_carpetas"])
+            ]
+            del bloque["_carpetas"]
+            resultado.append(bloque)
+        return resultado
+
+    @staticmethod
+    def por_dia(fecha):
+        """
+        F5-7: agregado 'día a día' (`tb_trans_x_dia`) de UNA fecha —
+        áreas con desglose por carpetas y contadores por estado.
+        """
+        if isinstance(fecha, str):
+            fecha = date.fromisoformat(fecha)
+        salidas = (
+            Salida.objects.select_related("vehiculo", "novedad")
+            .filter(fecha_salida=fecha)
+            .exclude(estado=EstadoSalida.ELIMINADO)
+            .order_by("id")
+        )
+        return {
+            "fecha": fecha.isoformat(),
+            "areas": InformeService._agregar_area_carpeta(salidas),
+        }
+
+    @staticmethod
+    def por_area(mes, anio, solo_aprobados=False):
+        """
+        F5-7: agregado del mes por área (`tb_trans_x_area`) con desglose
+        por carpetas. `solo_aprobados` = interruptor de la sábana
+        (totales solo APROBADO/VALIDADO).
+        """
+        mes, anio = validar_periodo(mes, anio)
+        desde, hasta = rango_mes(mes, anio)
+        salidas = (
+            Salida.objects.select_related("vehiculo", "novedad")
+            .filter(fecha_salida__gte=desde, fecha_salida__lt=hasta)
+            .exclude(estado=EstadoSalida.ELIMINADO)
+            .order_by("fecha_salida", "id")
+        )
+        return {
+            "mes": mes,
+            "anio": anio,
+            "areas": InformeService._agregar_area_carpeta(
+                salidas, solo_aprobados=solo_aprobados
+            ),
+        }
+
+    @staticmethod
+    def areas_por_mes(anio):
+        """
+        F5-7: matriz área × meses del año (totales de salidas no
+        eliminadas) — la base que el legacy descargaba como
+        `areas_mes[year_month]` y que alimenta el gráfico F5-2.
+        """
+        try:
+            anio = int(anio)
+        except (TypeError, ValueError):
+            raise ValueError("Año no válido.")
+        if not 2000 <= anio <= 2100:
+            raise ValueError("Año no válido.")
+
+        salidas = (
+            Salida.objects.select_related("vehiculo")
+            .filter(fecha_salida__year=anio)
+            .exclude(estado=EstadoSalida.ELIMINADO)
+            .order_by("fecha_salida", "id")
+        )
+        matriz = {}
+        for salida in salidas:
+            nombre_area = InformeService._area_de(salida)
+            valor = int(salida.total_a_pagar)
+            bloque = matriz.setdefault(nombre_area, {}).setdefault(
+                salida.fecha_salida.month,
+                {"propios": 0, "externos": 0, "total_vehi": 0, "total_dia": 0},
+            )
+            if salida.vehiculo.tipo_contrato == TipoContrato.EXTERNO:
+                bloque["externos"] += 1
+            else:
+                bloque["propios"] += 1
+            bloque["total_vehi"] += 1
+            bloque["total_dia"] += valor
+
+        return {
+            "anio": anio,
+            "areas": [
+                {
+                    "area": nombre_area,
+                    "meses": [
+                        {"mes": mes, **bloque}
+                        for mes, bloque in sorted(meses.items())
+                    ],
+                }
+                for nombre_area, meses in sorted(matriz.items())
+            ],
+        }
+
+    @staticmethod
+    def nomina(mes, anio):
+        """
+        F5-7: agregado de nómina (JS 4123–4346) — excluye REPORTADO y
+        ELIMINADO; agrupa por (carpeta, placa); pagador leído del dato
+        bancario vigente en SERVIDOR (CR-13); retefuente 1 %.
+
+        El legacy agrupaba por `centro_costo` tomado de un mapa JS de
+        carpetas (`map_carpetas[...].ccosto`); ese mapa vive en la BD de
+        `common` (gate G3/B11) que aún no existe, así que el grupo es la
+        CARPETA y `centro_costo` sale vacío hasta G3. `valor_dia` y
+        `estado` son del primer día del grupo (orden placa, fecha).
+        """
+        mes, anio = validar_periodo(mes, anio)
+        desde, hasta = rango_mes(mes, anio)
+        salidas = (
+            Salida.objects.select_related("vehiculo", "novedad")
+            .filter(fecha_salida__gte=desde, fecha_salida__lt=hasta)
+            .exclude(estado__in=(EstadoSalida.ELIMINADO, EstadoSalida.REPORTADO))
+            .order_by("vehiculo__placa", "fecha_salida", "id")
+        )
+        consecutivos = dict(
+            ConsecutivoMensual.objects.filter(mes=mes, anio=anio).values_list(
+                "vehiculo_id", "consecutivo"
+            )
+        )
+        grupos = {}
+        pagadores = {}
+        for salida in salidas:
+            vehiculo = salida.vehiculo
+            carpeta = InformeService._carpeta_de(salida)
+            clave = (carpeta, vehiculo.placa)
+            if vehiculo.pk not in pagadores:
+                pagadores[vehiculo.pk] = InformeService._pagador(vehiculo)
+            if clave not in grupos:
+                pagador = pagadores[vehiculo.pk]
+                grupos[clave] = {
+                    "mes": mes,
+                    "placa": vehiculo.placa,
+                    "carpeta": carpeta,
+                    # G3/B11: ccosto vendrá de `common` (map_carpetas).
+                    "centro_costo": "",
+                    "area": salida.area or "",
+                    "tipo_contrato": vehiculo.tipo_contrato,
+                    "cedula_pago": pagador["cedula_pago"],
+                    "nombre_pago": pagador["nombre_pago"],
+                    "total_dias": 0,
+                    "valor_dia": int(salida.valor_dia),
+                    "valor_base": CERO,
+                    "estado": salida.estado,
+                    "observacion": salida.observacion or "",
+                    "consecutivo": consecutivos.get(vehiculo.pk, ""),
+                }
+            grupos[clave]["total_dias"] += 1
+            grupos[clave]["valor_base"] += salida.total_a_pagar
+
+        filas = []
+        for clave in sorted(grupos):
+            grupo = grupos[clave]
+            rete = (grupo["valor_base"] * RETEFUENTE).quantize(Decimal("0.01"))
+            grupo["rte"] = rete
+            grupo["total_pagar"] = grupo["valor_base"] - rete
+            filas.append(grupo)
+        return {"mes": mes, "anio": anio, "filas": filas}
+
+    @staticmethod
+    def liquidacion_placa(mes, anio):
+        """
+        F5-7: liquidación por placa (JS 4267–4336) — una fila por
+        vehículo: días, valor base (valor_dia ± novedad = total_a_pagar),
+        retefuente 1 %, pagar, pagador y consecutivo si ya existe.
+        Excluye REPORTADO y ELIMINADO como el legacy.
+        """
+        mes, anio = validar_periodo(mes, anio)
+        desde, hasta = rango_mes(mes, anio)
+        salidas = (
+            Salida.objects.select_related("vehiculo", "novedad")
+            .filter(fecha_salida__gte=desde, fecha_salida__lt=hasta)
+            .exclude(estado__in=(EstadoSalida.ELIMINADO, EstadoSalida.REPORTADO))
+            .order_by("vehiculo__placa", "fecha_salida", "id")
+        )
+        consecutivos = dict(
+            ConsecutivoMensual.objects.filter(mes=mes, anio=anio).values_list(
+                "vehiculo_id", "consecutivo"
+            )
+        )
+        grupos = {}
+        for salida in salidas:
+            vehiculo = salida.vehiculo
+            grupo = grupos.get(vehiculo.pk)
+            if grupo is None:
+                pagador = InformeService._pagador(vehiculo)
+                grupos[vehiculo.pk] = {
+                    "placa": vehiculo.placa,
+                    "propietario": vehiculo.nombre_propietario or "SIN PROPIETARIO",
+                    "tipo_contrato": vehiculo.tipo_contrato,
+                    "total_dias": 0,
+                    "valor_dia": int(salida.valor_dia),
+                    "valor_base": CERO,
+                    "cedula_pago": pagador["cedula_pago"],
+                    "nombre_pago": pagador["nombre_pago"],
+                    "tipo_cuenta": pagador["tipo_cuenta"],
+                    "banco": pagador["banco"],
+                    "cuenta_pago": pagador["cuenta_pago"],
+                    "consecutivo": consecutivos.get(vehiculo.pk, ""),
+                }
+            grupos[vehiculo.pk]["total_dias"] += 1
+            grupos[vehiculo.pk]["valor_base"] += salida.total_a_pagar
+
+        filas = []
+        for vehiculo_pk in sorted(grupos, key=lambda k: grupos[k]["placa"]):
+            grupo = grupos[vehiculo_pk]
+            rete = (grupo["valor_base"] * RETEFUENTE).quantize(Decimal("0.01"))
+            grupo["rte"] = rete
+            grupo["pagar"] = grupo["valor_base"] - rete
+            filas.append(grupo)
+        return {"mes": mes, "anio": anio, "filas": filas}
 
     # ------------------------------------------------------------------ #
     # Export server-side (F5-4, fila B4 / §5.7)

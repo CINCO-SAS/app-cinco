@@ -16,7 +16,7 @@
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | Núcleo **CERRADO** (B2): alta de salidas S6, consulta B1, escaneo S1; **fotos B3 núcleo cerrado** (ventana/agenda/imágenes en servidor); **kiosco S3 (pre-chequeo) y S4 (consulta por placa) cerrados**; pendiente solo S2 (gated G4) y refinamientos B3 | ~70% |
 | F4 Backoffice y Novedades | Backoffice **CERRADO** (B4): `aprobar-lote`, `aprobar`, `rechazar`, `validar`, `DELETE`, novedades (B6/B7), historial y `/validaciones/` (cierre por área) | ~60% (falta B11 centros de costos → G3) |
-| F5 Liquidaciones e Informes | Núcleo CERRADO (A2); **F5-1…F5-6 cerrados** (cuenta de cobro, gráfico, informe mensual, export, WFM + worker, planillas); resto F5-7 (agregados) | ~85% |
+| F5 Liquidaciones e Informes | **F5-1…F5-7 CERRADOS** (cuenta de cobro, gráfico, informe mensual, export, WFM + worker, planillas, agregados de sábana) | ~95% |
 | F6 ETL histórico | Esqueleto cerrado (A3); corrida real → C3 | ~40% |
 | F7 Cutover | — | 0% |
 | F8 Estabilización | — | 0% |
@@ -202,9 +202,20 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
       QR en disco. Permisos: exige `add_consecutivomensual` (generar
       planilla ESCRIBE consecutivos). *Pendiente menor (P1): el formato
       físico definitivo requiere `planilla_salida.php` verificado.*
-- [ ] **F5-7 · Agregados de sábana** — día a día, área, área/carpeta,
-      áreas×mes, nómina, pronto pago y liquidación por placa (agregaciones
-      server-side sobre F5-3). *Tamaño L · al final.*
+- [x] **F5-7 · Agregados de sábana** — ✅ **CERRADO** (351 tests). Agregaciones
+      server-side del JS de la sábana (`transporte_salida_informes.php`):
+      `GET /informes/dia/?fecha=` (día → área → carpetas con `arr_estado`),
+      `GET /informes/area/?mes=&anio=&solo_aprobados=` (totales del mes,
+      interruptor "solo aprobados" = APROBADO/VALIDADO),
+      `GET /informes/areas-mes/?anio=` (matriz área × meses),
+      `GET /informes/nomina/?mes=&anio=` ((carpeta, placa), rete 1 %,
+      pagador en servidor CR-13; **`centro_costo` vacío hasta G3/B11** —
+      el legacy lo tomaba de `map_carpetas` en JS) y
+      `GET /informes/liquidacion/?mes=&anio=` (por placa, rete 1 %,
+      consecutivo). Fidelidad: `pendiente` = REPORTADO, EXTERNO es el
+      único "externo" (PROPIO/RENTING son propios), importes en pesos
+      enteros (`parseInt`), REPORTADO/ELIMINADO excluidos en nómina y
+      liquidación. *El "pronto pago" ya existía en A2 (`/liquidaciones/pronto-pago/`).*
 
 ---
 
@@ -272,4 +283,5 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-15 | F5-3 informe mensual: /informes/mensual/ + /areas/ con filtros server-side; fix paginación (500 latente en /salidas/) (255 tests) | `7f0f362` |
 | 2026-10-15 | F5-4 export server-side: /salidas/export/?formato=xlsx|csv, 13 columnas, mismos filtros B1 (260 tests) | `3013df2` |
 | 2026-10-19 | F5-5 WFM + F5-6 planillas: cola+lote WFM con worker y planilla oficial con consecutivo y QR (330 tests) | `6c2e10c` |
-| 2026-10-19 | Hallazgos de calidad: permisos de modelo en /planillas/, tecnico_cedula real, filtro duro MOTO (CR-11), worker `wfm_worker`, .venv raíz roto eliminado (339 tests) | *(este commit)* |
+| 2026-10-19 | Hallazgos de calidad: permisos de modelo en /planillas/, tecnico_cedula real, filtro duro MOTO (CR-11), worker `wfm_worker`, .venv raíz roto eliminado (339 tests) | `33e8d7e` |
+| 2026-10-19 | F5-7 agregados de sábana: /informes/dia, /area, /areas-mes, /nomina y /liquidacion server-side (351 tests) | *(este commit)* |

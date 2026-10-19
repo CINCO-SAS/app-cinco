@@ -3288,6 +3288,222 @@ class ExportTests(TestCase):
         self.assertIn("80000.00", texto)  # 85000 − 5000
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# §5.7 / F5-7: Agregados de sábana
+# ═════════════════════════════════════════════════════════════════════════════
+
+class InformeAgregadosTests(TestCase):
+    """F5-7: agregados server-side de la sábana (día, área, matriz,
+    nómina y liquidación por placa), portados del JS de la sábana."""
+
+    def setUp(self):
+        self.vehiculo = FlotaService.crear(
+            {
+                "placa": "AGR100", "tipo_vehiculo": "CAMIONETA",
+                "marca": "MAZDA", "referencia": "CX5", "modelo_anio": 2022,
+                "tipo_contrato": "PROPIO", "nombre_propietario": "CINCO SAS",
+                "cedula_propietario": "900111222", "valor_dia_base": 100000,
+                "fecha_soat": date(2027, 1, 1), "fecha_cda": date(2026, 11, 15),
+            },
+            actor=None,
+        )
+        self.externo = FlotaService.crear(
+            {
+                "placa": "AGR200", "tipo_vehiculo": "FURGON",
+                "marca": "CHEVROLET", "referencia": "NKR", "modelo_anio": 2021,
+                "tipo_contrato": "EXTERNO", "nombre_propietario": "TERCERO",
+                "cedula_propietario": "800111222", "valor_dia_base": 80000,
+                "fecha_soat": date(2027, 1, 1), "fecha_cda": date(2026, 11, 15),
+            },
+            actor=None,
+        )
+
+    def _salida(self, vehiculo, dia, estado, area="OPERACIONES",
+                carpeta="LOGISTICA", valor="100000"):
+        return Salida.objects.create(
+            vehiculo=vehiculo, fecha_salida=dia, area=area, carpeta=carpeta,
+            valor_dia=Decimal(valor), estado=estado,
+        )
+
+    def _area(self, datos, nombre):
+        return next(a for a in datos["areas"] if a["area"] == nombre)
+
+    # ------------------------------ por_dia ----------------------------- #
+    def test_por_dia_agrupa_area_y_carpeta(self):
+        self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.APROBADO)
+        self._salida(self.externo, date(2026, 10, 5), EstadoSalida.REPORTADO,
+                     carpeta="ASEO")
+        self._salida(self.vehiculo, date(2026, 10, 6), EstadoSalida.APROBADO)
+        datos = InformeService.por_dia(date(2026, 10, 5))
+        area = self._area(datos, "OPERACIONES")
+        self.assertEqual(area["propios"], 1)
+        self.assertEqual(area["externos"], 1)
+        self.assertEqual(area["total_vehi"], 2)
+        self.assertEqual(area["total_dia"], 200000)
+        # arr_estado: "pendiente" es REPORTADO (JS 3007).
+        self.assertEqual(area["arr_estado"]["aprobado"]["cnt"], 1)
+        self.assertEqual(area["arr_estado"]["pendiente"]["cnt"], 1)
+        self.assertEqual(area["arr_estado"]["total_est"]["cnt"], 2)
+        carpetas = {c["carpeta"]: c for c in area["carpetas"]}
+        self.assertEqual(set(carpetas), {"LOGISTICA", "ASEO"})
+        self.assertEqual(carpetas["ASEO"]["externos"], 1)
+
+    def test_por_dia_excluye_eliminado_y_fallbacks(self):
+        self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.ELIMINADO)
+        self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.APROBADO,
+                     area="", carpeta="")
+        datos = InformeService.por_dia(date(2026, 10, 5))
+        self.assertEqual(len(datos["areas"]), 1)
+        area = datos["areas"][0]
+        self.assertEqual(area["area"], "SIN AREA")
+        self.assertEqual(area["carpetas"][0]["carpeta"], "SIN CARPETA")
+        self.assertEqual(area["total_vehi"], 1)
+
+    def test_por_dia_novedad_ajusta_valor(self):
+        salida = self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.APROBADO)
+        Novedad.objects.create(
+            salida=salida, tipo=TipoNovedad.ADICIONAL,
+            valor=Decimal("15000"), descripcion="adicional",
+        )
+        datos = InformeService.por_dia(date(2026, 10, 5))
+        self.assertEqual(datos["areas"][0]["total_dia"], 115000)
+
+    # ------------------------------ por_area ---------------------------- #
+    def test_por_area_mes_y_solo_aprobados(self):
+        self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.APROBADO)
+        self._salida(self.vehiculo, date(2026, 10, 6), EstadoSalida.VALIDADO)
+        self._salida(self.vehiculo, date(2026, 10, 7), EstadoSalida.REPORTADO)
+        completo = InformeService.por_area(10, 2026)
+        area = self._area(completo, "OPERACIONES")
+        self.assertEqual(area["total_vehi"], 3)
+        self.assertEqual(area["total_dia"], 300000)
+        # solo_aprobados: los totales bajan a APROBADO/VALIDADO…
+        solo = self._area(
+            InformeService.por_area(10, 2026, solo_aprobados=True),
+            "OPERACIONES",
+        )
+        self.assertEqual(solo["total_vehi"], 2)
+        self.assertEqual(solo["total_dia"], 200000)
+        # …pero arr_estado sigue reflejando todas las filas (JS 2860–2909).
+        self.assertEqual(solo["arr_estado"]["pendiente"]["cnt"], 1)
+        self.assertEqual(solo["arr_estado"]["total_est"]["cnt"], 3)
+
+    def test_por_area_excluye_otro_mes(self):
+        self._salida(self.vehiculo, date(2026, 9, 30), EstadoSalida.APROBADO)
+        self._salida(self.vehiculo, date(2026, 10, 1), EstadoSalida.APROBADO)
+        area = self._area(InformeService.por_area(10, 2026), "OPERACIONES")
+        self.assertEqual(area["total_vehi"], 1)
+
+    # ---------------------------- areas_por_mes ------------------------- #
+    def test_areas_por_mes_matriz(self):
+        self._salida(self.vehiculo, date(2026, 1, 5), EstadoSalida.APROBADO)
+        self._salida(self.externo, date(2026, 1, 6), EstadoSalida.REPORTADO)
+        self._salida(self.vehiculo, date(2026, 3, 5), EstadoSalida.ELIMINADO)
+        matriz = InformeService.areas_por_mes(2026)
+        area = self._area(matriz, "OPERACIONES")
+        self.assertEqual(len(area["meses"]), 1)  # ELIMINADO excluido
+        mes = area["meses"][0]
+        self.assertEqual(mes["mes"], 1)
+        self.assertEqual(mes["propios"], 1)
+        self.assertEqual(mes["externos"], 1)
+        self.assertEqual(mes["total_dia"], 200000)
+
+    def test_areas_por_mes_anio_invalido(self):
+        with self.assertRaises(ValueError):
+            InformeService.areas_por_mes(1999)
+
+    # -------------------------------- nómina ---------------------------- #
+    def test_nomina_excluye_reportado_y_calcula_rete(self):
+        DatosBancariosVehiculo.objects.create(
+            vehiculo=self.vehiculo, cedula_titular="900111222",
+            nombre_titular="CINCO SAS", tipo_cuenta="AHORRO",
+            banco="BANCO", numero_cuenta="1234567890",
+        )
+        self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.APROBADO)
+        self._salida(self.vehiculo, date(2026, 10, 6), EstadoSalida.VALIDADO)
+        self._salida(self.vehiculo, date(2026, 10, 7), EstadoSalida.REPORTADO)
+        self._salida(self.externo, date(2026, 10, 5), EstadoSalida.APROBADO)
+        datos = InformeService.nomina(10, 2026)
+        filas = {f["placa"]: f for f in datos["filas"]}
+        # REPORTADO excluido: 2 días del propio + 1 del externo.
+        self.assertEqual(filas["AGR100"]["total_dias"], 2)
+        self.assertEqual(filas["AGR100"]["valor_base"], Decimal("200000"))
+        self.assertEqual(filas["AGR100"]["rte"], Decimal("2000.00"))
+        self.assertEqual(filas["AGR100"]["total_pagar"], Decimal("198000.00"))
+        # Pagador del dato bancario en servidor (CR-13).
+        self.assertEqual(filas["AGR100"]["cedula_pago"], "900111222")
+        self.assertEqual(filas["AGR100"]["nombre_pago"], "CINCO SAS")
+        self.assertEqual(filas["AGR200"]["total_dias"], 1)
+
+    def test_nomina_agrupa_por_carpeta(self):
+        self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.APROBADO)
+        self._salida(self.vehiculo, date(2026, 10, 6), EstadoSalida.APROBADO,
+                     carpeta="ASEO")
+        datos = InformeService.nomina(10, 2026)
+        self.assertEqual(len(datos["filas"]), 2)  # MISMA placa, 2 carpetas
+
+    # -------------------------- liquidación_placa ----------------------- #
+    def test_liquidacion_por_placa(self):
+        self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.APROBADO)
+        salida = self._salida(self.vehiculo, date(2026, 10, 6), EstadoSalida.VALIDADO)
+        Novedad.objects.create(
+            salida=salida, tipo=TipoNovedad.DESCUENTO,
+            valor=Decimal("10000"), descripcion="descuento",
+        )
+        self._salida(self.vehiculo, date(2026, 10, 7), EstadoSalida.REPORTADO)
+        datos = InformeService.liquidacion_placa(10, 2026)
+        self.assertEqual(len(datos["filas"]), 1)
+        fila = datos["filas"][0]
+        self.assertEqual(fila["placa"], "AGR100")
+        self.assertEqual(fila["total_dias"], 2)  # REPORTADO excluido
+        self.assertEqual(fila["valor_dia"], 100000)
+        # valor_base = 100000 + (100000 − 10000 descuento).
+        self.assertEqual(fila["valor_base"], Decimal("190000"))
+        self.assertEqual(fila["rte"], Decimal("1900.00"))
+        self.assertEqual(fila["pagar"], Decimal("188100.00"))
+        self.assertEqual(fila["propietario"], "CINCO SAS")
+        self.assertEqual(fila["consecutivo"], "")
+
+    # ------------------------------ endpoints --------------------------- #
+    def _api(self):
+        user = User.objects.create_user(
+            username="agr%s" % User.objects.count(), password="x"
+        )
+        api = APIClient()
+        api.force_authenticate(user=user)
+        return api
+
+    def test_endpoints_agregados(self):
+        self._salida(self.vehiculo, date(2026, 10, 5), EstadoSalida.APROBADO)
+        api = self._api()
+        casos = [
+            ("/transporte/informes/dia/", {"fecha": "2026-10-05"}),
+            ("/transporte/informes/area/", {"mes": 10, "anio": 2026}),
+            ("/transporte/informes/areas-mes/", {"anio": 2026}),
+            ("/transporte/informes/nomina/", {"mes": 10, "anio": 2026}),
+            ("/transporte/informes/liquidacion/", {"mes": 10, "anio": 2026}),
+        ]
+        for ruta, params in casos:
+            resp = api.get(ruta, params)
+            self.assertEqual(resp.status_code, 200, ruta)
+            self.assertTrue(resp.json()["ok"], ruta)
+
+    def test_endpoints_agregados_validan_entrada(self):
+        api = self._api()
+        self.assertEqual(
+            api.get("/transporte/informes/dia/", {"fecha": "no-fecha"}).status_code,
+            400,
+        )
+        self.assertEqual(
+            api.get("/transporte/informes/area/", {"mes": 13, "anio": 2026}).status_code,
+            400,
+        )
+        self.assertEqual(
+            api.get("/transporte/informes/areas-mes/", {"anio": 1999}).status_code,
+            400,
+        )
+
+
 class WfmVentanaTests(SimpleTestCase):
     """F5-5: ventana del WFM (legacy ResolveRange 24–66).
 

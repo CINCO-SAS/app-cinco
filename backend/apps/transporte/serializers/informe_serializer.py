@@ -51,3 +51,21 @@ class InformeMensualSerializer(PeriodoSerializer):
     area = serializers.CharField(required=False, allow_blank=True, default="")
     carpeta = serializers.CharField(required=False, allow_blank=True, default="")
     search = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class FechaSerializer(serializers.Serializer):
+    """Entrada F5-7: fecha exacta del agregado 'día a día'."""
+
+    fecha = serializers.DateField()
+
+
+class PeriodoAprobadosSerializer(PeriodoSerializer):
+    """Entrada F5-7: periodo + interruptor 'solo aprobados' de la sábana."""
+
+    solo_aprobados = serializers.BooleanField(required=False, default=False)
+
+
+class AnioSerializer(serializers.Serializer):
+    """Entrada F5-7: año de la matriz área × meses."""
+
+    anio = serializers.IntegerField(min_value=2000, max_value=2100)
