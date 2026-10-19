@@ -94,10 +94,6 @@ def convertir_conductor(fila):
             fila.get("fecha_nacimiento"), "fecha_nacimiento"
         ),
         "fecha_egreso": nz.fecha_legacy(fila.get("fecha_egreso")),
-        "tipo_vinculacion": nz.normalizar_catalogo(
-            fila.get("tipo_vinculacion") or TipoVinculacion.EXTERNO,
-            TipoVinculacion.values, "tipo_vinculacion"
-        ),
         "activo": nz.activo_por_estado(fila.get("estado")),
         ADVERTENCIAS: advertencias,
     }

@@ -15,8 +15,6 @@ Reglas:
 """
 from django.db import IntegrityError, transaction
 
-from apps.empleados.models import Empleado
-
 from ..models import ValidacionSalida
 from .periodos import entero, validar_anio, validar_mes, validar_periodo
 from .salida_service import SalidaService

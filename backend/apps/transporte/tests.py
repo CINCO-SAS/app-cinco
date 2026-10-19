@@ -45,8 +45,6 @@ from .models import (
     JefeValidador,
     Novedad,
     PagoVehiculoMensual,
-    ReporteFotoImagen,
-    ReporteFotograficoVehiculo,
     ResidencialWfm,
     Salida,
     SalidaHistorial,
@@ -72,7 +70,6 @@ from .services import (
     WfmService,
 )
 from .services.flota_service import COLUMNAS_CSV_BANCARIOS
-from .services.reporte_fotografico_service import MAX_BYTES_IMAGEN
 from .services.periodos import restar_meses
 from .services.vigencia import estado_vigencia
 
@@ -731,7 +728,7 @@ class ImportBancariosCsvTests(TestCase):
         fila = "ABC123;111;PEDRO;AHORRO;LOJA;001"
         contenido = f"placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\n{fila}"
         FlotaService.importar_datos_bancarios_csv(self._csv(contenido))
-        contenido2 = f"placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\nABC123;222;PEDRO;CORRIENTE;PRODUBANCO;999"
+        contenido2 = "placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\nABC123;222;PEDRO;CORRIENTE;PRODUBANCO;999"
         resultado = FlotaService.importar_datos_bancarios_csv(self._csv(contenido2))
 
         self.assertEqual(resultado["insertados"], 0)
@@ -4493,3 +4490,92 @@ class KioscoAPITests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.json()["ok"])
         self.assertEqual(resp.json()["data"]["vehiculo"]["placa"], "KSK100")
+
+
+class TransportePaginacionYValidacionAPITests(TestCase):
+    """
+    Verifica que todos los endpoints paginados respondan HTTP 200 con la
+    estructura canónica de PaginacionTransporte (count, next, previous, results)
+    y que la ruta /transporte/validaciones/ esté registrada y operativa.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_superuser(
+            username="admin_test", email="admin@test.com", password="x"
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def test_endpoints_paginados_retornan_200_con_estructura_canonica(self):
+        rutas = [
+            "/transporte/conductores/",
+            "/transporte/vehiculos/",
+            "/transporte/parametros/cierres/",
+            "/transporte/parametros/jefes/",
+            "/transporte/liquidaciones/",
+            "/transporte/validaciones/",
+        ]
+        for ruta in rutas:
+            with self.subTest(ruta=ruta):
+                resp = self.api.get(ruta)
+                self.assertEqual(
+                    resp.status_code,
+                    200,
+                    f"Falla HTTP 200 en {ruta}: {resp.content}",
+                )
+                data = resp.json()
+                self.assertIn("count", data, f"Falta 'count' en {ruta}")
+                self.assertIn("next", data, f"Falta 'next' en {ruta}")
+                self.assertIn("previous", data, f"Falta 'previous' en {ruta}")
+                self.assertIn("results", data, f"Falta 'results' en {ruta}")
+                self.assertIsInstance(data["results"], list)
+
+    def test_post_validaciones_cierre_area_via_http(self):
+        empleado = Empleado.objects.create(
+            cedula="999888777",
+            codigo_sap="SAP-999888777",
+            nombre="MARIO",
+            apellido="VALIDADOR",
+            password="",
+        )
+        ParametrosService.crear_jefe(
+            {
+                "empleado": empleado,
+                "areas": ["OPERACIONES"],
+                "carpetas_por_area": {"OPERACIONES": []},
+            },
+            actor=None,
+        )
+        user_jefe = User.objects.create_user(
+            username="999888777", password="x", is_staff=True
+        )
+        # Asignar permisos de modelo para ValidacionSalida
+        perm_add = Permission.objects.get(
+            codename="add_validacionsalida",
+            content_type__app_label="transporte",
+        )
+        user_jefe.user_permissions.add(perm_add)
+
+        self.api.force_authenticate(user=user_jefe)
+        resp = self.api.post(
+            "/transporte/validaciones/",
+            {
+                "area": "OPERACIONES",
+                "mes": 10,
+                "anio": 2026,
+                "datos": {"resumen": "cierre mensual test"},
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        cuerpo = resp.json()
+        self.assertEqual(cuerpo["area"], "OPERACIONES")
+        self.assertEqual(cuerpo["mes"], 10)
+        self.assertEqual(cuerpo["anio"], 2026)
+

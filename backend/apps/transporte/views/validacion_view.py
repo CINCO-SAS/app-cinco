@@ -24,6 +24,7 @@ from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 from ..models import ValidacionSalida
 from ..serializers import validacion_serializer
 from ..services import ValidacionService
+from .paginacion import PaginacionTransporte
 
 
 class ValidacionViewSet(ListModelMixin, GenericViewSet):
@@ -32,6 +33,7 @@ class ValidacionViewSet(ListModelMixin, GenericViewSet):
     el servicio."""
 
     queryset = ValidacionSalida.objects.all()
+    pagination_class = PaginacionTransporte
     serializer_class = validacion_serializer.ValidacionSalidaSerializer
     permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
 

@@ -21,7 +21,7 @@ Fórmula (idéntica a la liquidación de la sábana, JS 4270–4336):
 import calendar
 import csv
 import io
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from html import escape
 

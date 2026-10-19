@@ -16,6 +16,7 @@ from rest_framework.viewsets import GenericViewSet
 from ..models import Vehiculo
 from ..serializers import vehiculo_serializer
 from ..services import FlotaService
+from .paginacion import PaginacionTransporte
 
 
 class VehiculoViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
@@ -25,6 +26,7 @@ class VehiculoViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
     """
 
     queryset = Vehiculo.objects.all()
+    pagination_class = PaginacionTransporte
     parser_classes = [JSONParser, FormParser, MultiPartParser]
     filter_backends = [filters.SearchFilter]
     search_fields = ["placa", "marca", "referencia", "numero_motor", "numero_vin"]

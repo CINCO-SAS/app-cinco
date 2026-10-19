@@ -27,12 +27,14 @@ from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 from ..models import PagoVehiculoMensual
 from ..serializers import liquidacion_serializer
 from ..services import LiquidacionService
+from .paginacion import PaginacionTransporte
 
 
 class LiquidacionViewSet(ListModelMixin, GenericViewSet):
     """Lectura a autenticados; escritura con permiso de modelo + gate de cierre."""
 
     queryset = PagoVehiculoMensual.objects.all()
+    pagination_class = PaginacionTransporte
     serializer_class = liquidacion_serializer.PagoSerializer
     permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
 

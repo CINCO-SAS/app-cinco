@@ -3,7 +3,6 @@ Bases del módulo Transporte.
 
 Referencia: PLAN_BACKEND_DJANGO_CONSOLIDADO_MODULO_TRANSPORTE.md §3.A (D-A5).
 """
-from django.conf import settings
 from django.db import models
 
 

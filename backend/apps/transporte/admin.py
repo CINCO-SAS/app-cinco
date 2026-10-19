@@ -41,12 +41,17 @@ class MantenimientoInline(admin.TabularInline):
     extra = 0
 
 
+class DatosBancariosVehiculoInline(admin.TabularInline):
+    model = DatosBancariosVehiculo
+    extra = 0
+
+
 @admin.register(Vehiculo)
 class VehiculoAdmin(admin.ModelAdmin):
     list_display = ("placa", "marca", "tipo_vehiculo", "tipo_contrato", "activo")
     list_filter = ("tipo_vehiculo", "tipo_contrato", "ciudad_operacion", "activo")
     search_fields = ("placa", "marca", "numero_vin", "numero_motor")
-    inlines = [DocumentoVehiculoInline, MantenimientoInline]
+    inlines = [DocumentoVehiculoInline, MantenimientoInline, DatosBancariosVehiculoInline]
 
 
 class SalidaHistorialInline(admin.TabularInline):

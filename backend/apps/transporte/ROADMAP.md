@@ -284,4 +284,5 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-15 | F5-4 export server-side: /salidas/export/?formato=xlsx|csv, 13 columnas, mismos filtros B1 (260 tests) | `3013df2` |
 | 2026-10-19 | F5-5 WFM + F5-6 planillas: cola+lote WFM con worker y planilla oficial con consecutivo y QR (330 tests) | `6c2e10c` |
 | 2026-10-19 | Hallazgos de calidad: permisos de modelo en /planillas/, tecnico_cedula real, filtro duro MOTO (CR-11), worker `wfm_worker`, .venv raíz roto eliminado (339 tests) | `33e8d7e` |
-| 2026-10-19 | F5-7 agregados de sábana: /informes/dia, /area, /areas-mes, /nomina y /liquidacion server-side (351 tests) | *(este commit)* |
+| 2026-10-19 | F5-7 agregados de sábana: /informes/dia, /area, /areas-mes, /nomina y /liquidacion server-side (351 tests) | `c39ee9a` |
+| 2026-10-19 | Revisión de cambios subidos: registro real de `/validaciones/` (desde B4 el ViewSet existía pero la ruta devolvía 404), `serializer_class` en cierres/jefes (500 latente en GET), fix clave duplicada `tipo_vinculacion` en ETL de conductores, paginación canónica en 6 listados, inline de datos bancarios en admin (353 tests) | *(este commit)* |

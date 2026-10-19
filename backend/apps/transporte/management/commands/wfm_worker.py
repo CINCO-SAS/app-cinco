@@ -24,7 +24,6 @@ import os
 
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.transporte.models import WfmJob
 from apps.transporte.services import WfmService
 
 

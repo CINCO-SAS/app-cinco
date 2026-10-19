@@ -21,12 +21,15 @@ from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 from ..models import JefeValidador
 from ..serializers import jefe_serializer
 from ..services import ParametrosService
+from .paginacion import PaginacionTransporte
 
 
 class JefeValidadorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
     """Lectura abierta a autenticados; escritura requiere permiso de modelo."""
 
     queryset = JefeValidador.objects.all()
+    serializer_class = jefe_serializer.JefeValidadorSerializer
+    pagination_class = PaginacionTransporte
     permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
 
     # ------------------------------------------------------------------ #

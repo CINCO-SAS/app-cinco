@@ -60,6 +60,8 @@ router.register(r"kiosco", KioscoViewSet, basename="kiosco")
 router.register(
     r"reportes-fotograficos", ReporteFotograficoViewSet, basename="reportes-fotograficos"
 )
+# F4/B4: cierre mensual de validación de salidas por área.
+router.register(r"validaciones", ValidacionViewSet, basename="validaciones")
 # F5-5: validación WFM masiva (lote síncrono + cola de jobs).
 router.register(r"wfm", WfmViewSet, basename="wfm")
 

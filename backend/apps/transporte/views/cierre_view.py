@@ -21,12 +21,15 @@ from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 from ..models import FechaLimiteCierre
 from ..serializers import cierre_serializer
 from ..services import ParametrosService
+from .paginacion import PaginacionTransporte
 
 
 class FechaLimiteCierreViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
     """Lectura abierta a autenticados; escritura requiere permiso de modelo."""
 
     queryset = FechaLimiteCierre.objects.all()
+    serializer_class = cierre_serializer.FechaLimiteCierreSerializer
+    pagination_class = PaginacionTransporte
     permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
 
     # ------------------------------------------------------------------ #

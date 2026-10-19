@@ -53,7 +53,6 @@ Papeles (§5.9, hasta E3):
 from datetime import date, datetime
 from decimal import Decimal
 
-from django.contrib.auth.models import Group
 from django.db import transaction
 from django.utils import timezone
 

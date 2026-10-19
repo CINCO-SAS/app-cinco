@@ -14,6 +14,7 @@ from rest_framework.viewsets import GenericViewSet
 from ..models import Conductor
 from ..serializers import conductor_serializer
 from ..services import ConductorService
+from .paginacion import PaginacionTransporte
 
 
 class ConductorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
@@ -23,6 +24,7 @@ class ConductorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
     """
 
     queryset = Conductor.objects.all()
+    pagination_class = PaginacionTransporte
     filter_backends = [filters.SearchFilter]
     search_fields = ["cedula", "nombre_completo", "celular"]
 
