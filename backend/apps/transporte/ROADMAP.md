@@ -12,7 +12,7 @@
 | Fase | Contenido | Avance |
 |---|---|---|
 | F0 Diccionario y mapeo FKs | Mapeo aplicado en los modelos | ~90% (auditorías CR-3 pendientes → C2) |
-| F1 Base Django y Festivos | 16 modelos + migración; **algoritmo de festivos portado + caché** (services/calendario.py); falta la tabla `common.Festivo` | ~70% (solo falta `common.Festivo` → G1; migrate real → C1) |
+| F1 Base Django y Festivos | 16 modelos + migración; **algoritmo de festivos portado + caché** y **catálogo JSON editable** (`apps/common/festivos/`, compartido con otros módulos); falta la tabla `common.Festivo` | ~85% (solo falta la tabla → G1; migrate real → C1) |
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) | ~90% (falta T6 → C3) |
 | F3 Kiosco y Fotos | Núcleo **CERRADO** (B2): alta de salidas S6, consulta B1, escaneo S1; **fotos B3 núcleo cerrado** (ventana/agenda/imágenes en servidor); **kiosco S3 (pre-chequeo) y S4 (consulta por placa) cerrados**; pendiente solo S2 (gated G4) y refinamientos B3 | ~70% |
 | F4 Backoffice y Novedades | Backoffice **CERRADO** (B4): `aprobar-lote`, `aprobar`, `rechazar`, `validar`, `DELETE`, novedades (B6/B7), historial y `/validaciones/` (cierre por área) | ~60% (falta B11 centros de costos → G3) |
@@ -30,7 +30,7 @@
 
 | ID | Condición | Desbloquea | Estado / responsable |
 |---|---|---|---|
-| **G1** | Decisión de negocio: fuente y modelo del calendario de festivos (`common.Festivo`) | B1 (F3); **B2, B3 y B4 cerrados sin G1** con el algoritmo portado | Pospuesto por el negocio |
+| **G1** | Decisión de negocio: fuente y modelo del calendario de festivos (`common.Festivo`) | B1 (F3); **B2, B3 y B4 cerrados sin G1** con el algoritmo portado | **Desactivado en la práctica (19-oct):** `es_festivo` = algoritmo ∪ catálogo JSON editable (`apps/common/festivos/`); la tabla BD solo añadiría decretar en caliente sin redeploy |
 | **G2** | Conectividad: BD `azul` (`192.168.79.10`), BD negra Nokia y `default` | C1–C4, T6 teléfonos | Sin acceso desde esta máquina |
 | **G3** | Modelo `common.Area` (viene de otro PHP) | FK de áreas en parámetros/backoffice | Pendiente de fuente |
 | **G4** | Decisiones **D-A9** (asignar móvil vía outbox asíncrono) y **D-A10** (router BD negra) — §8 | S2 asignar móvil, T6 | Pendientes de decisión técnica |
@@ -77,16 +77,21 @@
 
 > T6 (teléfonos/`buscar_movil`) **no** es Tramo A: encadena tres BD (G2) y arrastra D-A9/D-A10 (G4).
 
-### Tramo B — requiere G1 (festivos)
+### Tramo B — requiere G1 (festivos) · B1 ya operativo (solo falta la tabla opcional)
 
 - [ ] **B1 · F1-resto: festivos** — modelo/precarga del calendario + caché en memoria
       + tests de la regla de −2 días hábiles (CR-9). *Tamaño M · Es gate de todo el tramo.*
-      **Avance (14-oct):** el ALGORITMO ya está portado al backend en
-      `services/calendario.py` (18 festivos estatutarios Ley 51/1983 +
-      Pascua Butcher/Meeus, port de `frontend/src/utils/festivos/festivosColombia.ts`,
-      sábado configurable con default hábil como el original). G1 ahora solo
-      gatea la TABLA `common.Festivo` (festivos decretados art. 71 + fuente
-      compartida de otras áreas): al llegar, `es_festivo` = algoritmo ∪ BD.
+      **Avance (19-oct): B1 DE FACTO OPERATIVO.** El calendario vive en
+      **`apps/common/festivos/`** (módulo reutilizable por cualquier app) con dos
+      fuentes: el ALGORITMO (18 festivos estatutarios Ley 51/1983 + Pascua
+      Butcher/Meeus, port de `frontend/src/utils/festivos/festivosColombia.ts`) y
+      el **catálogo editable `festivos_colombia.json`** (2022–2030, con el feriado
+      decretado 2026-07-13). `es_festivo` = **algoritmo ∪ catálogo**: agregar un
+      festivo = editar el JSON y `recargar_catalogo()` (sin código, sin migración);
+      validado por tests contra el algoritmo (así se detectó y corrigió el
+      2027-06-28 → 2027-07-05 del archivo de origen).
+      G1 ahora solo gatea la TABLA `common.Festivo` (opcional): al llegar,
+      `es_festivo` = algoritmo ∪ catálogo ∪ BD.
       **Paridad verificada:** el legacy CR-9 excluía sábados
       (`base_salida_transporte.php` 77–96) → la ventana usará
       `sabado_habil=False` explícito.
@@ -225,18 +230,22 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
 ## 3. Orden recomendado
 
 ```
-   HOY (sin gates)              G1 (festivos)                G2 (BD)                 CIERRE
- ┌─────────────────┐         ┌────────────────────┐      ┌──────────────────┐    ┌──────────┐
- │ A1 Parámetros   │         │ B1 festivos (gate) │      │ C1 migrate real  │    │ D1 F7    │
- │ A2 núcleo F5    │ ──────► │ B2 salidas (corazón)│ ───►│ C2 auditorías    │ ─► │ D2 F8    │
- │ A3 esqueleto ETL│         │ B3 fotos  B4 backof.│      │ C3 ETL  C4 real  │    └──────────┘
- └─────────────────┘         └────────────────────┘      └──────────────────┘
-                                    ▲
-        C1/C2 pueden adelantarse en cuanto se resuelva G2 (paralelo al Tramo A/B).
+   LISTO (código completo, sin gates)          G2 (BD)                 CIERRE
+ ┌─────────────────────────────┐          ┌──────────────────┐    ┌──────────┐
+ │ Tramo A: A1 A2 A3           │          │ C1 migrate real  │    │ D1 F7    │
+ │ Tramo B: B1 B2 B3 B4        │ ───────► │ C2 auditorías    │ ─► │ D2 F8    │
+ │   (festivos: algoritmo ∪    │          │ C3 ETL  C4 real  │    └──────────┘
+ │    catálogo JSON, sin G1)   │          └──────────────────┘
+ │ F5-1…F5-7 · CR-8 cerrados   │
+ └─────────────────────────────┘
+   Gates restantes (todo gated, ninguno bloquea el resto): G3 (common.Area → B11)
+   · G4 (outbox D-A9/D-A10 → S2/T6) · P1 (formato físico de la planilla) · G1 solo
+   aportaría la tabla BD opcional para decretar festivos en caliente.
 ```
 
-**Recomendación:** atacar A1 → A2 ahora; preparar G1 (decisión de festivos) como
-siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
+**Recomendación:** no queda trabajo de backend sin gate. Lo único que mueve la
+aguja ahora es **G2** (conectividad a BD → Tramo C completo con datos reales);
+G3 y G4 desbloquean los últimos dos puntos sueltos (B11 y S2/T6).
 
 ---
 
@@ -290,4 +299,5 @@ siguiente hito de negocio, porque de él cuelga el 40% del sistema (F3+F4).
 | 2026-10-19 | F5-7 agregados de sábana: /informes/dia, /area, /areas-mes, /nomina y /liquidacion server-side (351 tests) | `c39ee9a` |
 | 2026-10-19 | Revisión de cambios subidos: registro real de `/validaciones/` (desde B4 el ViewSet existía pero la ruta devolvía 404), `serializer_class` en cierres/jefes (500 latente en GET), fix clave duplicada `tipo_vinculacion` en ETL de conductores, paginación canónica en 6 listados, inline de datos bancarios en admin (353 tests) | `91615d4` |
 | 2026-10-19 | Refactor F5-7 (mejora sobre el legacy): claves de estado reales (`reportado`/`total`), RENTING separado de PROPIO, importes en `Decimal` con 2 decimales (355 tests) | `76c140f` |
-| 2026-10-19 | E1 catálogo operativo + E3 PermisoService (cierra CR-8): `/vehiculos/catalogo-operativo/` (solo activos, semáforo en servidor) y `/permisos/estado/` (grupos/permisos en vez de cédulas hardcodeadas, migración 0006) (365 tests) | *(este commit)* |
+| 2026-10-19 | E1 catálogo operativo + E3 PermisoService (cierra CR-8): `/vehiculos/catalogo-operativo/` (solo activos, semáforo en servidor) y `/permisos/estado/` (grupos/permisos en vez de cédulas hardcodeadas, migración 0006) (365 tests) | `65c2709` |
+| 2026-10-19 | Calendario reutilizable (G1 parcial): `apps/common/festivos/` con el algoritmo + catálogo editable `festivos_colombia.json` (2022–2030, feriado decretado 2026-07-13 incluido); `es_festivo` = algoritmo ∪ catálogo (agregar festivo = editar JSON y `recargar_catalogo()`, sin código ni migración); transporte queda como shim sin cambio de comportamiento; corrección del JSON de origen: San Pedro y San Pablo 2027 estaba en el lunes anterior (2027-06-28) → 2027-07-05 según Emiliani; +10 tests en `apps.common` (377 tests) | *(este commit)* |
