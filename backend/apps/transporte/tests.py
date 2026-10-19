@@ -18,7 +18,8 @@ import qrcode
 from openpyxl import load_workbook
 from PIL import Image
 from django.conf import settings
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Permission, User
+from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -33,17 +34,20 @@ from apps.operaciones.models import Actividad, Agenda
 from .etl import convertidores as cv
 from .etl import normalizadores as nz
 from .models import (
+    AgendaLogistica,
     AuditoriaLog,
     Conductor,
     ConsecutivoMensual,
     DatosBancariosVehiculo,
     EstadoSalida,
+    EstadoWfmJob,
     FechaLimiteCierre,
     JefeValidador,
     Novedad,
     PagoVehiculoMensual,
     ReporteFotoImagen,
     ReporteFotograficoVehiculo,
+    ResidencialWfm,
     Salida,
     SalidaHistorial,
     TipoNovedad,
@@ -51,6 +55,7 @@ from .models import (
     TipoVehiculo,
     ValidacionSalida,
     Vehiculo,
+    WfmJob,
 )
 from .serializers.jefe_serializer import JefeValidadorSerializer
 from .services import calendario
@@ -60,9 +65,11 @@ from .services import (
     InformeService,
     LiquidacionService,
     ParametrosService,
+    PlanillaService,
     ReporteFotograficoService,
     SalidaService,
     ValidacionService,
+    WfmService,
 )
 from .services.flota_service import COLUMNAS_CSV_BANCARIOS
 from .services.reporte_fotografico_service import MAX_BYTES_IMAGEN
@@ -81,6 +88,21 @@ def _asegurar_tabla_empleados():
     if "cinco_base_de_personal" not in connection.introspection.table_names():
         with connection.schema_editor() as editor:
             editor.create_model(Empleado)
+
+
+def _asegurar_tablas_wfm():
+    """
+    ResidencialWfm y AgendaLogistica son managed=False (BD azul, módulos
+    ajenos) y en tests el router está desactivado: se crean aquí desde
+    este archivo, igual que Empleado. Andamiaje solo de tests de
+    transporte; nunca se tocan residencial ni logística.
+    """
+    existentes = connection.introspection.table_names()
+    with connection.schema_editor() as editor:
+        if "residencial_base_wfm" not in existentes:
+            editor.create_model(ResidencialWfm)
+        if "logistica_actividades_modulo_agenda" not in existentes:
+            editor.create_model(AgendaLogistica)
 
 
 class EdadDerivadaTests(SimpleTestCase):
@@ -766,7 +788,12 @@ class ImportBancariosCsvTests(TestCase):
 
 
 class QrTests(TestCase):
-    """D-A8: el QR se regenera bajo demanda y jamás se persiste."""
+    """QR de verificación: PNG en `media/transporte/codigos-qr/` con
+    caché por placa (contrato revisado, ver ROADMAP · D-A8).
+
+    Payload = placa, igual que el legacy: el kiosco recibe lo escaneado
+    como texto de placa (S1), así que el contenido del QR no puede cambiar.
+    """
 
     MEDIA_ROOT_OVERRIDE = override_settings(
         MEDIA_ROOT=tempfile.mkdtemp(prefix="transporte_test_qr_")
@@ -797,14 +824,21 @@ class QrTests(TestCase):
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
 
     def test_es_determinista(self):
-        """Regenerable: mismo vehículo → mismos bytes en cada petición."""
+        """Regenerable: mismo vehículo → mismos bytes, con y sin caché."""
         vehiculo = self._vehiculo()
+        en_cache = FlotaService.generar_qr(vehiculo.pk)
+        forzado = FlotaService.generar_qr(vehiculo.pk, forzar=True)
+        self.assertEqual(en_cache, forzado)
         self.assertEqual(
-            FlotaService.generar_qr(vehiculo.pk),
-            FlotaService.generar_qr(vehiculo.pk),
+            forzado, FlotaService.generar_qr(vehiculo.pk, forzar=True)
         )
 
     def test_payload_es_la_placa(self):
+        """El payload NUNCA cambia: el kiosco S1 decodifica la placa.
+
+        Se fuerza la regeneración porque `crear` ya persiste el QR y sin
+        `forzar` la caché devolvería el archivo sin pasar por `add_data`.
+        """
         vehiculo = self._vehiculo()
         capturados = []
         original = qrcode.QRCode.add_data
@@ -814,14 +848,60 @@ class QrTests(TestCase):
             return original(self, data)
 
         with mock.patch.object(qrcode.QRCode, "add_data", espia):
-            FlotaService.generar_qr(vehiculo.pk)
+            FlotaService.generar_qr(vehiculo.pk, forzar=True)
 
         self.assertEqual(capturados, [vehiculo.placa])
 
-    def test_no_persiste_archivos(self):
-        vehiculo = self._vehiculo()
-        FlotaService.generar_qr(vehiculo.pk)
-        self.assertEqual(os.listdir(settings.MEDIA_ROOT), [])
+    def test_cambia_placa_no_devuelve_el_qr_anterior(self):
+        """Regresión: si cambia la placa, la caché NO puede seguir
+        sirviendo el PNG de la placa anterior."""
+        vehiculo = self._vehiculo("VIEJA01")
+        self.assertTrue(
+            FlotaService.generar_qr(vehiculo.pk).startswith(b"\x89PNG")
+        )
+        vehiculo.refresh_from_db(fields=["codigo_qr"])
+        ruta_vieja = vehiculo.codigo_qr.name
+        self.assertTrue(ruta_vieja, "el QR debe quedar persistido al crear")
+        self.assertTrue(default_storage.exists(ruta_vieja))
+
+        FlotaService.actualizar(
+            vehiculo.pk, {"placa": "NUEVA99"}, actor=None
+        )
+        vehiculo.refresh_from_db()
+
+        # El PNG de la placa anterior queda huérfano y se retira.
+        self.assertFalse(default_storage.exists(ruta_vieja))
+        # Y lo que devuelve ahora es el QR de la placa NUEVA.
+        ruta_nueva = FlotaService.obtener_ruta_qr(vehiculo.pk).name
+        self.assertEqual(ruta_nueva, "transporte/codigos-qr/qr_NUEVA99.png")
+
+        capturados = []
+        original = qrcode.QRCode.add_data
+
+        def espia(self, data):
+            capturados.append(data)
+            return original(self, data)
+
+        with mock.patch.object(qrcode.QRCode, "add_data", espia):
+            FlotaService.generar_qr(vehiculo.pk, forzar=True)
+        self.assertEqual(capturados, ["NUEVA99"])
+
+    def test_persiste_archivo_qr(self):
+        vehiculo = self._vehiculo("PERSIST1")
+        ruta_esperada = os.path.join(
+            settings.MEDIA_ROOT, "transporte", "codigos-qr", f"qr_{vehiculo.placa}.png"
+        )
+        self.assertTrue(os.path.exists(ruta_esperada))
+        vehiculo.refresh_from_db()
+        self.assertEqual(
+            vehiculo.codigo_qr.name, f"transporte/codigos-qr/qr_{vehiculo.placa}.png"
+        )
+
+    def test_obtener_ruta_qr(self):
+        vehiculo = self._vehiculo("RUTA123")
+        qr_file = FlotaService.obtener_ruta_qr(vehiculo.pk)
+        self.assertTrue(bool(qr_file))
+        self.assertEqual(qr_file.name, f"transporte/codigos-qr/qr_{vehiculo.placa}.png")
 
     def test_vehiculo_inexistente(self):
         with self.assertRaisesMessage(ValueError, "No existe un vehículo"):
@@ -1766,10 +1846,57 @@ class SalidaServiceTests(TestCase):
         salida.refresh_from_db()
         self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
 
-    def test_reportado_a_validado_no_permitido(self):
+    def test_reportado_a_validado_permitido_por_wfm(self):
+        """D-A11: el WFM masivo valida `reportado → validado` directo, sin
+        pasar por `aprobado` (transporte_validacion_wfm_service.php 427:
+        `SET estado='validado' WHERE estado='reportado'`)."""
         salida = self._salida()
-        with self.assertRaisesMessage(ValueError, "Transición no permitida"):
-            SalidaService.validar(salida.pk, usuario=self.jefe)
+        SalidaService.validar(salida.pk, usuario=self.jefe)
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
+        fila = salida.historial.filter(
+            estado=EstadoSalida.VALIDADO
+        ).first()
+        self.assertIsNotNone(fila)
+
+    def test_reportado_a_validado_tambien_exige_gestion(self):
+        """Abrir la transición no abre el endpoint: el WFM es un proceso
+        autónomo, pero un operador sigue sin poder validar."""
+        salida = self._salida()
+        with self.assertRaisesMessage(
+            ValueError, "No tiene permiso para gestionar"
+        ):
+            SalidaService.validar(salida.pk, usuario=self.operador)
+
+    def test_aprobado_a_rechazado_d_a11(self):
+        """D-A11: el rechazo puede caer sobre una salida ya aprobada
+        (base_salida_transporte.php 1159: su único guard es
+        `estado != 'eliminado'`, no mira el estado previo)."""
+        salida = self._salida(estado=EstadoSalida.APROBADO)
+        SalidaService.rechazar(
+            salida.pk, "Documento vencido", usuario=self.jefe
+        )
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.RECHAZADO)
+        fila = salida.historial.filter(
+            estado=EstadoSalida.RECHAZADO
+        ).first()
+        self.assertEqual(fila.motivo, "Documento vencido")
+
+    def test_eliminado_es_terminal(self):
+        """Endurecido vs legado: el único guard que SÍ comparte con el
+        legado (`estado != 'eliminado'`) es que nada resucita un
+        ELIMINADO, ni siquiera un jefe."""
+        salida = self._salida(estado=EstadoSalida.ELIMINADO)
+        for llamada in (
+            lambda: SalidaService.aprobar(salida.pk, usuario=self.jefe),
+            lambda: SalidaService.validar(salida.pk, usuario=self.jefe),
+            lambda: SalidaService.rechazar(
+                salida.pk, "motivo", usuario=self.jefe
+            ),
+        ):
+            with self.assertRaisesMessage(ValueError, "Transición no permitida"):
+                llamada()
 
     def test_rechazar_exige_motivo_y_queda_terminal(self):
         salida = self._salida()
@@ -2519,7 +2646,7 @@ class ReporteFotograficoApiTests(TestCase):
                 format="multipart",
             )
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.json()["responsable_cedula"], "1000002")
+        self.assertEqual(resp.json()["data"]["responsable_cedula"], "1000002")
 
     def test_create_placa_inexistente(self):
         with ReporteFotograficoTests._con_reloj(self.RELOJ_OK):
@@ -2537,13 +2664,13 @@ class ReporteFotograficoApiTests(TestCase):
             )
         self.assertEqual(resp.status_code, 200)
         # OM + CORRECTIVO → exenta, no exige agenda.
-        self.assertTrue(resp.json()["tiene_agenda"])
-        self.assertEqual(resp.json()["origen"], "area_exenta")
+        self.assertTrue(resp.json()["data"]["tiene_agenda"])
+        self.assertEqual(resp.json()["data"]["origen"], "area_exenta")
 
     def test_vehiculo_placa(self):
         resp = self.api.get("/transporte/reportes-fotograficos/vehiculo-placa/?placa=API123")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["vehiculo"]["placa"], "API123")
+        self.assertEqual(resp.json()["data"]["vehiculo"]["placa"], "API123")
 
 
 class KioscoS3S4Tests(TestCase):
@@ -2584,7 +2711,8 @@ class KioscoS3S4Tests(TestCase):
     # ------------------------------ S3 ------------------------------ #
     def test_s3_fecha_ok_sin_salida(self):
         resp = self._validar(timezone.localdate())
-        data = resp.json()
+        payload = resp.json()
+        data = payload["data"]
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(data["validable"])
         self.assertFalse(data["duplicado_vehiculo"])
@@ -2595,7 +2723,7 @@ class KioscoS3S4Tests(TestCase):
 
     def test_s3_fuera_ventana_no_validable(self):
         resp = self._validar(timezone.localdate() - timedelta(days=30))
-        data = resp.json()
+        data = resp.json()["data"]
         self.assertFalse(data["validable"])
         self.assertFalse(data["puede_registrar"])
         self.assertIn("No es posible registrar la salida", data["mensaje"])
@@ -2603,7 +2731,7 @@ class KioscoS3S4Tests(TestCase):
     def test_s3_cr1_vehiculo_duplicado(self):
         hoy = timezone.localdate()
         self._salida(self.vehiculo, hoy, EstadoSalida.REPORTADO)
-        data = self._validar(hoy).json()
+        data = self._validar(hoy).json()["data"]
         self.assertTrue(data["duplicado_vehiculo"])
         self.assertFalse(data["puede_registrar"])
         self.assertIn("Ya existe un registro de salida", data["mensaje"])
@@ -2612,14 +2740,14 @@ class KioscoS3S4Tests(TestCase):
     def test_s3_registro_aprobado_informativo(self):
         hoy = timezone.localdate()
         self._salida(self.vehiculo, hoy, EstadoSalida.APROBADO)
-        data = self._validar(hoy).json()
+        data = self._validar(hoy).json()["data"]
         self.assertIsNotNone(data["registro"])
         self.assertEqual(data["registro"]["estado"], EstadoSalida.APROBADO)
 
     def test_s3_eliminado_no_bloquea(self):
         hoy = timezone.localdate()
         self._salida(self.vehiculo, hoy, EstadoSalida.ELIMINADO)
-        data = self._validar(hoy).json()
+        data = self._validar(hoy).json()["data"]
         self.assertFalse(data["duplicado_vehiculo"])
         self.assertTrue(data["puede_registrar"])
 
@@ -2638,28 +2766,28 @@ class KioscoS3S4Tests(TestCase):
             area="OPERACIONES", carpeta="LOGISTICA", sede="MEDELLIN",
             valor_dia=Decimal("85000"), estado=EstadoSalida.REPORTADO,
         )
-        data = self._validar(hoy, movil_sale="777888999").json()
+        data = self._validar(hoy, movil_sale="777888999").json()["data"]
         self.assertTrue(data["duplicado_movil"])
         self.assertFalse(data["puede_registrar"])
         self.assertIn("Ya existe un registro de salida para esta móvil", data["mensaje"])
 
     def test_s3_disponible_no_aplica_cr2(self):
         hoy = timezone.localdate()
-        data = self._validar(hoy, movil_sale="disponible").json()
+        data = self._validar(hoy, movil_sale="disponible").json()["data"]
         self.assertFalse(data["duplicado_movil"])
         self.assertTrue(data["puede_registrar"])
 
     # ------------------------------ S4 ------------------------------ #
     def test_s4_placa_ok_sin_salida(self):
         resp = self.api.get("/transporte/kiosco/vehiculo/KIO123/")
-        data = resp.json()
+        data = resp.json()["data"]
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(data["vehiculo"]["placa"], "KIO123")
         self.assertIsNone(data["salida"])
 
     def test_s4_placa_con_salida_del_dia(self):
         self._salida(self.vehiculo, timezone.localdate())
-        data = self.api.get("/transporte/kiosco/vehiculo/KIO123/").json()
+        data = self.api.get("/transporte/kiosco/vehiculo/KIO123/").json()["data"]
         self.assertIsNotNone(data["salida"])
         self.assertEqual(data["salida"]["vehiculo"], self.vehiculo.pk)
 
@@ -2669,7 +2797,7 @@ class KioscoS3S4Tests(TestCase):
 
     def test_s4_eliminada_no_se_considera(self):
         self._salida(self.vehiculo, timezone.localdate(), EstadoSalida.ELIMINADO)
-        data = self.api.get("/transporte/kiosco/vehiculo/KIO123/").json()
+        data = self.api.get("/transporte/kiosco/vehiculo/KIO123/").json()["data"]
         self.assertIsNone(data["salida"])
 
 
@@ -2844,7 +2972,7 @@ class CuentaCobroTests(TestCase):
             {"placa": "ZZZ999", "mes": self.MES, "anio": self.ANIO},
         )
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("no encontrado", resp.json()["detail"])
+        self.assertIn("no encontrado", resp.json()["error"])
 
 
 class SeriesChartTests(TestCase):
@@ -2948,7 +3076,7 @@ class SeriesChartTests(TestCase):
         api.force_authenticate(user=user)
         resp = api.get("/transporte/informes/series-chart/", {"anio": 2026})
         self.assertEqual(resp.status_code, 200)
-        serie = resp.json()["series"]
+        serie = resp.json()["data"]["series"]
         self.assertEqual(serie[0]["name"], "OPERACIONES")
         self.assertEqual(serie[0]["points"], [["1/1/2026", 100000]])
 
@@ -3062,7 +3190,7 @@ class InformeMensualTests(TestCase):
         resp = self.api.get(
             "/transporte/informes/areas/", {"mes": self.MES, "anio": self.ANIO}
         ).json()
-        self.assertEqual(resp["areas"], ["LOGISTICA", "OPERACIONES"])
+        self.assertEqual(resp["data"]["areas"], ["LOGISTICA", "OPERACIONES"])
 
     def test_expose_placa_y_total(self):
         self._salida(1)
@@ -3158,3 +3286,870 @@ class ExportTests(TestCase):
         texto = self._get(formato="csv").content.decode("utf-8-sig")
         self.assertIn("DESCUENTO", texto)
         self.assertIn("80000.00", texto)  # 85000 − 5000
+
+
+class WfmVentanaTests(SimpleTestCase):
+    """F5-5: ventana del WFM (legacy ResolveRange 24–66).
+
+    Se usa la semana del 9 al 13 de noviembre de 2026 (lunes a viernes,
+    sin festivos colombianos) para que el recuento de días hábiles sea
+    predecible; el test de festivo lo cubre aparte.
+    """
+
+    HOY = date(2026, 11, 11)  # miércoles
+
+    def test_limite_inferior_sin_finde(self):
+        # miércoles 11 → martes 10 → lunes 9.
+        self.assertEqual(
+            WfmService.limite_inferior(self.HOY), date(2026, 11, 9)
+        )
+
+    def test_limite_inferior_cruza_finde(self):
+        # lunes 16 → salta domingo 15 y sábado 14 → viernes 13 → jueves 12.
+        self.assertEqual(
+            WfmService.limite_inferior(date(2026, 11, 16)), date(2026, 11, 12)
+        )
+
+    def test_limite_inferior_salta_festivo(self):
+        """El 12 de octubre es festivo (Día de la Raza): el legacy bloquea
+        `$esSab`, `$esDom` Y `$esFest` (líneas 13–17)."""
+        # miércoles 14 oct → martes 13 (1) → lunes 12 FESTIVO → viernes 9 (2).
+        self.assertEqual(
+            WfmService.limite_inferior(date(2026, 10, 14)), date(2026, 10, 9)
+        )
+
+    def test_limite_superior_incluye_hoy(self):
+        self.assertEqual(
+            WfmService.limite_superior(self.HOY), date(2026, 11, 12)
+        )
+
+    def test_resolver_rango_por_defecto_es_la_ventana(self):
+        self.assertEqual(
+            WfmService.resolver_rango(hoy=self.HOY),
+            (date(2026, 11, 9), date(2026, 11, 12)),
+        )
+
+    def test_resolver_rango_explícito_se_acota_a_la_ventana(self):
+        desde, hasta = WfmService.resolver_rango(
+            fecha_inicio=date(2026, 11, 1), fecha_fin=date(2026, 11, 30),
+            hoy=self.HOY,
+        )
+        self.assertEqual(desde, date(2026, 11, 9))
+        self.assertEqual(hasta, date(2026, 11, 12))
+
+    def test_resolver_rango_excluye_el_día_siguiente(self):
+        """La fecha fin del POST es INCLUSIVA → se vuelve semiabierta."""
+        desde, hasta = WfmService.resolver_rango(
+            fecha_inicio=date(2026, 11, 10), fecha_fin=date(2026, 11, 10),
+            hoy=self.HOY,
+        )
+        self.assertEqual((desde, hasta), (date(2026, 11, 10), date(2026, 11, 11)))
+
+    def test_mes_fuera_de_la_ventana_rechaza(self):
+        with self.assertRaisesMessage(ValueError, "no contiene fechas"):
+            WfmService.resolver_rango(mes=8, yyyy=2026, hoy=self.HOY)
+
+    def test_mes_invalido_no_rechaza_sino_que_usa_la_ventana(self):
+        """Fiel al legado (44): `checkdate(13, 1, 2026)` es falso, así que
+        la validación de mes se omite y el rango es la ventana normal."""
+        self.assertEqual(
+            WfmService.resolver_rango(mes=13, yyyy=2026, hoy=self.HOY),
+            (date(2026, 11, 9), date(2026, 11, 12)),
+        )
+
+    def test_rango_invertido_rechaza(self):
+        with self.assertRaisesMessage(ValueError, "no contiene fechas"):
+            WfmService.resolver_rango(
+                fecha_inicio=date(2026, 11, 20), fecha_fin=date(2026, 11, 21),
+                hoy=self.HOY,
+            )
+
+
+class WfmServiceTests(TestCase):
+    """F5-5: elegibilidad WFM, lote y cola de jobs."""
+
+    @classmethod
+    def setUpClass(cls):
+        # WFM lee 3 tablas ajenas (cinco_base_de_personal,
+        # residencial_base_wfm, logistica_actividades_modulo_agenda).
+        _asegurar_tabla_empleados()
+        _asegurar_tablas_wfm()
+        super().setUpClass()
+
+    def setUp(self):
+        self.hoy = date(2026, 11, 11)  # miércoles; ventana [nov 9, nov 12)
+        self.persona = Empleado.objects.create(
+            cedula="111222333",
+            codigo_sap="SAP-111222333",
+            nombre="WFM",
+            apellido="PRUEBA",
+            area="OPERACIONES",
+            carpeta="LOGISTICA",
+            sede="MEDELLIN",
+            movil="MOVIL-77",
+            password="",
+        )
+        self.vehiculo = FlotaService.crear(
+            {
+                "placa": "WFM001", "tipo_vehiculo": "CAMIONETA",
+                "marca": "KIA", "referencia": "SPORTAGE", "modelo_anio": 2023,
+                "tipo_contrato": "PROPIO", "nombre_propietario": "CINCO SAS",
+                "cedula_propietario": "900111222", "valor_dia_base": 85000,
+            },
+            actor=None,
+        )
+
+    # ------------------------------ fixtures ----------------------------- #
+    def _salida(self, dia=None, **extra):
+        datos = {
+            "vehiculo": self.vehiculo,
+            "fecha_salida": dia or self.hoy,
+            "area": "OPERACIONES",
+            "carpeta": "LOGISTICA",
+            "sede": "MEDELLIN",
+            "valor_dia": Decimal("85000"),
+            "estado": EstadoSalida.REPORTADO,
+            "tecnico_asignado": self.persona,
+        }
+        datos.update(extra)
+        return Salida.objects.create(**datos)
+
+    def _vehiculo_nuevo(self, placa):
+        return FlotaService.crear(
+            {
+                "placa": placa, "tipo_vehiculo": "CAMIONETA",
+                "marca": "KIA", "referencia": "X", "modelo_anio": 2023,
+                "tipo_contrato": "PROPIO", "nombre_propietario": "C",
+                "cedula_propietario": "900111222", "valor_dia_base": 85000,
+            },
+            actor=None,
+        )
+
+    @staticmethod
+    def _wfm(external_id="", cc_auxiliar="", dia=None):
+        dia = dia or date(2026, 11, 11)
+        return ResidencialWfm.objects.create(
+            external_id=external_id or None,
+            cc_auxiliar=cc_auxiliar or None,
+            fecha=datetime(dia.year, dia.month, dia.day, 8, 0),
+        )
+
+    @staticmethod
+    def _agenda(cedula="", movil="", dia=None):
+        dia = dia or date(2026, 11, 11)
+        return AgendaLogistica.objects.create(
+            cedula=cedula or None,
+            movil=movil or None,
+            fecha=datetime(dia.year, dia.month, dia.day, 8, 0),
+        )
+
+    def _elegibles(self, **extra):
+        return WfmService.elegibles(
+            date(2026, 11, 9), date(2026, 11, 12), hoy=self.hoy, **extra
+        )
+
+    def _lote(self, **extra):
+        return WfmService.aplicar_lote(
+            date(2026, 11, 9), date(2026, 11, 12), hoy=self.hoy, **extra
+        )
+
+    # --------------------------- elegibilidad ---------------------------- #
+    def test_sin_evidencia_no_es_elegible(self):
+        salida = self._salida()
+        self.assertNotIn(salida.pk, self._elegibles())
+
+    def test_evidencia_wfm_por_cedula_hace_elegible(self):
+        salida = self._salida()
+        self._wfm(external_id="111222333")
+        self.assertIn(salida.pk, self._elegibles())
+
+    def test_evidencia_wfm_por_cc_auxiliar_hace_elegible(self):
+        salida = self._salida()
+        self._wfm(cc_auxiliar="111222333")
+        self.assertIn(salida.pk, self._elegibles())
+
+    def test_evidencia_wfm_en_otro_dia_no_cuenta(self):
+        salida = self._salida()
+        self._wfm(external_id="111222333", dia=date(2026, 10, 20))
+        self.assertNotIn(salida.pk, self._elegibles())
+
+    def test_agenda_es_respaldo_cuando_no_hay_wfm(self):
+        salida = self._salida()
+        self._agenda(cedula="111222333")
+        self.assertIn(salida.pk, self._elegibles())
+
+    def test_agenda_por_movil_tambien_respalda(self):
+        salida = self._salida()
+        self._agenda(movil="MOVIL-77")
+        self.assertIn(salida.pk, self._elegibles())
+
+    def test_agenda_por_fecha_cierre_tambien_respalda(self):
+        """El legado mira `fecha` y `fecha_cierre` por igual (305–321)."""
+        salida = self._salida()
+        AgendaLogistica.objects.create(
+            cedula="111222333",
+            fecha_cierre=datetime(2026, 11, 11, 17, 0),
+        )
+        self.assertIn(salida.pk, self._elegibles())
+
+    def test_cruce_movil_cedula_expande_identidades(self):
+        """Una móvil identifica a TODAS sus cédulas (legacy 244–257).
+
+        Dos personas distintas comparten la móvil MOVIL-77 (cesión o
+        reemplazo). La salida solo registra a la primera; el WFM la
+        valida por la evidencia de la SEGUNDA, que solo se alcanza
+        cruzando contra `cinco_base_de_personal`.
+        """
+        Empleado.objects.create(
+            cedula="555666777", codigo_sap="SAP-555666777",
+            nombre="REEMPLAZO", apellido="TEMPORAL",
+            area="OPERACIONES", carpeta="LOGISTICA", sede="MEDELLIN",
+            movil="MOVIL-77", password="",
+        )
+        salida = self._salida()
+        self._wfm(external_id="555666777")
+        self.assertIn(salida.pk, self._elegibles())
+
+    def test_sin_identidades_no_puede_expandirse(self):
+        """Sin conductor ni técnico no hay NINGUNA identidad que buscar:
+        el cruce no tiene con qué arrancar y la salida nunca califica."""
+        salida = self._salida(tecnico_asignado=None)
+        self._wfm(external_id="111222333")
+        self.assertNotIn(salida.pk, self._elegibles())
+
+    def test_personal_inactivo_no_expande(self):
+        """El legacy solo usa personal `activo` (211)."""
+        self.persona.estado = "INACTIVO"
+        self.persona.save()
+        salida = self._salida(tecnico_asignado=None)
+        self._wfm(external_id="111222333")
+        self.assertNotIn(salida.pk, self._elegibles())
+
+    def test_solo_estados_reportado(self):
+        salida = self._salida(estado=EstadoSalida.APROBADO)
+        self._wfm(external_id="111222333")
+        self.assertNotIn(salida.pk, self._elegibles())
+
+    def test_filtro_por_area(self):
+        salida = self._salida()
+        self._wfm(external_id="111222333")
+        self.assertIn(salida.pk, self._elegibles(area="OPERACIONES"))
+        self.assertNotIn(salida.pk, self._elegibles(area="OTRA"))
+        # 'TODAS'/'TODOS' no filtra (legacy 152).
+        self.assertIn(salida.pk, self._elegibles(area="TODAS"))
+
+    def test_solo_ventana_permitida(self):
+        """Fuera de [hoy−2 hábiles, mañana) no se elige nada."""
+        dentro = self._salida(dia=date(2026, 11, 9))
+        self._wfm(external_id="111222333", dia=date(2026, 11, 9))
+        self.assertIn(dentro.pk, self._elegibles())
+        # El límite inferior de hoy (mié 11) es lunes 9: el 8 queda fuera.
+        fuera = self._salida(
+            dia=date(2026, 11, 8), vehiculo=self._vehiculo_nuevo("FUERA1")
+        )
+        self._wfm(external_id="111222333", dia=date(2026, 11, 8))
+        self.assertNotIn(fuera.pk, self._elegibles())
+
+    def test_limite_del_lote(self):
+        """Nunca devuelve más de `limite` IDs (legacy 116)."""
+        for dia in (date(2026, 11, 9), date(2026, 11, 10), date(2026, 11, 11)):
+            self._salida(dia=dia, vehiculo=self._vehiculo_nuevo("LOT%s" % dia.day))
+            self._wfm(external_id="111222333", dia=dia)
+        self.assertEqual(len(self._elegibles()), 3)
+        self.assertEqual(len(self._elegibles(limite=2)), 2)
+
+    # ------------------------------ el lote ------------------------------ #
+    def test_aplicar_lote_valida_y_registra_historial(self):
+        salida = self._salida()
+        self._wfm(external_id="111222333")
+        resultado = self._lote(edit_cedula="111222333")
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
+        self.assertTrue(resultado["success"])
+        self.assertEqual(resultado["updated_count"], 1)
+        self.assertEqual(resultado["selected_count"], 1)
+        self.assertFalse(resultado["has_more_in_chunk"])
+        # Observación literal del legado (438).
+        fila = salida.historial.filter(estado=EstadoSalida.VALIDADO).first()
+        self.assertEqual(fila.motivo, "validado por sistema")
+
+    def test_aplicar_lote_sin_registros_responde_legacy(self):
+        self._salida()
+        resultado = self._lote()
+        self.assertFalse(resultado["success"])
+        self.assertEqual(
+            resultado["message"], "No se encontraron registros para validar"
+        )
+        self.assertEqual(resultado["updated_count"], 0)
+        # La fecha fin que devuelve es INCLUSIVA (legacy 470).
+        self.assertEqual(resultado["fecha_fin"], "2026-11-11")
+        self.assertEqual(resultado["area"], "TODAS")
+        self.assertEqual(resultado["total_reportados"], 1)
+
+    def test_aplicar_lote_es_idempotente(self):
+        self._salida()
+        self._wfm(external_id="111222333")
+        primera = self._lote()
+        segunda = self._lote()
+        self.assertEqual(primera["updated_count"], 1)
+        self.assertEqual(segunda["updated_count"], 0)
+        self.assertFalse(segunda["success"])
+
+    def test_aplicar_lote_marca_has_more_in_chunk(self):
+        """Si quedan salidas elegibles, el chunk se repite (legacy 464)."""
+        for dia in (date(2026, 11, 10), date(2026, 11, 11)):
+            self._salida(dia=dia, vehiculo=self._vehiculo_nuevo("HAY%s" % dia.day))
+            self._wfm(external_id="111222333", dia=dia)
+        resultado = self._lote(limite=1)
+        self.assertEqual(resultado["updated_count"], 1)
+        self.assertTrue(resultado["has_more_in_chunk"])
+
+    def test_wfm_no_exige_rol_de_gestion(self):
+        """El WFM es proceso autónomo: valida sin que nadie sea jefe."""
+        salida = self._salida()
+        self._wfm(external_id="111222333")
+        self._lote(edit_cedula="000000000")
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
+
+    # ------------------------------ la cola ------------------------------ #
+    def _correr_worker(self, job, **extra):
+        """Simula el worker: reclama y procesa chunks hasta completar."""
+        for _ in range(20):  # tope de seguridad contra bucles
+            reclamado = WfmService.reclamar_job(job.job_uuid, "worker-1")
+            if reclamado is None:
+                break
+            job = WfmService.procesar_job(reclamado, **extra)
+            if job.estado == EstadoWfmJob.COMPLETADO:
+                break
+        return job
+
+    def test_crear_job_y_reutilizar_vigente(self):
+        job, reutilizado = WfmService.crear_job(
+            mes=11, yyyy=2026, area="OPERACIONES",
+            creado_por="111222333", hoy=self.hoy,
+        )
+        self.assertFalse(reutilizado)
+        self.assertEqual(job.estado, EstadoWfmJob.PENDIENTE)
+        self.assertEqual(job.fecha_inicio, date(2026, 11, 9))
+        # fecha_fin es INCLUSIVA (legacy 168).
+        self.assertEqual(job.fecha_fin, date(2026, 11, 11))
+        self.assertEqual(job.total_dias, 3)
+
+        otro, reutilizado = WfmService.crear_job(
+            mes=11, yyyy=2026, area="OPERACIONES",
+            creado_por="111222333", hoy=self.hoy,
+        )
+        self.assertTrue(reutilizado)
+        self.assertEqual(otro.pk, job.pk)
+
+    def test_obtener_job_por_uuid_inexistente(self):
+        self.assertIsNone(WfmService.obtener_job("no-existe"))
+
+    def test_reclamar_job_bloquea_segundo_worker(self):
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        reclamado = WfmService.reclamar_job(job.job_uuid, "worker-1")
+        self.assertIsNotNone(reclamado)
+        self.assertEqual(reclamado.estado, EstadoWfmJob.PROCESANDO)
+        self.assertEqual(reclamado.locked_by, "worker-1")
+        # Un segundo worker no lo toma si está fresco.
+        self.assertIsNone(
+            WfmService.reclamar_job(job.job_uuid, "worker-2", stale_after=60)
+        )
+
+    def test_reclamar_job_colgado_lo_retoma(self):
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        WfmService.reclamar_job(job.job_uuid, "worker-1")
+        WfmJob.objects.filter(pk=job.pk).update(
+            locked_at=timezone.now() - timedelta(seconds=300)
+        )
+        retomado = WfmService.reclamar_job(job.job_uuid, "worker-2", stale_after=60)
+        self.assertIsNotNone(retomado)
+        self.assertEqual(retomado.locked_by, "worker-2")
+
+    def test_procesar_job_avanza_dia_a_dia_hasta_completar(self):
+        """Un chunk es UN día (legacy `chunkDays = 1`): el worker itera."""
+        for dia in (date(2026, 11, 9), date(2026, 11, 11)):
+            self._salida(dia=dia, vehiculo=self._vehiculo_nuevo("PR%s" % dia.day))
+            self._wfm(external_id="111222333", dia=dia)
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        final = self._correr_worker(job, edit_cedula="111222333")
+
+        self.assertEqual(final.estado, EstadoWfmJob.COMPLETADO)
+        self.assertEqual(final.total_validados, 2)
+        self.assertEqual(final.total_reportados, 2)
+        self.assertEqual(final.dias_procesados, 3)
+        self.assertIsNotNone(final.finished_at)
+        self.assertIsNone(final.fecha_cursor)
+        self.assertEqual(
+            Salida.objects.filter(estado=EstadoSalida.VALIDADO).count(), 2
+        )
+
+    def test_chunk_saturado_no_avanza_cursor(self):
+        """Si el lote de un día no se vacía, el cursor NO avanza y el
+        mismo día se reintenta (legacy 701–706)."""
+        dia = date(2026, 11, 9)
+        self._salida(dia=dia, vehiculo=self._vehiculo_nuevo("SAT1"))
+        self._salida(dia=dia, vehiculo=self._vehiculo_nuevo("SAT2"))
+        self._wfm(external_id="111222333", dia=dia)
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        job = WfmService.reclamar_job(job.job_uuid, "worker-1")
+
+        procesado = WfmService.procesar_job(job, batch_size=1)
+        self.assertEqual(procesado.estado, EstadoWfmJob.PROCESANDO)
+        self.assertEqual(procesado.fecha_cursor, date(2026, 11, 9))
+        self.assertEqual(procesado.total_validados, 1)
+
+        # El resto se validan en las pasadas siguientes.
+        final = self._correr_worker(WfmService.obtener_job(job.job_uuid))
+        self.assertEqual(final.estado, EstadoWfmJob.COMPLETADO)
+        self.assertEqual(final.total_validados, 2)
+
+    def test_procesar_job_sin_evidencia_completa_en_cero(self):
+        """Sin evidencia WFM ni agenda no se valida nada, pero el job
+        avanza día a día hasta completarse (no queda colgado)."""
+        self._salida()  # reportado pero sin evidencia
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        final = self._correr_worker(job)
+        self.assertEqual(final.estado, EstadoWfmJob.COMPLETADO)
+        self.assertEqual(final.total_validados, 0)
+        self.assertEqual(final.dias_procesados, 3)
+
+    def test_el_rango_del_job_no_se_reacota_al_procesarlo(self):
+        """Corrección sobre el legado: `ApplyValidationChunk` reclamps el
+        rango con el `hoy` del momento (75–83), así que un job cuyo rango
+        quedó fuera de la ventana del día NO perdería sus primeros días
+        en silencio aquí.
+
+        Este test lo materializa: el job cubre noviembre mientras el
+        `hoy` real del entorno es octubre, y aun así valida."""
+        salida = self._salida()
+        self._wfm(external_id="111222333")
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        # Sin `hoy` forzado: `aplicar_lote` usaría el `hoy` REAL (octubre).
+        final = self._correr_worker(job)
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
+        self.assertEqual(final.total_validados, 1)
+
+    def test_fallar_job(self):
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        fallado = WfmService.fallar_job(job, "boom")
+        self.assertEqual(fallado.estado, EstadoWfmJob.ERROR)
+        self.assertEqual(fallado.detalle_error, "boom")
+        self.assertEqual(fallado.mensaje, "El job finalizo con error")
+
+    # ------------------------- respuesta del job ------------------------- #
+    def test_formatear_respuesta_calcula_progreso(self):
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        WfmJob.objects.filter(pk=job.pk).update(dias_procesados=1, total_dias=4)
+        respuesta = WfmService.formatear_respuesta(
+            WfmService.obtener_job(job.job_uuid)
+        )
+        self.assertEqual(respuesta["progreso"], 25)
+        self.assertEqual(respuesta["job_uuid"], job.job_uuid)
+        self.assertFalse(respuesta["existing"])
+        self.assertIn("fecha_cursor", respuesta)
+
+    def test_formatear_respuesta_detecta_job_pendiente_colgado(self):
+        job, _ = WfmService.crear_job(mes=11, yyyy=2026, hoy=self.hoy)
+        WfmJob.objects.filter(pk=job.pk).update(
+            created_at=timezone.now() - timedelta(seconds=300),
+            updated_at=timezone.now() - timedelta(seconds=300),
+        )
+        respuesta = WfmService.formatear_respuesta(
+            WfmService.obtener_job(job.job_uuid)
+        )
+        self.assertIn("revisa cron", respuesta["mensaje"])
+
+
+class WfmApiTests(TestCase):
+    """F5-5: los tres endpoints HTTP del WFM.
+
+    El legacy los protegía con un HMAC que generaba y consumía el propio
+    navegador; aquí exigen `change_salida` (ver wfm_view.py).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        _asegurar_tablas_wfm()
+        super().setUpClass()
+
+    def setUp(self):
+        self.hoy = date(2026, 11, 11)
+        # El endpoint no puede recibir `hoy`, así que se fija el reloj:
+        # si no, el servicio usaría la fecha REAL y la ventana no
+        # contendría los datos de prueba.
+        reloj = mock.patch(
+            "django.utils.timezone.localdate", return_value=self.hoy
+        )
+        reloj.start()
+        self.addCleanup(reloj.stop)
+
+        self.persona = Empleado.objects.create(
+            cedula="111222333", codigo_sap="SAP-111222333",
+            nombre="WFM", apellido="API", area="OPERACIONES",
+            carpeta="LOGISTICA", sede="MEDELLIN", movil="MOVIL-77",
+            password="",
+        )
+        self.vehiculo = FlotaService.crear(
+            {
+                "placa": "WFMAPI", "tipo_vehiculo": "CAMIONETA",
+                "marca": "KIA", "referencia": "X", "modelo_anio": 2023,
+                "tipo_contrato": "PROPIO", "nombre_propietario": "C",
+                "cedula_propietario": "900111222", "valor_dia_base": 85000,
+            },
+            actor=None,
+        )
+        self.api = APIClient()
+
+    def _usuario_con_permiso(self):
+        user = User.objects.create_user(username="111222333", password="x")
+        user.user_permissions.add(
+            Permission.objects.get(codename="change_salida")
+        )
+        # Nueva instancia: los permisos se cachean en el objeto.
+        return User.objects.get(pk=user.pk)
+
+    def _salida(self, dia=None, **extra):
+        datos = {
+            "vehiculo": self.vehiculo,
+            "fecha_salida": dia or self.hoy,
+            "area": "OPERACIONES", "carpeta": "LOGISTICA",
+            "sede": "MEDELLIN", "valor_dia": Decimal("85000"),
+            "estado": EstadoSalida.REPORTADO,
+            "tecnico_asignado": self.persona,
+        }
+        datos.update(extra)
+        return Salida.objects.create(**datos)
+
+    def _wfm(self, dia=None):
+        dia = dia or self.hoy
+        return ResidencialWfm.objects.create(
+            external_id="111222333",
+            fecha=datetime(dia.year, dia.month, dia.day, 8, 0),
+        )
+
+    # ------------------------------ validar ------------------------------ #
+    def test_validar_lote(self):
+        self.api.force_authenticate(user=self._usuario_con_permiso())
+        salida = self._salida()
+        self._wfm()
+        resp = self.api.post("/transporte/wfm/validar/", {}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
+
+    def test_validar_sin_permiso_de_modelo(self):
+        self.api.force_authenticate(
+            user=User.objects.create_user(username="111222333", password="x")
+        )
+        self.assertEqual(
+            self.api.post("/transporte/wfm/validar/", {}, format="json").status_code,
+            403,
+        )
+
+    def test_validar_sin_autenticar(self):
+        self.assertEqual(
+            self.api.post("/transporte/wfm/validar/", {}, format="json").status_code
+            in (401, 403),
+            True,
+        )
+
+    def test_validar_periodo_no_validable(self):
+        self.api.force_authenticate(user=self._usuario_con_permiso())
+        resp = self.api.post(
+            "/transporte/wfm/validar/",
+            {"fecha_inicio": "2020-01-01", "fecha_fin": "2020-01-31"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("no contiene fechas", resp.json()["detail"])
+
+    def test_validar_mes_invalido_da_ventana_por_defecto(self):
+        """Fiel al legado: un mes inexistente no lanza, usa la ventana."""
+        self.api.force_authenticate(user=self._usuario_con_permiso())
+        resp = self.api.post(
+            "/transporte/wfm/validar/", {"mes": 13, "yyyy": 2026}, format="json"
+        )
+        self.assertEqual(resp.status_code, 200)
+
+    # ------------------------------ la cola ------------------------------ #
+    def test_crear_job(self):
+        self.api.force_authenticate(user=self._usuario_con_permiso())
+        resp = self.api.post(
+            "/transporte/wfm/crear-job/",
+            {"mes": 11, "yyyy": 2026, "area": "OPERACIONES"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        cuerpo = resp.json()
+        self.assertTrue(cuerpo["success"])
+        self.assertEqual(cuerpo["estado"], "PENDIENTE")
+        self.assertEqual(cuerpo["fecha_inicio"], "2026-11-09")
+        self.assertIn("cola de validacion", cuerpo["message"])
+
+    def test_crear_job_reutiliza_el_vigente(self):
+        self.api.force_authenticate(user=self._usuario_con_permiso())
+        datos = {"mes": 11, "yyyy": 2026, "area": "OPERACIONES"}
+        primero = self.api.post("/transporte/wfm/crear-job/", datos, format="json")
+        segundo = self.api.post("/transporte/wfm/crear-job/", datos, format="json")
+        self.assertTrue(segundo.json()["existing"])
+        self.assertEqual(
+            primero.json()["job_uuid"], segundo.json()["job_uuid"]
+        )
+
+    def test_crear_job_periodo_no_validable(self):
+        self.api.force_authenticate(user=self._usuario_con_permiso())
+        resp = self.api.post(
+            "/transporte/wfm/crear-job/", {"mes": 8, "yyyy": 2026}, format="json"
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_estado_job_inexistente(self):
+        self.api.force_authenticate(user=self._usuario_con_permiso())
+        resp = self.api.post(
+            "/transporte/wfm/estado-job/", {"job_uuid": "nadie"}, format="json"
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_estado_job_sin_uuid(self):
+        self.api.force_authenticate(user=self._usuario_con_permiso())
+        resp = self.api.post("/transporte/wfm/estado-job/", {}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_estado_job_con_respaldo_sincrono(self):
+        """El legacy empuja UN chunk si el worker no corrió (201–214)."""
+        self.api.force_authenticate(user=self._usuario_con_permiso())
+        salida = self._salida(dia=date(2026, 11, 9))
+        self._wfm(dia=date(2026, 11, 9))
+        creado = self.api.post(
+            "/transporte/wfm/crear-job/",
+            {"mes": 11, "yyyy": 2026, "area": "OPERACIONES"},
+            format="json",
+        ).json()
+        self.assertEqual(creado["total_validados"], 0)
+
+        estado = self.api.post(
+            "/transporte/wfm/estado-job/", {"job_uuid": creado["job_uuid"]},
+            format="json",
+        ).json()
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
+        self.assertEqual(estado["total_validados"], 1)
+        self.assertEqual(estado["estado"], "PROCESANDO")  # 1 de 3 días
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# §5.6 / S5: Planilla Oficial de Salida
+# ═════════════════════════════════════════════════════════════════════════════
+
+class PlanillaServiceTests(TestCase):
+    """Pruebas unitarias de PlanillaService (CR-11 / S5 / consecutivos / QR)."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        super().setUp()
+        self.v_propio = FlotaService.crear(
+            {
+                "placa": "PLA111", "tipo_vehiculo": "CAMIONETA",
+                "marca": "TOYOTA", "referencia": "HILUX", "modelo_anio": 2022,
+                "tipo_contrato": "PROPIO", "nombre_propietario": "PROPIETARIO 1",
+                "cedula_propietario": "1001", "valor_dia_base": 120000,
+            },
+            actor=None,
+        )
+        self.v_externo = FlotaService.crear(
+            {
+                "placa": "EXT222", "tipo_vehiculo": "FURGON",
+                "marca": "CHEVROLET", "referencia": "NKR", "modelo_anio": 2021,
+                "tipo_contrato": "EXTERNO", "nombre_propietario": "PROPIETARIO 2",
+                "cedula_propietario": "1002", "valor_dia_base": 150000,
+            },
+            actor=None,
+        )
+
+    def test_validar_fecha_invalida(self):
+        with self.assertRaises(ValueError) as ctx:
+            PlanillaService._validar_fecha("fecha-no-valida")
+        self.assertIn("Fecha inválida", str(ctx.exception))
+
+    def test_validar_alcance_invalido(self):
+        with self.assertRaises(ValueError) as ctx:
+            PlanillaService._validar_alcance("DESCONOCIDO", placa=None)
+        self.assertIn("inválido", str(ctx.exception))
+
+    def test_alcance_placa_sin_placa_falla(self):
+        with self.assertRaises(ValueError) as ctx:
+            PlanillaService._validar_alcance("PLACA", placa="")
+        self.assertIn("placa es obligatoria", str(ctx.exception))
+
+    def test_generar_planilla_placa_exacta(self):
+        resultado = PlanillaService.generar_planilla(
+            fecha="2026-10-16", alcance="PLACA", placa="PLA111"
+        )
+        self.assertEqual(resultado["alcance"], "PLACA")
+        self.assertEqual(len(resultado["vehiculos"]), 1)
+        fila = resultado["vehiculos"][0]
+        self.assertEqual(fila["placa"], "PLA111")
+        self.assertEqual(fila["tipo_contrato"], "PROPIO")
+        self.assertEqual(fila["consecutivo"], 1000)
+        self.assertTrue(fila["consecutivo_creado"])
+        self.assertIsNotNone(fila["ruta_qr"])
+        self.assertTrue(fila["ruta_qr"].startswith("transporte/codigos-qr/"))
+
+    def test_generar_planilla_alcance_propio(self):
+        resultado = PlanillaService.generar_planilla(
+            fecha="2026-10-16", alcance="PROPIO"
+        )
+        placas = [v["placa"] for v in resultado["vehiculos"]]
+        self.assertIn("PLA111", placas)
+        self.assertNotIn("EXT222", placas)
+
+    def test_generar_planilla_alcance_todas(self):
+        resultado = PlanillaService.generar_planilla(
+            fecha="2026-10-16", alcance="TODAS"
+        )
+        placas = [v["placa"] for v in resultado["vehiculos"]]
+        self.assertIn("PLA111", placas)
+        self.assertIn("EXT222", placas)
+
+class PlanillaAPITests(TestCase):
+    """Pruebas del endpoint HTTP consolidado de la Planilla Oficial de Salida."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        super().setUp()
+        self.vehiculo = FlotaService.crear(
+            {
+                "placa": "API999", "tipo_vehiculo": "CAMIONETA",
+                "marca": "NISSAN", "referencia": "FRONTIER", "modelo_anio": 2024,
+                "tipo_contrato": "PROPIO", "nombre_propietario": "PROPIETARIO API",
+                "cedula_propietario": "999888", "valor_dia_base": 110000,
+            },
+            actor=None,
+        )
+        self.user = User.objects.create_user(username="test_planilla", password="x")
+        self.api = APIClient()
+
+    def test_endpoint_sin_autenticacion_falla(self):
+        resp = self.api.post(
+            "/transporte/planillas/generar/",
+            {"fecha": "2026-10-16", "alcance": "PLACA", "placa": "API999"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 401)
+
+    def test_endpoint_generar_exitoso_estandarizado(self):
+        self.api.force_authenticate(user=self.user)
+        resp = self.api.post(
+            "/transporte/planillas/generar/",
+            {"fecha": "2026-10-16", "alcance": "PLACA", "placa": "API999"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        cuerpo = resp.json()
+        self.assertTrue(cuerpo["ok"])
+        datos = cuerpo["data"]
+        self.assertEqual(datos["alcance"], "PLACA")
+        self.assertEqual(len(datos["vehiculos"]), 1)
+        self.assertEqual(datos["vehiculos"][0]["placa"], "API999")
+        self.assertIsNotNone(datos["vehiculos"][0]["ruta_qr"])
+
+    def test_endpoint_generar_error_estandarizado(self):
+        self.api.force_authenticate(user=self.user)
+        resp = self.api.post(
+            "/transporte/planillas/generar/",
+            {"fecha": "2026-10-16", "alcance": "PLACA", "placa": "NOEXISTE"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        cuerpo = resp.json()
+        self.assertFalse(cuerpo["ok"])
+        self.assertIn("No existe un vehículo", cuerpo["error"])
+
+
+class KioscoAPITests(TestCase):
+    """Pruebas de los endpoints consolidados del kiosco."""
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        super().setUp()
+        self.vehiculo = FlotaService.crear(
+            {
+                "placa": "KSK100", "tipo_vehiculo": "CAMIONETA",
+                "marca": "RENAULT", "referencia": "DUSTER", "modelo_anio": 2023,
+                "tipo_contrato": "PROPIO", "nombre_propietario": "PROPIETARIO KIOSCO",
+                "cedula_propietario": "555444", "valor_dia_base": 95000,
+            },
+            actor=None,
+        )
+        self.user = User.objects.create_user(username="test_kiosco", password="x")
+        self.api = APIClient()
+
+    def test_identificar_por_placa(self):
+        self.api.force_authenticate(user=self.user)
+        resp = self.api.post(
+            "/transporte/kiosco/identificar/",
+            {"placa": "KSK100"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        cuerpo = resp.json()
+        self.assertTrue(cuerpo["ok"])
+        self.assertEqual(cuerpo["data"]["vehiculo"]["placa"], "KSK100")
+
+    def test_identificar_por_qr(self):
+        self.api.force_authenticate(user=self.user)
+        resp = self.api.post(
+            "/transporte/kiosco/identificar/",
+            {"qr": "KSK100"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        cuerpo = resp.json()
+        self.assertTrue(cuerpo["ok"])
+        self.assertEqual(cuerpo["data"]["vehiculo"]["placa"], "KSK100")
+
+    def test_identificar_no_encontrado(self):
+        self.api.force_authenticate(user=self.user)
+        resp = self.api.post(
+            "/transporte/kiosco/identificar/",
+            {"placa": "INEXISTENTE"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        cuerpo = resp.json()
+        self.assertFalse(cuerpo["ok"])
+        self.assertIn("no encontrado", cuerpo["error"])
+
+    def test_alias_escanear_retrocompatible(self):
+        self.api.force_authenticate(user=self.user)
+        resp = self.api.post(
+            "/transporte/kiosco/escanear/",
+            {"contenido": "KSK100"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
+
+    def test_alias_get_vehiculo(self):
+        self.api.force_authenticate(user=self.user)
+        resp = self.api.get("/transporte/kiosco/vehiculo/KSK100/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
+        self.assertEqual(resp.json()["data"]["vehiculo"]["placa"], "KSK100")

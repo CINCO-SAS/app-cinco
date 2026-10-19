@@ -11,6 +11,13 @@ Uso:
 """
 from .settings_test import *  # noqa: F401,F403
 
+import tempfile
+
+# Aíslamos MEDIA_ROOT: sin esto, cada test que crea un vehículo escribiría
+# su PNG en la carpeta real backend/media/transporte/codigos-qr/, que es
+# la que usa el negocio (contaminación de datos reales en cada corrida).
+MEDIA_ROOT = tempfile.mkdtemp(prefix="transporte_test_media_root_")
+
 MIGRATION_MODULES = {
     "authentication": None,
     "common": None,

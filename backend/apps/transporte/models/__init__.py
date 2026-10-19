@@ -39,6 +39,7 @@ from .liquidacion import (
 )
 from .reporte_fotografico import ReporteFotograficoVehiculo, ReporteFotoImagen
 from .auditoria import AuditoriaLog
+from .wfm import AgendaLogistica, EstadoWfmJob, ResidencialWfm, WfmJob
 
 __all__ = [
     "AuditoriaModel",
@@ -68,4 +69,8 @@ __all__ = [
     "ReporteFotograficoVehiculo",
     "ReporteFotoImagen",
     "AuditoriaLog",
+    "EstadoWfmJob",
+    "WfmJob",
+    "ResidencialWfm",
+    "AgendaLogistica",
 ]

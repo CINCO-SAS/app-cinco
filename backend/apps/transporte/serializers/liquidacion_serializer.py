@@ -7,7 +7,7 @@ carrera de consecutivos) viven en LiquidacionService.
 from rest_framework import serializers
 
 from ..models import PagoVehiculoMensual, Vehiculo
-from ..models.choices import TipoPago
+
 
 
 class ConsecutivoInputSerializer(serializers.Serializer):

@@ -55,8 +55,9 @@ class InformeViewSet(GenericViewSet):
             )
         except ValueError as exc:
             return Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+                {"ok": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST
             )
+
         html = InformeService.html_cuenta_cobro(cuenta)
         return HttpResponse(html, content_type="text/html; charset=utf-8")
 
@@ -79,7 +80,7 @@ class InformeViewSet(GenericViewSet):
         )
         serializer.is_valid(raise_exception=True)
         serie = InformeService.series_chart(serializer.validated_data.get("anio"))
-        return Response(serie)
+        return Response({"ok": True, "data": serie})
 
     # ------------------------------------------------------------------ #
     # Informe mensual de salidas (F5-3, §5.7)
@@ -125,8 +126,11 @@ class InformeViewSet(GenericViewSet):
         datos = serializer.validated_data
         return Response(
             {
-                "areas": InformeService.areas_del_periodo(
-                    datos["mes"], datos["anio"]
-                )
+                "ok": True,
+                "data": {
+                    "areas": InformeService.areas_del_periodo(
+                        datos["mes"], datos["anio"]
+                    )
+                },
             }
         )

@@ -287,6 +287,14 @@ STATIC_URL = os.getenv('BASE_PATH', '') + 'static/'
 # STATIC_ROOT = '/home/admcinco/app_cinco/backend/static'
 STATIC_ROOT = os.getenv('BASE_PATH', '') + 'static/'
 
+# Media (archivos subidos) — verificado: ninguna app ajena lee MEDIA_ROOT
+# ni MEDIA_URL; smu/empleados usan FileSystemStorage(location=...) propio,
+# así que esta config solo afecta al storage por defecto (QR de transporte).
+# Ruta local: backend/media/  ·  URL pública /media/ (alias nginx, igual
+# que smu que ya sirve /media/smu/... — ver smu/API_REST_REFERENCE.md:123).
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Security headers (ya configurados arriba según DEBUG)

@@ -184,8 +184,8 @@ class VehiculoViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
     @extend_schema(
         responses={(200, "image/png"): OpenApiTypes.BYTE},
         description=(
-            "QR de verificación de la placa, regenerado bajo demanda "
-            "(D-A8: no se persiste en BD ni en disco)."
+            "QR de verificación de la placa, persistido en media/transporte/codigos-qr/ "
+            "y en el campo codigo_qr del vehículo."
         ),
     )
     @action(detail=True, methods=["get"], url_path="qr.png")

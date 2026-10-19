@@ -14,6 +14,7 @@ Reglas de negocio:
 from datetime import date
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 
 from ..models import Conductor
 from .vigencia import estado_vigencia
@@ -48,8 +49,6 @@ class ConductorService:
 
         search = query_params.get("search")
         if search:
-            from django.db.models import Q
-
             queryset = queryset.filter(
                 Q(cedula__icontains=search)
                 | Q(nombre_completo__icontains=search)

@@ -62,9 +62,9 @@ class Vehiculo(AuditoriaModel):
 
     Se ELIMINAN (verificado): nombre_conductor/cedual_conductor (→FK),
     tipo_conductor (→Conductor), licencia/fecha_licencia/estado_licencia/categoria
-    (pertenecen al conductor), como_cond (ambigua, pendiente de verificación de uso),
-    codigo_qr/codigo_barras (regenerables bajo demanda, D-A8), 6 columnas de
-    mantenimiento (→ Mantenimiento 1:N), edit/fecha_edit (→ AuditoriaModel),
+    (pertenecen al conductor), como_cond (ambigua, no utilizada),
+    codigo_barras (obsoleto; codigo_qr se persiste en media/transporte/codigos-qr/),
+    6 columnas de mantenimiento (→ Mantenimiento 1:N), edit/fecha_edit (→ AuditoriaModel),
     estado texto (→ activo bool).
     """
     placa = models.CharField(max_length=10, unique=True, db_index=True)
@@ -103,6 +103,14 @@ class Vehiculo(AuditoriaModel):
     fecha_soat = models.DateField(null=True, blank=True)
     fecha_cda = models.DateField(null=True, blank=True)
     valor_dia_base = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    codigo_qr = models.FileField(
+        # Ruta local definida por negocio: backend/media/transporte/codigos-qr/
+        upload_to="transporte/codigos-qr/",
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Ruta del archivo PNG del código QR generado.",
+    )
     activo = models.BooleanField(default=True, db_index=True)
 
     class Meta:

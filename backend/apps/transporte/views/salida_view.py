@@ -143,11 +143,12 @@ class SalidaViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
             )
         except ValueError as exc:
             return Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+                {"ok": False, "error": str(exc), "detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
         except Salida.DoesNotExist:
             return Response(
-                {"detail": "vehículo inexistente"},
+                {"ok": False, "error": "vehículo inexistente", "detail": "vehículo inexistente"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(
@@ -167,7 +168,7 @@ class SalidaViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
                 if "No existe" in str(exc)
                 else status.HTTP_400_BAD_REQUEST
             )
-            return Response({"detail": str(exc)}, status=codigo)
+            return Response({"ok": False, "error": str(exc), "detail": str(exc)}, status=codigo)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # ------------------------------------------------------------------ #
@@ -190,7 +191,8 @@ class SalidaViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
             )
         except ValueError as exc:
             return Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+                {"ok": False, "error": str(exc), "detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(
             salida_serializer.SalidaSerializer(
@@ -305,7 +307,10 @@ class SalidaViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
             if "No existe" in str(exc)
             else status.HTTP_400_BAD_REQUEST
         )
-        return Response({"detail": str(exc)}, status=codigo)
+        return Response(
+            {"ok": False, "error": str(exc), "detail": str(exc)},
+            status=codigo,
+        )
 
     def _transicion(self, request, metodo, *args):
         try:

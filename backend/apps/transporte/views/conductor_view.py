@@ -38,9 +38,7 @@ class ConductorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
         try:
             queryset = ConductorService.listar(request.query_params)
         except ValueError as exc:
-            return Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return self._error(exc)
         page = self.paginate_queryset(queryset)
         serializer = self.get_serializer(page, many=True)
         return self.get_paginated_response(serializer.data)
@@ -49,9 +47,7 @@ class ConductorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
         try:
             ConductorService.obtener(kwargs["pk"])
         except ValueError as exc:
-            return Response(
-                {"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND
-            )
+            return self._error(exc)
         return super().retrieve(request, *args, **kwargs)
 
     # ------------------------------------------------------------------ #
@@ -66,9 +62,7 @@ class ConductorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
                 serializer.validated_data, actor=self._actor(request)
             )
         except ValueError as exc:
-            return Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return self._error(exc)
         return Response(
             conductor_serializer.ConductorSerializer(conductor).data,
             status=status.HTTP_201_CREATED,
@@ -87,12 +81,7 @@ class ConductorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
                 parche=parche,
             )
         except ValueError as exc:
-            codigo = (
-                status.HTTP_404_NOT_FOUND
-                if "No existe" in str(exc)
-                else status.HTTP_400_BAD_REQUEST
-            )
-            return Response({"detail": str(exc)}, status=codigo)
+            return self._error(exc)
         return Response(conductor_serializer.ConductorSerializer(conductor).data)
 
     def partial_update(self, request, *args, **kwargs):
@@ -112,15 +101,22 @@ class ConductorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
                 pk, fecha_egreso, actor=self._actor(request)
             )
         except ValueError as exc:
-            codigo = (
-                status.HTTP_404_NOT_FOUND
-                if "No existe" in str(exc)
-                else status.HTTP_400_BAD_REQUEST
-            )
-            return Response({"detail": str(exc)}, status=codigo)
+            return self._error(exc)
         return Response(conductor_serializer.ConductorSerializer(conductor).data)
 
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _error(exc):
+        codigo = (
+            status.HTTP_404_NOT_FOUND
+            if "No existe" in str(exc)
+            else status.HTTP_400_BAD_REQUEST
+        )
+        return Response(
+            {"ok": False, "error": str(exc), "detail": str(exc)},
+            status=codigo,
+        )
+
     @staticmethod
     def _actor(request):
         """Empleado del token actual; None si la petición es anónima."""

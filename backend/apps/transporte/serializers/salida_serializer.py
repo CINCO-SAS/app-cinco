@@ -106,10 +106,39 @@ class RegistrarSalidaSerializer(serializers.Serializer):
         return valor
 
 
-class EscanearSerializer(serializers.Serializer):
-    contenido = serializers.CharField(
-        help_text="Texto decodificado del QR (la placa del vehículo)."
+class IdentificarVehiculoSerializer(serializers.Serializer):
+    """S1/S4 (kiosco): identifica vehículo por placa o por QR decodificado."""
+    placa = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Placa directa del vehículo.",
     )
+    qr = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Texto decodificado del código QR.",
+    )
+    contenido = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Alias de compatibilidad para el contenido del QR.",
+    )
+
+    def validate(self, attrs):
+        valor = attrs.get("placa") or attrs.get("qr") or attrs.get("contenido") or ""
+        valor = valor.strip().upper()
+        if not valor:
+            raise serializers.ValidationError(
+                "Debe proporcionar la placa o el contenido del QR."
+            )
+        attrs["placa"] = valor
+        return attrs
+
+
+EscanearSerializer = IdentificarVehiculoSerializer
 
 
 class ValidarSerializer(serializers.Serializer):

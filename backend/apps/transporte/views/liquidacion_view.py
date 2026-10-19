@@ -1,19 +1,18 @@
 """
-LiquidacionViewSet — liquidaciones del Tab 3 (matriz D3 y D4).
+LiquidacionViewSet — Liquidaciones del Tab 3 (matriz D3 y D4).
 
-Contrato ADMCINCO (D-A3): delega en LiquidacionService y traduce sus
-ValueError a HTTP 400/403/404.
+Contrato ADMCINCO (D-A3) consolidado:
+- Respuestas estandarizadas:
+    Éxito: { "ok": true, "data": ... }
+    Fallo: { "ok": false, "error": ..., "detail": ... }
 
-Rutas (decisión documentada): la matriz D3
-`GET /liquidaciones/{anio}/{mes}/` se expresa como
-`GET /liquidaciones/?mes=&anio=` — DefaultRouter reserva `/{pk}/` para el
-detalle y los parámetros de consulta evitan la ambigüedad de ruta.
-
-Permisos: lectura a autenticados; escrituras con DjangoModelPermissions
-(queryset = PagoVehiculoMensual → add/change_pagovehiculomensual). El gate
-de negocio de la fecha límite (permiso `transporte.editar_tras_cierre`) se
-evalúa en las acciones de escritura; el afinado por acción llega con
-PermisoService (E3).
+Rutas consolidadas:
+- GET  /liquidaciones/?mes=&anio=          → lista pagos registrados en el período.
+- GET  /liquidaciones/sabana/               → sábana consolidada (?tipo=pago-mensual|pronto-pago).
+- GET  /liquidaciones/pago-mensual/         → alias retrocompatible.
+- GET  /liquidaciones/pronto-pago/          → alias retrocompatible.
+- POST /liquidaciones/consecutivo/          → genera o consulta consecutivo atómico mensual.
+- POST /liquidaciones/pago/                 → upsert de marca de pago mensual.
 """
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -34,6 +33,7 @@ class LiquidacionViewSet(ListModelMixin, GenericViewSet):
     """Lectura a autenticados; escritura con permiso de modelo + gate de cierre."""
 
     queryset = PagoVehiculoMensual.objects.all()
+    serializer_class = liquidacion_serializer.PagoSerializer
     permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
 
     # ------------------------------------------------------------------ #
@@ -43,36 +43,36 @@ class LiquidacionViewSet(ListModelMixin, GenericViewSet):
         try:
             queryset = LiquidacionService.listar_pagos(request.query_params)
         except ValueError as exc:
-            return Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return self._error(exc)
         page = self.paginate_queryset(queryset)
         serializer = self.get_serializer(page, many=True)
         return self.get_paginated_response(serializer.data)
 
     # ------------------------------------------------------------------ #
-    # Sábanas (D4 / CR-10)
+    # Sábanas (D4 / CR-10) — Consolidado con aliases
     # ------------------------------------------------------------------ #
     @extend_schema(
         responses={200: liquidacion_serializer.SabanaSerializer},
-        description=(
-            "Sábana de pago mensual: suma APROBADO + REPORTADO + VALIDADO (CR-10). "
-            "Retrocede hasta 6 meses si el período pedido es el actual."
-        ),
+        description="Sábana consolidada de liquidación. Parámetro tipo=pago-mensual | pronto-pago.",
     )
+    @action(detail=False, methods=["get"], url_path="sabana")
+    def sabana(self, request):
+        tipo = request.query_params.get("tipo", "pago-mensual").lower()
+        metodo = (
+            "sabana_pronto_pago"
+            if tipo in ("pronto-pago", "pronto_pago")
+            else "sabana_pago_mensual"
+        )
+        return self._responder_sabana(request, metodo)
+
     @action(detail=False, methods=["get"], url_path="pago-mensual")
     def pago_mensual(self, request):
+        """Alias retrocompatible de /sabana/?tipo=pago-mensual."""
         return self._responder_sabana(request, "sabana_pago_mensual")
 
-    @extend_schema(
-        responses={200: liquidacion_serializer.SabanaSerializer},
-        description=(
-            "Pronto pago: suma exclusivamente APROBADO (CR-10). "
-            "Retrocede hasta 6 meses si el período pedido es el actual."
-        ),
-    )
     @action(detail=False, methods=["get"], url_path="pronto-pago")
     def pronto_pago(self, request):
+        """Alias retrocompatible de /sabana/?tipo=pronto-pago."""
         return self._responder_sabana(request, "sabana_pronto_pago")
 
     def _responder_sabana(self, request, metodo):
@@ -87,11 +87,14 @@ class LiquidacionViewSet(ListModelMixin, GenericViewSet):
                 request.query_params.get("anio"),
                 filtros=filtros,
             )
-        except ValueError as exc:
             return Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+                {
+                    "ok": True,
+                    "data": liquidacion_serializer.SabanaSerializer(sabana).data,
+                }
             )
-        return Response(liquidacion_serializer.SabanaSerializer(sabana).data)
+        except ValueError as exc:
+            return self._error(exc)
 
     # ------------------------------------------------------------------ #
     # Escritura (con gate de fecha límite)
@@ -116,21 +119,22 @@ class LiquidacionViewSet(ListModelMixin, GenericViewSet):
                 periodo["anio"],
                 actor=self._actor(request),
             )
-        except ValueError as exc:
+            datos = {
+                "vehiculo": numero.vehiculo_id,
+                "mes": numero.mes,
+                "anio": numero.anio,
+                "consecutivo": numero.consecutivo,
+                "creado": creado,
+            }
             return Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+                {
+                    "ok": True,
+                    "data": liquidacion_serializer.ConsecutivoSerializer(datos).data,
+                },
+                status=status.HTTP_201_CREATED if creado else status.HTTP_200_OK,
             )
-        datos = {
-            "vehiculo": numero.vehiculo_id,
-            "mes": numero.mes,
-            "anio": numero.anio,
-            "consecutivo": numero.consecutivo,
-            "creado": creado,
-        }
-        return Response(
-            liquidacion_serializer.ConsecutivoSerializer(datos).data,
-            status=status.HTTP_201_CREATED if creado else status.HTTP_200_OK,
-        )
+        except ValueError as exc:
+            return self._error(exc)
 
     @extend_schema(request=liquidacion_serializer.PagoInputSerializer)
     @action(detail=False, methods=["post"], url_path="pago")
@@ -147,14 +151,15 @@ class LiquidacionViewSet(ListModelMixin, GenericViewSet):
             pago = LiquidacionService.guardar_pago(
                 datos, actor=self._actor(request)
             )
-        except ValueError as exc:
             return Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+                {
+                    "ok": True,
+                    "data": liquidacion_serializer.PagoSerializer(pago).data,
+                },
+                status=status.HTTP_201_CREATED,
             )
-        return Response(
-            liquidacion_serializer.PagoSerializer(pago).data,
-            status=status.HTTP_201_CREATED,
-        )
+        except ValueError as exc:
+            return self._error(exc)
 
     # ------------------------------------------------------------------ #
     def _periodo_cerrado(self, request, mes, anio):
@@ -168,14 +173,26 @@ class LiquidacionViewSet(ListModelMixin, GenericViewSet):
             ),
         ):
             return None
+
+        mensaje = (
+            f"El período {mes:02d}/{anio} está cerrado: requiere el "
+            "permiso transporte.editar_tras_cierre."
+        )
         return Response(
-            {
-                "detail": (
-                    f"El período {mes:02d}/{anio} está cerrado: requiere el "
-                    "permiso transporte.editar_tras_cierre."
-                )
-            },
+            {"ok": False, "error": mensaje, "detail": mensaje},
             status=status.HTTP_403_FORBIDDEN,
+        )
+
+    @staticmethod
+    def _error(exc):
+        codigo = (
+            status.HTTP_404_NOT_FOUND
+            if "No existe" in str(exc)
+            else status.HTTP_400_BAD_REQUEST
+        )
+        return Response(
+            {"ok": False, "error": str(exc), "detail": str(exc)},
+            status=codigo,
         )
 
     @staticmethod

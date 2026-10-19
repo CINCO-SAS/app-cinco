@@ -78,14 +78,30 @@ _DISPONIBLES = ("disponible", "0", "")
 
 # Máquina de estados (D-A11 / §5.1). RECHAZADO es terminal para flujos
 # (solo borrado lógico lo remueve); ELIMINADO es estado final.
+#
+# El legado NO tiene matriz de transiciones: su único guard es
+# `WHERE id = ? AND estado != 'eliminado'` (`base_salida_transporte.php`
+# 973 y 1159), es decir admite cualquier salto salvo desde ELIMINADO.
+# Aquí se endurece a propósito (no se resucita un ELIMINADO ni se
+# reabre un RECHAZADO) conservando los dos saltos que el sistema real
+# usa, ambos con evidencia en el legado:
+#   · APROBADO → RECHAZADO: `rechazar` (base_salida_transporte.php 1159).
+#     El rechazo puede caer sobre una salida ya aprobada (documento
+#     vencido, error de carga); el guard solo excluye ELIMINADO.
+#   · REPORTADO → VALIDADO: WFM masivo
+#     (`transporte_validacion_wfm_service.php` 426–445) que valida por
+#     lote con observación literal 'validado por sistema'. Es un segundo
+#     camino paralelo a VALIDADO que no pasa por APROBADO.
 TRANSICIONES = {
     EstadoSalida.REPORTADO: {
         EstadoSalida.APROBADO,
         EstadoSalida.RECHAZADO,
+        EstadoSalida.VALIDADO,  # WFM masivo (legacy 427)
         EstadoSalida.ELIMINADO,
     },
     EstadoSalida.APROBADO: {
         EstadoSalida.VALIDADO,
+        EstadoSalida.RECHAZADO,  # legacy 1159: solo excluye ELIMINADO
         EstadoSalida.ELIMINADO,
     },
     EstadoSalida.RECHAZADO: {EstadoSalida.ELIMINADO},
@@ -116,6 +132,8 @@ MSG_FUERA_VENTANA_NOVEDAD = (
 )
 MSG_SIN_PERMISO = "No tiene permiso para gestionar esta salida."
 MSG_MOTIVO_RECHAZO = "Debe indicar un motivo de rechazo."
+# Literal del historial del WFM masivo (transporte_validacion_wfm_service.php 438).
+MOTIVO_VALIDADO_WFM = "validado por sistema"
 MSG_NOVEDAD_VACIA = "Debe indicar el tipo, el valor y la descripción de la novedad."
 MSG_NOVEDAD_VALOR = "El valor de la novedad no puede ser negativo."
 MSG_SIN_NOVEDAD = "La salida no tiene novedades registradas."
@@ -521,6 +539,38 @@ class SalidaService:
         return cls._cambiar_estado(salida, EstadoSalida.VALIDADO, usuario)
 
     @classmethod
+    def validar_wfm(cls, salidas, edit_cedula=""):
+        """
+        Validación WFM masiva (F5-5): `reportado → validado` en bloque.
+
+        Es el equivalente a `transporteWfmApplyValidationChunk`
+        (transporte_validacion_wfm_service.php 426–445), que hace un único
+        UPDATE **sin chequear permisos** porque es un proceso autónomo y no
+        una acción de un jefe. Aquí se mantiene ese gate abierto
+        (``requiere_gestion=False``) pero la autorización vive en el
+        endpoint WFM, y la máquina de estados D-A11 sigue aplicando.
+
+        Observación literal del legado: 'validado por sistema'. La
+        auditoría se atribuye a la cédula ``edit_cedula`` si hay Empleado
+        correspondiente (el legado guardaba la cédula cruda en `edit`).
+        """
+        cedula = str(edit_cedula or "").strip()
+        empleado = (
+            Empleado.objects.filter(cedula=cedula).first() if cedula else None
+        )
+        return [
+            cls._cambiar_estado(
+                salida,
+                EstadoSalida.VALIDADO,
+                None,
+                motivo=MOTIVO_VALIDADO_WFM,
+                requiere_gestion=False,
+                empleado=empleado,
+            )
+            for salida in salidas
+        ]
+
+    @classmethod
     def eliminar(cls, salida_id, usuario=None):
         """Borrado lógico (B5): CR-9 estricto para el operador con el
         mensaje legacy (`base_salida_transporte.php` 882–887) y libera
@@ -689,7 +739,7 @@ class SalidaService:
 
     @classmethod
     def _cambiar_estado(cls, salida, destino, usuario, motivo="",
-                        requiere_gestion=True):
+                        requiere_gestion=True, empleado=None):
         permitidos = TRANSICIONES.get(salida.estado, set())
         if destino not in permitidos:
             raise ValueError(
@@ -701,7 +751,8 @@ class SalidaService:
             ):
                 raise ValueError(MSG_SIN_PERMISO)
 
-        empleado = cls._empleado_de(usuario)
+        if empleado is None:
+            empleado = cls._empleado_de(usuario)
         estado_previo = salida.estado
         salida.estado = destino
         salida.modificado_por = empleado

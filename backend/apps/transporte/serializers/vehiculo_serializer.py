@@ -48,11 +48,12 @@ class VehiculoSerializer(serializers.ModelSerializer):
             "fecha_soat",
             "fecha_cda",
             "valor_dia_base",
+            "codigo_qr",
             "activo",
             "estado_soat",
             "estado_cda",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "codigo_qr"]
 
     def get_estado_soat(self, obj):
         return estado_vigencia(obj.fecha_soat)
@@ -119,6 +120,7 @@ class VehiculoListSerializer(serializers.ModelSerializer):
             "estado_soat",
             "estado_cda",
             "valor_dia_base",
+            "codigo_qr",
             "activo",
         ]
 

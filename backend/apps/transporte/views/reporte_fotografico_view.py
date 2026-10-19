@@ -57,7 +57,7 @@ class ReporteFotograficoViewSet(GenericViewSet):
         responsable = self._responsable(request)
         if responsable is None:
             return Response(
-                {"detail": MSG_SIN_IDENTIDAD},
+                {"ok": False, "error": MSG_SIN_IDENTIDAD},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -70,7 +70,8 @@ class ReporteFotograficoViewSet(GenericViewSet):
         vehiculo = ReporteFotograficoService.vehiculo_por_placa(datos["placa"])
         if vehiculo is None:
             return Response(
-                {"detail": MSG_SIN_PLACA}, status=status.HTTP_400_BAD_REQUEST
+                {"ok": False, "error": MSG_SIN_PLACA},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
@@ -88,11 +89,15 @@ class ReporteFotograficoViewSet(GenericViewSet):
             )
         except ValueError as exc:
             return Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+                {"ok": False, "error": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         return Response(
-            ReporteFotograficoSerializer(reporte).data,
+            {
+                "ok": True,
+                "data": ReporteFotograficoSerializer(reporte).data,
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -110,7 +115,7 @@ class ReporteFotograficoViewSet(GenericViewSet):
         responsable = self._responsable(request)
         if responsable is None:
             return Response(
-                {"detail": MSG_SIN_IDENTIDAD},
+                {"ok": False, "error": MSG_SIN_IDENTIDAD},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         fecha_raw = str(request.data.get("fecha") or "").strip()
@@ -122,7 +127,7 @@ class ReporteFotograficoViewSet(GenericViewSet):
             )
         except ValueError:
             return Response(
-                {"detail": "Fecha inválida; use YYYY-MM-DD."},
+                {"ok": False, "error": "Fecha inválida; use YYYY-MM-DD."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         resultado = ReporteFotograficoService.validar_agenda_responsable(
@@ -131,7 +136,7 @@ class ReporteFotograficoViewSet(GenericViewSet):
             es_programacion=ReporteFotograficoService.es_programacion(request.user),
         )
         resultado["fecha"] = fecha
-        return Response(resultado)
+        return Response({"ok": True, "data": resultado})
 
     # ------------------------------------------------------------------ #
     # GET /reportes-fotograficos/vehiculo-placa/?placa= — resolver placa
@@ -147,17 +152,21 @@ class ReporteFotograficoViewSet(GenericViewSet):
         )
         if vehiculo is None:
             return Response(
-                {"detail": MSG_SIN_PLACA}, status=status.HTTP_400_BAD_REQUEST
+                {"ok": False, "error": MSG_SIN_PLACA},
+                status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(
             {
-                "vehiculo": {
-                    "placa": vehiculo.placa,
-                    "tipo_vehiculo": vehiculo.tipo_vehiculo,
-                    "marca": vehiculo.marca,
-                    "referencia": vehiculo.referencia,
-                    "ciudad": vehiculo.ciudad_operacion,
-                }
+                "ok": True,
+                "data": {
+                    "vehiculo": {
+                        "placa": vehiculo.placa,
+                        "tipo_vehiculo": vehiculo.tipo_vehiculo,
+                        "marca": vehiculo.marca,
+                        "referencia": vehiculo.referencia,
+                        "ciudad": vehiculo.ciudad_operacion,
+                    }
+                },
             }
         )
 

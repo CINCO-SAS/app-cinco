@@ -26,10 +26,12 @@ from .views import (
     JefeValidadorViewSet,
     KioscoViewSet,
     LiquidacionViewSet,
+    PlanillaViewSet,
     ReporteFotograficoViewSet,
     SalidaViewSet,
     ValidacionViewSet,
     VehiculoViewSet,
+    WfmViewSet,
 )
 
 router = DefaultRouter()
@@ -44,6 +46,10 @@ router.register(
 router.register(
     r"liquidaciones", LiquidacionViewSet, basename="liquidaciones"
 )
+# F5-6: Planilla Oficial de Salida consolidada (S5 / CR-11).
+# Alcances: PLACA | PROPIO | EXTERNO | RENTING | TODAS.
+# POST /planillas/generar/ → genera la planilla con consecutivo atómico y QR en disco.
+router.register(r"planillas", PlanillaViewSet, basename="planillas")
 # F5: Tab 2 informes (I1) — F5-1 cuenta de cobro imprimible.
 router.register(r"informes", InformeViewSet, basename="informes")
 # F3/B2: alta + consulta (S6/B1); transiciones y novedades → F4 (B4).
@@ -54,5 +60,7 @@ router.register(r"kiosco", KioscoViewSet, basename="kiosco")
 router.register(
     r"reportes-fotograficos", ReporteFotograficoViewSet, basename="reportes-fotograficos"
 )
+# F5-5: validación WFM masiva (lote síncrono + cola de jobs).
+router.register(r"wfm", WfmViewSet, basename="wfm")
 
 urlpatterns = router.urls

@@ -16,6 +16,8 @@ import re
 from datetime import date
 
 import qrcode
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -188,7 +190,13 @@ class FlotaService:
 
         try:
             with transaction.atomic():
-                return Vehiculo.objects.create(**registros)
+                vehiculo = Vehiculo.objects.create(**registros)
+                FlotaService.generar_qr(vehiculo.pk)
+                # `generar_qr` persiste `codigo_qr` en su propia instancia:
+                # sin refrescar, el alta (POST /vehiculos/) devolvería el
+                # campo vacío y el front no recibiría la URL del QR.
+                vehiculo.refresh_from_db(fields=["codigo_qr"])
+                return vehiculo
         except IntegrityError:
             raise ValueError(
                 "No se pudo crear el vehículo: la placa ya está registrada."
@@ -209,11 +217,19 @@ class FlotaService:
         registros = FlotaService._sanear(merged)
         registros["modificado_por"] = actor
 
+        placa_anterior = vehiculo.placa
+
         try:
             with transaction.atomic():
                 for campo, valor in registros.items():
                     setattr(vehiculo, campo, valor)
                 vehiculo.save()
+                # El QR codifica la placa: si esta cambió hay que
+                # regenerarlo y retirar el PNG huérfano, o `generar_qr`
+                # devolvería el QR de la placa anterior (bug verificado).
+                if vehiculo.placa != placa_anterior:
+                    FlotaService.generar_qr(vehiculo.pk, forzar=True)
+                    vehiculo.refresh_from_db(fields=["codigo_qr"])
         except IntegrityError:
             raise ValueError(
                 "No se pudo actualizar el vehículo: la placa ya está registrada."
@@ -278,9 +294,9 @@ class FlotaService:
         return re.sub(r"[^a-zA-Z0-9\s]", "", valor or "").strip().upper()
 
     @staticmethod
-    def detectar_separador(primeria_linea):
+    def detectar_separador(primera_linea):
         """Auto-detección delimitador: ';' si la cabecera lo tiene, si no ','."""
-        return ";" if ";" in (primeria_linea or "") else ","
+        return ";" if ";" in (primera_linea or "") else ","
 
     @staticmethod
     def importar_datos_bancarios_csv(archivo, actor=None):
@@ -368,19 +384,36 @@ class FlotaService:
         }
 
     # ------------------------------------------------------------------ #
-    # QR de verificación (D-A8)
+    # QR de verificación (persistido en carpeta media y BD)
     # ------------------------------------------------------------------ #
     @staticmethod
-    def generar_qr(vehiculo_id):
+    def generar_qr(vehiculo_id, forzar=False):
         """
-        PNG del QR de la placa, regenerado EN MEMORIA bajo demanda: nunca
-        se persiste en BD ni en disco (D-A8 elimina codigo_qr/codigo_barras).
+        Genera el QR de la placa y lo PERSISTE en la carpeta
+        `media/transporte/codigos-qr/qr_{placa}.png` y en `vehiculo.codigo_qr`.
 
-        Payload = placa, verificado en el legacy: el kiosco recibe lo
-        escaneado como texto de placa (transporte_salida.php → POST val_placa)
-        y el PNG legacy se nombraba qr_{placa}.png (base_transportadores.php).
+        Si el archivo ya existe y no se fuerza regeneración, retorna el
+        contenido existente desde storage para máxima eficiencia (soporte
+        directo para Planillas de despacho y generación de PDFs).
         """
         vehiculo = FlotaService.obtener(vehiculo_id)
+        rel_path = f"transporte/codigos-qr/qr_{vehiculo.placa}.png"
+        ruta_anterior = (
+            vehiculo.codigo_qr.name if vehiculo.codigo_qr else ""
+        )
+
+        # La caché solo vale si el archivo apunta a la placa ACTUAL:
+        # `actualizar` permite cambiar la placa, y sin esta comprobación
+        # se devolvería el QR de la placa anterior (bug de verificación).
+        if (
+            not forzar
+            and bool(vehiculo.codigo_qr)
+            and vehiculo.codigo_qr.name == rel_path
+            and default_storage.exists(rel_path)
+        ):
+            with default_storage.open(rel_path, "rb") as f:
+                return f.read()
+
         qr = qrcode.QRCode(
             error_correction=qrcode.constants.ERROR_CORRECT_M,
             box_size=10,
@@ -392,7 +425,41 @@ class FlotaService:
         qr.make_image(fill_color="black", back_color="white").save(
             buffer, format="PNG"
         )
-        return buffer.getvalue()
+        contenido = buffer.getvalue()
+
+        if default_storage.exists(rel_path):
+            default_storage.delete(rel_path)
+        nombre_guardado = default_storage.save(rel_path, ContentFile(contenido))
+
+        if not vehiculo.codigo_qr or vehiculo.codigo_qr.name != nombre_guardado:
+            vehiculo.codigo_qr = nombre_guardado
+            vehiculo.save(update_fields=["codigo_qr"])
+
+        # Si la placa cambió, el PNG de la placa anterior queda huérfano:
+        # se retira, pero SOLO si está dentro de la carpeta del QR (nunca
+        # se borra una ruta arbitraria de media).
+        if (
+            ruta_anterior
+            and ruta_anterior != nombre_guardado
+            and ruta_anterior.startswith("transporte/codigos-qr/")
+            and default_storage.exists(ruta_anterior)
+        ):
+            default_storage.delete(ruta_anterior)
+
+        return contenido
+
+    @staticmethod
+    def obtener_ruta_qr(vehiculo_id):
+        """
+        Retorna la ruta o archivo QR garantizando que exista en disco.
+        Facilita el consumo inmediato en Planillas y reportes impresos.
+        """
+        vehiculo = FlotaService.obtener(vehiculo_id)
+        rel_path = f"transporte/codigos-qr/qr_{vehiculo.placa}.png"
+        if not vehiculo.codigo_qr or not default_storage.exists(rel_path):
+            FlotaService.generar_qr(vehiculo_id, forzar=True)
+            vehiculo.refresh_from_db(fields=["codigo_qr"])
+        return vehiculo.codigo_qr
 
     # ------------------------------------------------------------------ #
     # Validaciones internas
