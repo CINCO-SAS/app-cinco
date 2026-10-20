@@ -129,11 +129,38 @@
       lógica, novedades, historial (`SalidaHistorial`) y validación de jefes
       (`ValidacionSalida`, con datos de A1). *Tamaño M.* **CERRADO** (182 tests).
 
-### Tramo C — requiere G2 (conectividad)
+### Tramo C — G2 ABIERTO el 20-oct
 
-- [ ] **C1 · Migrate real** — `0001_initial` en `default` (`db_cincosas`), verificar `utf8mb4`.
-- [ ] **C2 · Auditorías §7.1** — CR-3 (placas duplicadas), CR-1/CR-2 (duplicados previos)
-      → columna virtual `STORED` + constraints únicos parciales de `Salida`.
+- [x] **C1 · Migrate real** — ✅ **CERRADO (20-oct)**: `0001`–`0006` aplicados contra
+      `default` = **`db_cincosas`** (MySQL 8.0.46). **17 tablas `transporte_*`** creadas
+      vacías (utf8mb4_unicode_ci ✓) + **79 permisos** activos (incluidos los custom
+      CR-8: `puede_programar`, `permiso_especial`, `editar_tras_cierre`). Ninguna de
+      las 50 tablas pre-existentes fue tocada. Herramientas: `inspeccion_bd_legacy`
+      y `auditar_datos_legacy` (ambas de **solo lectura**).
+      *⚠️ `mysql.W002`: `sql_mode` **vacío** en `default` y `azul` → sin
+      `STRICT_TRANS_TABLES`; MySQL trunca silenciosamente. Habilitarlo antes de C3.*
+- [x] **C2 · Auditorías §7.1** — ✅ **INFORME listo (20-oct)**, solo lectura sobre
+      `azul` (`manage.py auditar_datos_legacy`). Espejo real:
+      - **CR-3 placas** — 1.307 vehículos / 1.304 placas distintas; **3 duplicadas**:
+        `MXW46F` (ids 1822,1825) · `TSG407` (730,870) · `TTP822` (826,1192). Cédulas de
+        conductor: **1 duplicada** (`10235098`). Cédulas de personal: **0** ✓ → el
+        UNIQUE de `placa`/`cedula` es viable tras resolver esos 4 casos puntuales.
+      - **CR-1 (vehículo, día) con estado vivo: 303 colisiones** (620 filas, máx. 5/día):
+        **256 son duplicados técnicos** (mismo timestamp/técnico/móvil → doble submit
+        del PHP) y **47 son salidas múltiples reales**. Por año 2022:135 · 2023:107 ·
+        2024:58 · **2025:3**; solo **2 en los últimos 12 meses**.
+      - **CR-2 (móvil, día) NO es viable**: `movil_sale` **nunca es placa** (0/253.035)
+        sino el móvil nombrado (`TIRAN119`, `MOVIL 11`, `HW-CONSTRU`…), con ~70k
+        sentinelas (`Z - FUERA` 42.260 · `Z - FUERA DE OPERACION` 16.711 ·
+        `disponible` 7.938 · `0` 1.392 · `1 - SIN ASIGNAR` 1.273) y móviles comunes
+        asignados a 14 personas el mismo día **por diseño**.
+      - **Huérfanos**: 60 vehículos borrados (~700 salidas) · 148 técnicos sin personal
+        (el `0` con 17.192 salidas) · 3.427 sin móvil · **488 filas en estado
+        `disponible`** (estado no estándar). Rango: 2021-10-06 → 2026-10-31.
+      - **Conclusión D-A12**: los datos legacy **no permiten** los constraints parciales
+        CR-1/CR-2 tal como estaban previstos; el criterio se refuerza en
+        `SalidaService` (ya implementado). *La importación de datos la ejecuta el
+        usuario; el backend no escribe en `azul`.*
 - [ ] **C3 · F6 ETL** — `manage.py migrate_transporte_legacy`: lotes de 2.000,
       desempaquetado del JSON `datos`, resolución de FKs (`ID Foreign Keys`),
       **jefes** (`programacion_parametros`), **fechas límite**, **festivos** (si su
