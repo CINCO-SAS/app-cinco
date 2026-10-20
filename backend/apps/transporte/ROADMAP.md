@@ -115,9 +115,16 @@
       con compresión Pillow; dedup `(vehículo, fecha, técnico)`; identidad desde
       `request.user` (no del cliente). Endpoints: `POST /reportes-fotograficos/`,
       `POST .../validar-agenda/`, `GET .../vehiculo-placa/`. **Núcleo CERRADO**
-      (214 tests). *Pendiente (diferido):* match OT-específica `validar_agenda_ot`
-      (→ con WFM/OT, F5) y ventana de días anteriores con excepción en
-      `programacion_parametros` (→ decisión ETL).
+      (214 tests). **Refinamiento #1 CERRADO (20-oct): match OT-específica**
+      `validar_agenda_ot` (port del `controlador_fix` 319–360 y 175–244): la
+      OT declarada debe coincidir exactamente —mayúsculas y espacios
+      colapsados— con `actividad.ot`, `tipo_trabajo`, `descripcion` u
+      `observacion` de una agenda no borrada del día. Aplicado en `guardar()`
+      y en el pre-chequeo `validar-agenda/`; áreas exentas y WFM/IM intactas,
+      y sin OT declarada no se endurece el gate ya cerrado.
+      *Pendiente (diferido):* ventana de días anteriores con excepción en
+      `programacion_parametros` (→ decisión de diseño: storage propio + CRUD
+      con `puede_programar` + ETL de las excepciones).
 - [x] **B4 · F4 backoffice** — aprobación masiva, rechazo con motivo, eliminación
       lógica, novedades, historial (`SalidaHistorial`) y validación de jefes
       (`ValidacionSalida`, con datos de A1). *Tamaño M.* **CERRADO** (182 tests).
@@ -307,4 +314,5 @@ G3 y G4 desbloquean los últimos dos puntos sueltos (B11 y S2/T6).
 | 2026-10-19 | Refactor F5-7 (mejora sobre el legacy): claves de estado reales (`reportado`/`total`), RENTING separado de PROPIO, importes en `Decimal` con 2 decimales (355 tests) | `76c140f` |
 | 2026-10-19 | E1 catálogo operativo + E3 PermisoService (cierra CR-8): `/vehiculos/catalogo-operativo/` (solo activos, semáforo en servidor) y `/permisos/estado/` (grupos/permisos en vez de cédulas hardcodeadas, migración 0006) (365 tests) | `65c2709` |
 | 2026-10-19 | Calendario reutilizable (G1 parcial): `apps/common/festivos/` con el algoritmo + catálogo editable `festivos_colombia.json` (2022–2030, feriado decretado 2026-07-13 incluido); `es_festivo` = algoritmo ∪ catálogo (agregar festivo = editar JSON y `recargar_catalogo()`, sin código ni migración); transporte queda como shim sin cambio de comportamiento; corrección del JSON de origen: San Pedro y San Pablo 2027 estaba en el lunes anterior (2027-06-28) → 2027-07-05 según Emiliani; +10 tests en `apps.common` (377 tests) | `6f3e837` |
-| 2026-10-19 | P1 CERRADO: formato físico F-104 en `POST /planillas/formato/` verificado contra `planilla_salida.php` (LETTER horizontal, hoja por vehículo, QR en base64, casillas en blanco para firmas); mejora sobre el legacy: fecha real (el legacy imprimía 16/02/2022 fijo), conductor/teléfono/valor día reales (la consulta del legacy estaba comentada), consecutivo impreso (§3.6) y sin código de barras (D-A8); +12 tests (389 tests) | *(este commit)* |
+| 2026-10-19 | P1 CERRADO: formato físico F-104 en `POST /planillas/formato/` verificado contra `planilla_salida.php` (LETTER horizontal, hoja por vehículo, QR en base64, casillas en blanco para firmas); mejora sobre el legacy: fecha real (el legacy imprimía 16/02/2022 fijo), conductor/teléfono/valor día reales (la consulta del legacy estaba comentada), consecutivo impreso (§3.6) y sin código de barras (D-A8); +12 tests (389 tests) | `7e00e26` |
+| 2026-10-20 | Refinamiento B3 #1 CERRADO: match OT-específica `validar_agenda_ot` portado del `controlador_fix` (la OT declarada debe coincidir exactamente con `actividad.ot`/`tipo_trabajo`/`descripcion`/`observacion` de una agenda no borrada del día); aplicado en `guardar()` y en `validar-agenda/`; áreas exentas y WFM/IM intactas; el #2 (ventana de días anteriores con excepción) queda pendiente de decisión de diseño | *(este commit)* |

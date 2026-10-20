@@ -24,14 +24,16 @@ MEJORAS sobre el legacy (usado como guía de comportamiento, endurecido en servi
 
 Paridad conservada (comportamiento + mensajes legacy literales):
 - Ventana inclusive [10:00, 16:00]; exención de área (O&M, I&M apoyo, Pymes EN,
-  programación); gate "¿tiene agenda hoy?"; 1–5 imágenes; un reporte por
+  programación); gate "¿tiene agenda hoy?"; **match OT-específica**
+  (``validar_agenda_ot``, port de ``validarOtActividadTransporte`` +
+  ``validarOtActividadAgendaTransporte``); 1–5 imágenes; un reporte por
   (vehículo, fecha, técnico).
 
-Pendiente documentado (no en este bloque, requiere F5 / ETL):
-- ``validar_agenda_ot`` (match OT-específica contra la agenda) → se resuelve junto
-  al subsistema WFM/OT (F5).
+Pendiente documentado (no en este bloque, requiere decisión de diseño):
 - Ventana de días anteriores con excepción en ``programacion_parametros``
-  (``excepciones_reporte_dias_anteriores``) → requiere decisión ETL de esa tabla.
+  (``excepciones_reporte_dias_anteriores``: ``{cedula, fecha_permitida}``) →
+  storage propio + CRUD con ``puede_programar`` + ETL de las excepciones
+  existentes. Hoy el backend rechaza toda fecha pasada.
 """
 from __future__ import annotations
 
@@ -90,6 +92,7 @@ MSG_FECHA_PASADA = (
 )
 MSG_IMAGEN_INVALIDA = "El archivo adjunto no es una imagen válida."
 MSG_OT_VACIA = "Debe indicar la OT / actividad."
+MSG_OT_VACIA_WFM = "Debe ingresar una de las OT asignadas para el dia de hoy."
 MSG_OT_NO_AGENDADA = (
     "La OT / actividad {ot} no está agendada para el empleado {cedula} "
     "en la fecha {fecha}."
@@ -144,6 +147,13 @@ class ReporteFotograficoService:
         base = ot_n.split("_", 1)[0].strip()
         digitos = re.sub(r"\D", "", base)
         return digitos or base
+
+    @staticmethod
+    def _texto_comparable(valor) -> str:
+        """``transporteTextoComparableAgenda`` (controlador 74–82): mayúsculas
+        y espacios colapsados; el legacy comparaba exacto con esto."""
+        texto = str(valor or "").upper().strip()
+        return re.sub(r"\s+", " ", texto) if texto else ""
 
     @classmethod
     def omite_validacion_ot(cls, area="", carpeta="", cargo="") -> bool:
@@ -207,7 +217,29 @@ class ReporteFotograficoService:
                 fecha_inicio__lte=fecha,
                 fecha_fin__gte=fecha,
                 is_deleted=False,
-            ).select_related("actividad")[:20]
+            ).select_related("actividad", "actividad__detalle")[:20]
+        )
+
+    @classmethod
+    def _agenda_coincide_con_ot(cls, agenda: Agenda, comparable: str) -> bool:
+        """
+        ``validarOtActividadAgendaTransporte`` (controlador 221–237).
+
+        La OT digitada coincide si su texto comparable es EXACTAMENTE igual
+        a ``actividad.ot``, ``detalle.tipo_trabajo``, ``detalle.descripcion``
+        u ``observacion`` de la agenda.
+        """
+        actividad = getattr(agenda, "actividad", None)
+        detalle = getattr(actividad, "detalle", None) if actividad else None
+        candidatos = (
+            getattr(actividad, "ot", ""),
+            getattr(detalle, "tipo_trabajo", "") if detalle else "",
+            getattr(detalle, "descripcion", "") if detalle else "",
+            agenda.observacion,
+        )
+        return any(
+            texto and cls._texto_comparable(texto) == comparable
+            for texto in candidatos
         )
 
     @staticmethod
@@ -260,6 +292,86 @@ class ReporteFotograficoService:
             "origen": "agenda",
             "agendas": [cls._agenda_a_dict(a) for a in agendas],
             "msg": "",
+        }
+
+    # ------------------------------------------------------------------ #
+    # Match OT-específica (refinamiento B3 diferido)
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def validar_agenda_ot(
+        cls,
+        empleado: Empleado | None,
+        fecha: date,
+        ot: str,
+        es_programacion: bool = False,
+    ) -> dict:
+        """
+        Port de ``validarOtActividadTransporte`` +
+        ``validarOtActividadAgendaTransporte``
+        (controlador_transporte_img_reporte_salida_fix.php 319–360 y 175–244).
+
+        Reglas, en orden:
+        1. Área exenta o permiso de programación → no se valida nada.
+        2. Sin OT digitada → error (mensaje distinto si el área valida en
+           WFM, que exige una OT del día).
+        3. Área que valida en WFM (``area == 'IM'``) → se recibe la OT sin
+           validarla: la validación queda diferida al subsistema WFM.
+        4. Resto: la OT debe coincidir EXACTAMENTE (texto comparable) con
+           ``actividad.ot`` / ``tipo_trabajo`` / ``descripcion`` /
+           ``observacion`` de alguna agenda del día del responsable.
+
+        Devuelve ``{valida, origen, ot, msg, agendas}``.
+        """
+        area = getattr(empleado, "area", "") or ""
+        carpeta = getattr(empleado, "carpeta", "") or ""
+        cargo = getattr(empleado, "cargo", "") or ""
+        cedula = getattr(empleado, "cedula", "") or ""
+
+        if es_programacion or cls.omite_validacion_ot(area, carpeta, cargo):
+            return {
+                "valida": True,
+                "origen": "area_exenta",
+                "ot": "",
+                "msg": MSG_AGENDA_EXENTA,
+                "agendas": [],
+            }
+
+        ot_n = cls.normalizar_ot_actividad(ot, area, carpeta)
+        if not ot_n:
+            return {
+                "valida": False,
+                "origen": "ot_vacia",
+                "ot": "",
+                "msg": MSG_OT_VACIA_WFM if cls.valida_ot_en_wfm(area) else MSG_OT_VACIA,
+                "agendas": [],
+            }
+
+        if cls.valida_ot_en_wfm(area):
+            # La validación de IM pasa por WFM (subsistema aparte, F5).
+            return {
+                "valida": True,
+                "origen": "wfm",
+                "ot": ot_n,
+                "msg": "",
+                "agendas": [],
+            }
+
+        agendas = cls._agendas_del_dia(empleado, fecha)
+        comparable = cls._texto_comparable(ot_n)
+        if any(cls._agenda_coincide_con_ot(a, comparable) for a in agendas):
+            return {
+                "valida": True,
+                "origen": "agenda",
+                "ot": ot_n,
+                "msg": "",
+                "agendas": [cls._agenda_a_dict(a) for a in agendas],
+            }
+        return {
+            "valida": False,
+            "origen": "agenda",
+            "ot": ot_n,
+            "msg": MSG_OT_NO_AGENDADA.format(ot=ot_n, cedula=cedula, fecha=fecha),
+            "agendas": [cls._agenda_a_dict(a) for a in agendas],
         }
 
     # ------------------------------------------------------------------ #
@@ -342,6 +454,21 @@ class ReporteFotograficoService:
         agenda = cls.validar_agenda_responsable(responsable, fecha, es_programacion)
         if not agenda["tiene_agenda"]:
             raise ValueError(agenda["msg"] or MSG_SIN_AGENDA)
+        # Match OT-específica (legacy `validarOtActividadTransporte`): si el
+        # reporte declara una OT, debe estar agendada para ese técnico/fecha.
+        validacion_ot = {
+            "agenda_origen": agenda.get("origen"),
+            "agenda_exenta": agenda.get("origen") == "area_exenta",
+            "ot": ot_actividad or "",
+        }
+        if ot_actividad:
+            check = cls.validar_agenda_ot(
+                responsable, fecha, ot_actividad, es_programacion
+            )
+            validacion_ot["ot_origen"] = check["origen"]
+            validacion_ot["ot_valida"] = check["valida"]
+            if not check["valida"]:
+                raise ValueError(check["msg"])
         # Duplicado (vehículo, fecha, técnico).
         if ReporteFotograficoVehiculo.objects.filter(
             vehiculo=vehiculo, fecha=fecha, responsable=responsable
@@ -364,11 +491,7 @@ class ReporteFotograficoService:
             fecha=fecha,
             hora=cls.ahora_local().time(),
             ot_actividad=ot_actividad or None,
-            validacion_ot={
-                "agenda_origen": agenda.get("origen"),
-                "agenda_exenta": agenda.get("origen") == "area_exenta",
-                "ot": ot_actividad or "",
-            },
+            validacion_ot=validacion_ot,
             location=location or None,
             observaciones=observaciones or "",
             creado_por=creador,

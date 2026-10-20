@@ -108,7 +108,8 @@ class ReporteFotograficoViewSet(GenericViewSet):
         request=None,
         responses={200: dict},
         description="Devuelve el gate de agenda del responsable para la fecha "
-                    "(hoy por defecto).",
+                    "(hoy por defecto). Si se envía `ot_actividad`, además "
+                    "valida el match OT-específica contra la agenda del día.",
     )
     @action(detail=False, methods=["post"], url_path="validar-agenda")
     def validar_agenda(self, request):
@@ -130,12 +131,25 @@ class ReporteFotograficoViewSet(GenericViewSet):
                 {"ok": False, "error": "Fecha inválida; use YYYY-MM-DD."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        es_programacion = ReporteFotograficoService.es_programacion(request.user)
         resultado = ReporteFotograficoService.validar_agenda_responsable(
             responsable,
             fecha,
-            es_programacion=ReporteFotograficoService.es_programacion(request.user),
+            es_programacion=es_programacion,
         )
         resultado["fecha"] = fecha
+
+        # Match OT-específica (pre-chequeo, solo si declara OT; el legacy la
+        # validaba en un endpoint aparte — controlador_fix 175).
+        ot_actividad = str(request.data.get("ot_actividad") or "").strip()
+        if ot_actividad:
+            check = ReporteFotograficoService.validar_agenda_ot(
+                responsable, fecha, ot_actividad, es_programacion=es_programacion
+            )
+            resultado["ot"] = check
+            resultado["tiene_agenda"] = resultado["tiene_agenda"] and check["valida"]
+            if not check["valida"]:
+                resultado["msg"] = check["msg"]
         return Response({"ok": True, "data": resultado})
 
     # ------------------------------------------------------------------ #

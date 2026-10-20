@@ -29,7 +29,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.empleados.models import Empleado
-from apps.operaciones.models import Actividad, Agenda
+from apps.operaciones.models import Actividad, ActividadDetalle, Agenda
 
 from .etl import convertidores as cv
 from .etl import normalizadores as nz
@@ -45,6 +45,7 @@ from .models import (
     JefeValidador,
     Novedad,
     PagoVehiculoMensual,
+    ReporteFotograficoVehiculo,
     ResidencialWfm,
     Salida,
     SalidaHistorial,
@@ -72,6 +73,7 @@ from .services import (
 )
 from .services.flota_service import COLUMNAS_CSV_BANCARIOS
 from .services.periodos import restar_meses
+from .services.reporte_fotografico_service import MSG_OT_VACIA, MSG_OT_VACIA_WFM
 from .services.vigencia import estado_vigencia
 
 
@@ -2669,6 +2671,210 @@ class ReporteFotograficoApiTests(TestCase):
         resp = self.api.get("/transporte/reportes-fotograficos/vehiculo-placa/?placa=API123")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["data"]["vehiculo"]["placa"], "API123")
+
+
+class ValidarAgendaOtTests(TestCase):
+    """Refinamiento B3 diferido: match OT-específica contra la agenda.
+
+    Port de ``validarOtActividadTransporte`` +
+    ``validarOtActividadAgendaTransporte``
+    (controlador_transporte_img_reporte_salida_fix.php 319–360 y 175–244).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        media = override_settings(
+            MEDIA_ROOT=tempfile.mkdtemp(prefix="transporte_test_agenda_ot_")
+        )
+        media.enable()
+        self.addCleanup(media.disable)
+        self.user = User.objects.create_user(username="2000001", password="x")
+        self.empleado = Empleado.objects.create(
+            cedula="2000001", codigo_sap="SAP-OT", nombre="TEC", apellido="OT",
+            password="", area="TRANSPORTE", carpeta="LOGISTICA", estado="ACTIVO",
+        )
+        self.vehiculo = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos("OT001")
+        )
+        self.fecha = date(2026, 10, 15)
+
+    def _agendar(self, ot="OT-77", detalle=None, observacion=""):
+        user, _ = User.objects.get_or_create(username="2000001")
+        actividad = Actividad.objects.create(responsable=user, ot=ot)
+        if detalle:
+            ActividadDetalle.objects.create(
+                actividad=actividad,
+                tipo_trabajo=detalle.get("tipo_trabajo", ""),
+                descripcion=detalle.get("descripcion", ""),
+            )
+        return Agenda.objects.create(
+            actividad=actividad, responsable=user,
+            fecha_inicio=self.fecha, fecha_fin=self.fecha, sede="MEDELLIN",
+            observacion=observacion or None,
+        )
+
+    def _validar(self, ot, **kwargs):
+        return ReporteFotograficoService.validar_agenda_ot(
+            self.empleado, self.fecha, ot, **kwargs
+        )
+
+    # --------------------------- reglas base --------------------------- #
+    def test_ot_agendada_valida(self):
+        self._agendar(ot="OT-77")
+        res = self._validar("OT-77")
+        self.assertTrue(res["valida"])
+        self.assertEqual(res["origen"], "agenda")
+        self.assertEqual(res["ot"], "OT-77")
+
+    def test_ot_no_agendada_rechaza_con_mensaje(self):
+        self._agendar(ot="OT-77")
+        res = self._validar("OT-999")
+        self.assertFalse(res["valida"])
+        self.assertIn("OT-999", res["msg"])
+        self.assertIn("2000001", res["msg"])
+
+    def test_comparacion_normalizada_mayusculas_y_espacios(self):
+        # transporteTextoComparableAgenda: mayúsculas + espacios colapsados.
+        self._agendar(ot="OT 77")
+        self.assertTrue(self._validar("  ot   77 ")["valida"])
+
+    def test_coincide_por_tipo_trabajo_del_detalle(self):
+        self._agendar(ot="OT-77", detalle={"tipo_trabajo": "MANTENIMIENTO PREVENTIVO"})
+        self.assertTrue(
+            self._validar("Mantenimiento   Preventivo")["valida"]
+        )
+
+    def test_coincide_por_descripcion_del_detalle(self):
+        self._agendar(
+            ot="OT-77", detalle={"tipo_trabajo": "X", "descripcion": "CAMBIO DE ACEITE"}
+        )
+        self.assertTrue(self._validar("CAMBIO DE ACEITE")["valida"])
+
+    def test_coincide_por_observacion_de_la_agenda(self):
+        self._agendar(ot="OT-77", observacion="REVISION DE FRENOS")
+        self.assertTrue(self._validar("REVISION DE FRENOS")["valida"])
+
+    def test_no_coincide_ot_agendada_en_otra_fecha(self):
+        user, _ = User.objects.get_or_create(username="2000001")
+        actividad = Actividad.objects.create(responsable=user, ot="OT-77")
+        Agenda.objects.create(
+            actividad=actividad, responsable=user,
+            fecha_inicio=self.fecha, fecha_fin=self.fecha, sede="MEDELLIN",
+            is_deleted=True,  # borrada ⇒ no cuenta
+        )
+        res = self._validar("OT-77")
+        self.assertFalse(res["valida"])
+
+    # ---------------------- áreas exentas / WFM ------------------------ #
+    def test_area_exenta_omite_la_validacion(self):
+        self.empleado.area = "OM"
+        self.empleado.carpeta = "CORRECTIVO"
+        self.empleado.save()
+        res = self._validar("OT-QUE-NO-EXISTE")
+        self.assertTrue(res["valida"])
+        self.assertEqual(res["origen"], "area_exenta")
+
+    def test_area_wfm_im_recibe_sin_validar(self):
+        # IM valida en WFM (subsistema aparte) ⇒ se recibe sin agendar.
+        self.empleado.area = "IM"
+        self.empleado.save()
+        res = self._validar("OT-77777")
+        self.assertTrue(res["valida"])
+        self.assertEqual(res["origen"], "wfm")
+
+    def test_ot_vacia_sin_area_wfm_exige_agenda(self):
+        res = self._validar("")
+        self.assertFalse(res["valida"])
+        self.assertEqual(res["msg"], MSG_OT_VACIA)
+
+    def test_ot_vacia_en_area_wfm_pide_ot_del_dia(self):
+        self.empleado.area = "IM"
+        self.empleado.save()
+        res = self._validar("   ")
+        self.assertFalse(res["valida"])
+        self.assertEqual(res["msg"], MSG_OT_VACIA_WFM)
+
+    # --------------------------- por guardar --------------------------- #
+    def test_guardar_rechaza_ot_no_agendada(self):
+        self._agendar(ot="OT-77")
+        with ReporteFotograficoTests._con_reloj(
+            ReporteFotograficoTests.RELOJ_OK
+        ):
+            with self.assertRaisesRegex(ValueError, "no está agendada"):
+                ReporteFotograficoService.guardar(
+                    vehiculo=self.vehiculo,
+                    responsable=self.empleado,
+                    imagenes=[ReporteFotograficoTests._imagen()],
+                    ot_actividad="OT-999",
+                    fecha=self.fecha,
+                )
+        self.assertEqual(
+            ReporteFotograficoVehiculo.objects.filter(vehiculo=self.vehiculo).count(), 0
+        )
+
+    def test_guardar_con_ot_agendada_registra_la_validacion(self):
+        self._agendar(ot="OT-77")
+        with ReporteFotograficoTests._con_reloj(
+            ReporteFotograficoTests.RELOJ_OK
+        ):
+            reporte = ReporteFotograficoService.guardar(
+                vehiculo=self.vehiculo,
+                responsable=self.empleado,
+                imagenes=[ReporteFotograficoTests._imagen()],
+                ot_actividad="ot-77",
+                fecha=self.fecha,
+            )
+        self.assertEqual(reporte.validacion_ot["ot_valida"], True)
+        self.assertEqual(reporte.validacion_ot["ot_origen"], "agenda")
+        self.assertEqual(reporte.ot_actividad, "ot-77")
+
+    def test_guardar_sin_ot_no_exige_match(self):
+        # Sin OT declarada el gate sigue siendo solo la agenda (no se endurece
+        # el comportamiento ya cerrado en B3).
+        self._agendar(ot="OT-77")
+        with ReporteFotograficoTests._con_reloj(
+            ReporteFotograficoTests.RELOJ_OK
+        ):
+            reporte = ReporteFotograficoService.guardar(
+                vehiculo=self.vehiculo,
+                responsable=self.empleado,
+                imagenes=[ReporteFotograficoTests._imagen()],
+                fecha=self.fecha,
+            )
+        self.assertNotIn("ot_valida", reporte.validacion_ot)
+
+    # ------------------------------ HTTP ------------------------------- #
+    def test_validar_agenda_http_con_ot(self):
+        self._agendar(ot="OT-77")
+        api = APIClient()
+        api.force_authenticate(user=self.user)
+        resp = api.post(
+            "/transporte/reportes-fotograficos/validar-agenda/",
+            {"fecha": "2026-10-15", "ot_actividad": "OT-999"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()["data"]
+        self.assertFalse(data["tiene_agenda"])
+        self.assertFalse(data["ot"]["valida"])
+        self.assertIn("OT-999", data["msg"])
+
+    def test_validar_agenda_http_ot_agendada(self):
+        self._agendar(ot="OT-77")
+        api = APIClient()
+        api.force_authenticate(user=self.user)
+        resp = api.post(
+            "/transporte/reportes-fotograficos/validar-agenda/",
+            {"fecha": "2026-10-15", "ot_actividad": "OT-77"},
+            format="json",
+        )
+        data = resp.json()["data"]
+        self.assertTrue(data["tiene_agenda"])
+        self.assertTrue(data["ot"]["valida"])
 
 
 class KioscoS3S4Tests(TestCase):

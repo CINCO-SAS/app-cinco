@@ -134,7 +134,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 
 | Métrica | Valor |
 |---|---|
-| Tests | **389 OK** (377 transporte + 12 `apps.common`; evolución 87 → 105 → 126 → 134 → 162 → 182 → 214 → 225 → 238 → 246 → 255 → 260 → 330 → 339 → 351 → 353 → 355 → 365 → 377 → 389) |
+| Tests | **405 OK** (393 transporte + 12 `apps.common`; evolución 87 → 105 → 126 → 134 → 162 → 182 → 214 → 225 → 238 → 246 → 255 → 260 → 330 → 339 → 351 → 353 → 355 → 365 → 377 → 389 → 405) |
 | Modelos Django | 16 (+ `0001_initial`–`0005`, choices, admin) |
 | Endpoints activos | 13 recursos router (`/conductores/`, `/vehiculos/`, `/parametros/cierres/`, `/parametros/jefes/`, `/liquidaciones/`, `/planillas/`, `/informes/`, `/salidas/`, `/kiosco/`, `/reportes-fotograficos/`, `/validaciones/`, `/wfm/`, `/permisos/`) + acciones (`catalogo-operativo`, `permisos/estado`, `resumen`, `documentos`, `importar-bancarios`, `qr.png`, `inactivar`×2, `pago-mensual`, `pronto-pago`, `sabana`, `consecutivo`, `pago`, `escanear`, `identificar`, `vehiculo/{placa}`, `validar`×3, `aprobar-lote`, `aprobar`, `rechazar`, `novedad`, `historial`, `export`, `cuenta-cobro`, `series-chart`, `mensual`, `areas`, `dia`, `area`, `areas-mes`, `nomina`, `liquidacion`, `generar`, `formato`, `validar-agenda`, `vehiculo-placa`, `wfm/validar`, `wfm/crear-job`, `wfm/estado-job`) |
 | Comandos CLI | `migrate_transporte_legacy` (ETL) · **`wfm_worker` (cola WFM)** |
@@ -189,9 +189,12 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
    commitea sin tocar Python. La tabla BD solo aporta decretar un festivo
    en caliente sin redeploy → `es_festivo = algoritmo ∪ catálogo ∪ BD`.
    *(B2, B3 y B4 ya cerrados; B1 de facto operativo.)*
-2. **Refinamientos B3 (diferidos)**: match OT-específica `validar_agenda_ot`
-   (→ junto al subsistema WFM/OT, F5) y ventana de días anteriores con
-   excepción en `programacion_parametros` (→ decisión ETL de esa tabla).
+2. **Refinamiento B3 #2 (diferido)**: ventana de días anteriores con
+   excepción en `programacion_parametros` (el legacy guarda
+   `{cedula, fecha_permitida}`; hoy el backend rechaza toda fecha pasada).
+   Requiere **decisión de diseño**: storage propio + CRUD con permiso
+   `puede_programar` + ETL de las excepciones existentes.
+   *El #1 (match OT-específica `validar_agenda_ot`) CERRÓ el 20-oct.*
 3. **G2 → Tramo C**: C1 migrate real (incluye migración 0006 de permisos) ·
    C2 auditorías y constraints (CR-3/CR-1/CR-2/D-A12) · C3 ETL con
    conciliación = 0 (DoD 201.000) · C4 validación con datos reales.
@@ -232,4 +235,5 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | 2026-10-19 | Refactor F5-7 (mejora sobre el legacy): claves de estado reales (`reportado`/`total`), RENTING separado de PROPIO, importes en `Decimal` (355 tests) | `76c140f` |
 | 2026-10-19 | E1 catálogo operativo + E3 PermisoService (cierra CR-8): `/vehiculos/catalogo-operativo/` (solo activos, semáforo en servidor) y `/permisos/estado/` (grupos/permisos en vez de cédulas, migración 0006) (365 tests) | `65c2709` |
 | 2026-10-19 | Calendario reutilizable (G1 parcial): `apps/common/festivos/` con el algoritmo + catálogo editable `festivos_colombia.json` (2022–2030); `es_festivo` = algoritmo ∪ catálogo (agregar festivo = editar JSON, sin código ni migración); shim en transporte (sin cambio de comportamiento); corrección del JSON de origen: San Pedro y San Pablo 2027 del lunes anterior al correcto 2027-07-05; +10 tests en `apps.common` (377 tests) | `6f3e837` |
-| 2026-10-19 | **P1 CERRADO**: formato físico F-104 en `POST /planillas/formato/`, verificado contra `planilla_salida.php` (LETTER horizontal, una hoja por vehículo, QR embebido en base64, casillas en blanco para firmas de salida/retorno). Mejoras sobre el legacy: fecha real (imprimía "16/02/2022" fijo), CONDUCTOR/TELÉFONO/VALOR DÍA reales (la consulta del legacy estaba comentada y salían vacíos), CONSECUTIVO impreso (§3.6) y sin código de barras (D-A8 lo eliminó); F5 al 100 %. +12 tests (389 tests) | *(este commit)* |
+| 2026-10-19 | **P1 CERRADO**: formato físico F-104 en `POST /planillas/formato/`, verificado contra `planilla_salida.php` (LETTER horizontal, una hoja por vehículo, QR embebido en base64, casillas en blanco para firmas de salida/retorno). Mejoras sobre el legacy: fecha real (imprimía "16/02/2022" fijo), CONDUCTOR/TELÉFONO/VALOR DÍA reales (la consulta del legacy estaba comentada y salían vacíos), CONSECUTIVO impreso (§3.6) y sin código de barras (D-A8 lo eliminó); F5 al 100 %. +12 tests (389 tests) | `7e00e26` |
+| 2026-10-20 | **Refinamiento B3 #1 CERRADO**: match OT-específica `validar_agenda_ot` (port de `validarOtActividadTransporte` + `validarOtActividadAgendaTransporte`, controlador_fix 319–360/175–244): la OT declarada debe coincidir exactamente (mayúsculas + espacios colapsados) con `actividad.ot`, `tipo_trabajo`, `descripcion` u `observacion` de una agenda no borrada del día; se aplica en `guardar()` y en el pre-chequeo `validar-agenda/`; áreas exentas y WFM/IM intactas y sin OT declarada no se endurece el gate ya cerrado. Queda el #2 (ventana de días anteriores con excepción). +16 tests (405 tests) | *(este commit)* |
