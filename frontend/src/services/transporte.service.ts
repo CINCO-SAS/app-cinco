@@ -1,0 +1,507 @@
+// src/services/transporte.service.ts
+//
+// Cliente HTTP del módulo Transporte. Un método por endpoint del backend
+// (apps/transporte/urls.py), con la URL exacta y el tipo de respuesta.
+//
+// Los nombres de los métodos replican los de DRF/`url_path` para que el
+// enlace backend ↔ front sea un espejo sin interpretación.
+
+import api from "@/lib/api";
+import type {
+  Conductor,
+  DatosBancariosVehiculo,
+  DocumentoVehiculo,
+  Mantenimiento,
+  Novedad,
+  RegistrarSalidaPayload,
+  RespuestaAccion,
+  ResultadoValidacionSalida,
+  Salida,
+  SalidaHistorial,
+  Vehiculo,
+  VehiculoListado,
+  VehiculoPayload,
+} from "@/types/transporte.types";
+
+// El prefijo es único en la app; centralizarlo evita divergencias.
+const BASE = "/transporte";
+
+/** Listado paginado de DRF: puede venir plano o envuelto en `{results}`. */
+export interface RespuestaPaginada<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+type ParamsBusqueda = Record<string, string | number | boolean | undefined>;
+
+/**
+ * DRF devuelve `[...]` o `{count, results}` según `pagination_class`.
+ * Normalizamos para que los consumidores siempre reciban `{results}`.
+ */
+const normalizarPagina = <T>(data: unknown): RespuestaPaginada<T> => {
+  if (Array.isArray(data)) {
+    return {
+      count: data.length,
+      next: null,
+      previous: null,
+      results: data as T[],
+    };
+  }
+  const envuelto = data as Partial<RespuestaPaginada<T>>;
+  return {
+    count: envuelto.count ?? envuelto.results?.length ?? 0,
+    next: envuelto.next ?? null,
+    previous: envuelto.previous ?? null,
+    results: envuelto.results ?? [],
+  };
+};
+
+export const transporteService = {
+  // ==========================================================================
+  // Conductores (F2) — transporte_base_conductores
+  // ==========================================================================
+
+  getConductores: async (params?: ParamsBusqueda): Promise<Conductor[]> => {
+    const res = await api.get(`${BASE}/conductores/`, { params });
+    return normalizarPagina<Conductor>(res.data).results;
+  },
+
+  getConductor: async (id: number): Promise<Conductor> => {
+    const res = await api.get(`${BASE}/conductores/${id}/`);
+    return res.data;
+  },
+
+  crearConductor: async (payload: Partial<Conductor>): Promise<Conductor> => {
+    const res = await api.post(`${BASE}/conductores/`, payload);
+    return res.data;
+  },
+
+  actualizarConductor: async (
+    id: number,
+    payload: Partial<Conductor>,
+  ): Promise<Conductor> => {
+    const res = await api.put(`${BASE}/conductores/${id}/`, payload);
+    return res.data;
+  },
+
+  /** Baja lógica (el legacy borraba el registro y perdía el historial). */
+  inactivarConductor: async (id: number): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/conductores/${id}/inactivar/`);
+    return res.data;
+  },
+
+  // ==========================================================================
+  // Vehículos / Flota (F2) — transportadores_vehiculos
+  // ==========================================================================
+
+  /**
+   * Listado completo (`VehiculoListSerializer`), apto para la tabla de flota.
+   * Acepta `?search=` (DRF SearchFilter) y los filtros del viewset.
+   */
+  getVehiculos: async (
+    params?: ParamsBusqueda,
+  ): Promise<VehiculoListado[]> => {
+    const res = await api.get(`${BASE}/vehiculos/`, { params });
+    return normalizarPagina<VehiculoListado>(res.data).results;
+  },
+
+  getVehiculo: async (id: number): Promise<Vehiculo> => {
+    const res = await api.get(`${BASE}/vehiculos/${id}/`);
+    return res.data;
+  },
+
+  crearVehiculo: async (payload: VehiculoPayload): Promise<Vehiculo> => {
+    const res = await api.post(`${BASE}/vehiculos/`, payload);
+    return res.data;
+  },
+
+  actualizarVehiculo: async (
+    id: number,
+    payload: Partial<VehiculoPayload>,
+  ): Promise<Vehiculo> => {
+    const res = await api.put(`${BASE}/vehiculos/${id}/`, payload);
+    return res.data;
+  },
+
+  inactivarVehiculo: async (id: number): Promise<RespuestaAccion> => {
+    const res = await api.delete(`${BASE}/vehiculos/${id}/`);
+    return res.data;
+  },
+
+  /**
+   * E1 — catálogo operativo que reemplaza `get_vehiculos_transp`.
+   * El semáforo SOAT/CDA viene calculado EN SERVIDOR (no aritmética en JS).
+   */
+  getCatalogoOperativo: async (): Promise<VehiculoListado[]> => {
+    const res = await api.get(`${BASE}/vehiculos/catalogo-operativo/`);
+    return normalizarPagina<VehiculoListado>(res.data).results;
+  },
+
+  /** T8: ficha de un vehículo con sus documentos, bancarios y mantenimientos. */
+  getResumenVehiculo: async (id: number): Promise<VehiculoResumen> => {
+    const res = await api.get(`${BASE}/vehiculos/${id}/resumen/`);
+    return res.data;
+  },
+
+  /** T2: sube un documento (SOAT/CDA/matrícula/foto). Multipart. */
+  subirDocumentoVehiculo: async (
+    id: number,
+    formData: FormData,
+  ): Promise<DocumentoVehiculo> => {
+    const res = await api.post(`${BASE}/vehiculos/${id}/documentos/`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return res.data;
+  },
+
+  /** T3: importa datos bancarios (JSON `datos.bancarios[]` del legacy). */
+  importarBancarios: async (
+    payload: { vehiculo: number; bancarios: Partial<DatosBancariosVehiculo>[] },
+  ): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/vehiculos/importar-bancarios/`, payload);
+    return res.data;
+  },
+
+  /** T5: URL del PNG del código QR (codifica la placa, D-A8). */
+  urlQrVehiculo: (id: number): string => `${BASE}/vehiculos/${id}/qr.png/`,
+
+  // ==========================================================================
+  // Salidas (F3/B2 + F4/B4) — transporte_registro_salida
+  // ==========================================================================
+
+  /**
+   * B1: listado de salidas. Acepta `?fecha=`, `?desde=`, `?hasta=`,
+   * `?estado=`, `?area=`, `?vehiculo=` y `?search=`.
+   */
+  getSalidas: async (params?: ParamsBusqueda): Promise<Salida[]> => {
+    const res = await api.get(`${BASE}/salidas/`, { params });
+    return normalizarPagina<Salida>(res.data).results;
+  },
+
+  getSalida: async (id: number): Promise<Salida> => {
+    const res = await api.get(`${BASE}/salidas/${id}/`);
+    return res.data;
+  },
+
+  /**
+   * S6: alta de salida. El contrato conserva los nombres legacy del form
+   * (`movil_sale`, `cc_asignada`) para que el kiosco sea reconocible.
+   */
+  registrarSalida: async (payload: RegistrarSalidaPayload): Promise<Salida> => {
+    const res = await api.post(`${BASE}/salidas/`, payload);
+    return res.data;
+  },
+
+  /** B5: baja lógica (estado ELIMINADO; el registro se conserva). */
+  eliminarSalida: async (id: number): Promise<RespuestaAccion> => {
+    const res = await api.delete(`${BASE}/salidas/${id}/`);
+    return res.data;
+  },
+
+  /** B12: validación masiva de salidas REPORTADO. */
+  aprobarLote: async (ids: number[]): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/salidas/aprobar-lote/`, { ids });
+    return res.data;
+  },
+
+  /** B4: aprobación individual (REPORTADO → APROBADO). */
+  aprobarSalida: async (id: number): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/salidas/${id}/aprobar/`);
+    return res.data;
+  },
+
+  /** B13: rechazo con motivo OBLIGATORIO (el backend lo exige). */
+  rechazarSalida: async (id: number, motivo: string): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/salidas/${id}/rechazar/`, { motivo });
+    return res.data;
+  },
+
+  /** D-A11: cierre de validación individual (APROBADO → VALIDADO). */
+  validarSalida: async (id: number): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/salidas/${id}/validar/`);
+    return res.data;
+  },
+
+  /** B6/B7: alta o borrado de novedad (ADICIONAL/DESCUENTO; una por salida). */
+  guardarNovedad: async (
+    id: number,
+    payload: { tipo: string; valor: string; descripcion: string },
+  ): Promise<Novedad> => {
+    const res = await api.post(`${BASE}/salidas/${id}/novedad/`, payload);
+    return res.data;
+  },
+
+  eliminarNovedad: async (id: number): Promise<RespuestaAccion> => {
+    const res = await api.delete(`${BASE}/salidas/${id}/novedad/`);
+    return res.data;
+  },
+
+  /** §7.2: trazabilidad 1:N (reemplaza el JSON `historial` longtext). */
+  getHistorialSalida: async (id: number): Promise<SalidaHistorial[]> => {
+    const res = await api.get(`${BASE}/salidas/${id}/historial/`);
+    return normalizarPagina<SalidaHistorial>(res.data).results;
+  },
+
+  /** Exporta el listado filtrado (blob, para descarga directa). */
+  exportarSalidas: async (params?: ParamsBusqueda): Promise<Blob> => {
+    const res = await api.get(`${BASE}/salidas/export/`, {
+      params,
+      responseType: "blob",
+    });
+    return res.data as Blob;
+  },
+
+  // ==========================================================================
+  // Kiosco (S1–S6) — consulta en terminal
+  // ==========================================================================
+
+  /** S1/S4: identifica vehículo por placa o por contenido del QR. */
+  escanearQr: async (contenido: string): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/kiosco/escanear/`, { contenido });
+    return res.data;
+  },
+
+  /** Alias de compatibilidad con el form legacy del kiosco. */
+  identificarVehiculo: async (payload: {
+    placa?: string;
+    qr?: string;
+  }): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/kiosco/identificar/`, payload);
+    return res.data;
+  },
+
+  getVehiculoKiosco: async (placa: string): Promise<RespuestaAccion> => {
+    const res = await api.get(`${BASE}/kiosco/vehiculo/${encodeURIComponent(placa)}/`);
+    return res.data;
+  },
+
+  /** S3: pre-chequeo de fecha/vehículo/móvil ANTES del alta S6. */
+  validarKiosco: async (payload: {
+    fecha: string;
+    vehiculo: number;
+    movil_sale?: string;
+  }): Promise<ResultadoValidacionSalida> => {
+    const res = await api.post(`${BASE}/kiosco/validar/`, payload);
+    return res.data;
+  },
+
+  // ==========================================================================
+  // Reporte fotográfico (F3/B3)
+  // ==========================================================================
+
+  guardarReporteFotografico: async (payload: unknown): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/reportes-fotograficos/`, payload);
+    return res.data;
+  },
+
+  /** B3 #1: pre-chequeo de OT-específica contra la agenda del día. */
+  validarAgendaReporte: async (payload: {
+    fecha: string;
+    ot_actividad?: string;
+  }): Promise<ResultadoValidacionSalida> => {
+    const res = await api.post(`${BASE}/reportes-fotograficos/validar-agenda/`, payload);
+    return res.data;
+  },
+
+  getVehiculoPorPlaca: async (placa: string): Promise<Vehiculo> => {
+    const res = await api.get(`${BASE}/reportes-fotograficos/vehiculo-placa/`, {
+      params: { placa },
+    });
+    return res.data;
+  },
+
+  // ==========================================================================
+  // Informes (F5) — tablero de gestión
+  // ==========================================================================
+
+  getInformeCuentaCobro: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/informes/cuenta-cobro/`, { params });
+    return res.data;
+  },
+
+  getSeriesChart: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/informes/series-chart/`, { params });
+    return res.data;
+  },
+
+  getInformeMensual: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/informes/mensual/`, { params });
+    return res.data;
+  },
+
+  getInformeDia: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/informes/dia/`, { params });
+    return res.data;
+  },
+
+  getInformeAreas: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/informes/areas/`, { params });
+    return res.data;
+  },
+
+  getInformeArea: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/informes/area/`, { params });
+    return res.data;
+  },
+
+  getInformeAreasMes: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/informes/areas-mes/`, { params });
+    return res.data;
+  },
+
+  getInformeNomina: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/informes/nomina/`, { params });
+    return res.data;
+  },
+
+  getInformeLiquidacion: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/informes/liquidacion/`, { params });
+    return res.data;
+  },
+
+  // ==========================================================================
+  // Liquidaciones / sábanas (A2)
+  // ==========================================================================
+
+  getLiquidaciones: async (params?: ParamsBusqueda): Promise<unknown[]> => {
+    const res = await api.get(`${BASE}/liquidaciones/`, { params });
+    return normalizarPagina<unknown>(res.data).results;
+  },
+
+  getSabana: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/liquidaciones/sabana/`, { params });
+    return res.data;
+  },
+
+  getPagoMensual: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/liquidaciones/pago-mensual/`, { params });
+    return res.data;
+  },
+
+  getProntoPago: async (params: ParamsBusqueda): Promise<unknown> => {
+    const res = await api.get(`${BASE}/liquidaciones/pronto-pago/`, { params });
+    return res.data;
+  },
+
+  /** D3: genera el consecutivo del período (atómico en servidor). */
+  generarConsecutivo: async (payload: {
+    mes: number;
+    anio: number;
+  }): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/liquidaciones/consecutivo/`, payload);
+    return res.data;
+  },
+
+  /** D3: registra el pago del período (queda cerrado). */
+  registrarPago: async (payload: {
+    mes: number;
+    anio: number;
+  }): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/liquidaciones/pago/`, payload);
+    return res.data;
+  },
+
+  // ==========================================================================
+  // Planillas (F5-6) — Planilla Oficial de Salida F-104
+  // ==========================================================================
+
+  /**
+   * S5/CR-11: genera la planilla con consecutivo atómico y QR en disco.
+   * `alcance`: PLACA | PROPIO | EXTERNO | RENTING | TODAS.
+   */
+  generarPlanilla: async (payload: {
+    fecha: string;
+    alcance: string;
+  }): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/planillas/generar/`, payload);
+    return res.data;
+  },
+
+  /** P1: HTML imprimible de la hoja de vehículo (F-104). */
+  getFormatoPlanilla: async (payload: {
+    fecha: string;
+    alcance?: string;
+  }): Promise<string> => {
+    const res = await api.post(`${BASE}/planillas/formato/`, payload);
+    return typeof res.data === "string" ? res.data : (res.data?.html ?? "");
+  },
+
+  // ==========================================================================
+  // Parámetros (A1)
+  // ==========================================================================
+
+  getCierres: async (params?: ParamsBusqueda): Promise<unknown[]> => {
+    const res = await api.get(`${BASE}/parametros/cierres/`, { params });
+    return normalizarPagina<unknown>(res.data).results;
+  },
+
+  getJefesValidadores: async (params?: ParamsBusqueda): Promise<unknown[]> => {
+    const res = await api.get(`${BASE}/parametros/jefes/`, { params });
+    return normalizarPagina<unknown>(res.data).results;
+  },
+
+  // ==========================================================================
+  // Validaciones de cierre mensual (F4)
+  // ==========================================================================
+
+  getValidaciones: async (params?: ParamsBusqueda): Promise<unknown[]> => {
+    const res = await api.get(`${BASE}/validaciones/`, { params });
+    return normalizarPagina<unknown>(res.data).results;
+  },
+
+  // ==========================================================================
+  // WFM (F5-5)
+  // ==========================================================================
+
+  validarWfm: async (payload: unknown): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/wfm/validar/`, payload);
+    return res.data;
+  },
+
+  crearJobWfm: async (payload: unknown): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/wfm/crear-job/`, payload);
+    return res.data;
+  },
+
+  estadoJobWfm: async (payload: { job_id: number }): Promise<RespuestaAccion> => {
+    const res = await api.post(`${BASE}/wfm/estado-job/`, payload);
+    return res.data;
+  },
+
+  // ==========================================================================
+  // Permisos (E3/CR-8) — reemplaza las cédulas hardcodeadas del legacy
+  // ==========================================================================
+
+  /**
+   * Estado de permisos del usuario actual (`puede_programar`,
+   * `permiso_especial`, `editar_tras_cierre`).
+   */
+  getEstadoPermisos: async (): Promise<EstadoPermisos> => {
+    const res = await api.get(`${BASE}/permisos/estado/`);
+    return res.data;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Tipos derivados de respuestas que no tienen modelo propio en el front
+// ---------------------------------------------------------------------------
+
+/** Ficha de vehículo (acción `resumen`): vehículo + colecciones anidadas. */
+export interface VehiculoResumen {
+  vehiculo: Vehiculo;
+  documentos: DocumentoVehiculo[];
+  datos_bancarios: DatosBancariosVehiculo[];
+  mantenimientos: Mantenimiento[];
+}
+
+/** Permisos granulares del usuario (CR-8). */
+export interface EstadoPermisos {
+  puede_programar: boolean;
+  permiso_especial: boolean;
+  editar_tras_cierre: boolean;
+  es_superuser: boolean;
+}
+
+export default transporteService;

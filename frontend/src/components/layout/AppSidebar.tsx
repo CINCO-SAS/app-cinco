@@ -40,6 +40,15 @@ const defaultNavItems: NavItem[] = [
     ],
   },
   {
+    name: "Transporte",
+    subItems: [
+      {
+        name: "Flota Vehicular",
+        path: "/transporte/flota",
+      },
+    ],
+  },
+  {
     name: "RRHH",
     subItems: [
       {
