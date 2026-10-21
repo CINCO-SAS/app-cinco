@@ -54,6 +54,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.empleados.models import Empleado
@@ -431,8 +432,8 @@ class SalidaService:
         estado explícitamente (incluido ELIMINADO).
         """
         queryset = Salida.objects.select_related(
-            "vehiculo", "conductor", "tecnico_asignado", "novedad"
-        )
+            "vehiculo", "conductor", "novedad"
+        ).prefetch_related("tecnico_asignado")
 
         desde = (query_params.get("desde") or "").strip()
         if desde:
@@ -456,7 +457,16 @@ class SalidaService:
 
         conductor = (query_params.get("conductor") or "").strip()
         if conductor:
-            queryset = queryset.filter(conductor_id=int(conductor))
+            if conductor.isdigit():
+                queryset = queryset.filter(conductor_id=int(conductor))
+            else:
+                # Mismo trato que `vehiculo`: el filtro también acepta texto
+                # (cédula o nombre de quien sale). Antes aquí iba un `int()`
+                # crudo, y `?conductor=JUAN` terminaba en ValueError → 500.
+                queryset = queryset.filter(
+                    Q(conductor__cedula__icontains=conductor)
+                    | Q(conductor__nombre_completo__icontains=conductor)
+                )
 
         area = (query_params.get("area") or "").strip()
         if area:
@@ -464,8 +474,6 @@ class SalidaService:
 
         search = (query_params.get("search") or "").strip()
         if search:
-            from django.db.models import Q
-
             queryset = queryset.filter(
                 Q(vehiculo__placa__icontains=search)
                 | Q(conductor__cedula__icontains=search)
@@ -480,8 +488,8 @@ class SalidaService:
     def obtener(salida_id):
         """Salida con relaciones; ValueError si no existe."""
         salida = Salida.objects.select_related(
-            "vehiculo", "conductor", "tecnico_asignado"
-        ).filter(pk=salida_id).first()
+            "vehiculo", "conductor", "novedad"
+        ).prefetch_related("tecnico_asignado").filter(pk=salida_id).first()
         if salida is None:
             raise ValueError("No existe la salida %s." % salida_id)
         return salida
@@ -503,7 +511,20 @@ class SalidaService:
         ids = list(dict.fromkeys(ids))
         if not ids:
             raise ValueError("Debe indicar al menos una salida.")
-        salidas = Salida.objects.select_for_update().filter(pk__in=ids)
+        # Las relaciones se TRAEN aparte (prefetch) y no con select_related:
+        # este queryset va con select_for_update y un JOIN ensancharía los
+        # candados a conductor/vehiculo dentro de la transacción.
+        #
+        # Sin esto, la respuesta B12 serializa N filas y cae en N+1; el
+        # `tecnico_asignado` es además cross-DB (azul), así que sería un
+        # round-trip por fila hacia OTRA base de datos.
+        salidas = (
+            Salida.objects.select_for_update()
+            .filter(pk__in=ids)
+            .prefetch_related(
+                "vehiculo", "conductor", "novedad", "tecnico_asignado"
+            )
+        )
         if len(salidas) != len(ids):
             raise ValueError("Algunas de las salidas indicadas no existen.")
         return [

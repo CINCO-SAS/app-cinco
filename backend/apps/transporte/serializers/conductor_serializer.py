@@ -54,7 +54,16 @@ class ConductorSerializer(serializers.ModelSerializer):
 
 
 class ConductorListSerializer(serializers.ModelSerializer):
-    """Vista compacta para listados (sin campos derivados pesados)."""
+    """
+    Vista compacta para listados (sin campos derivados pesados).
+
+    Incluye `estado_licencia` (barato: una resta de fechas) porque la tabla
+    pinta el semáforo de licencia y la regla §5.3 vive EN EL SERVIDOR — mismo
+    criterio que `VehiculoListSerializer` con SOAT/CDA. El `edad` completo
+    solo en el detalle.
+    """
+
+    estado_licencia = serializers.SerializerMethodField()
 
     class Meta:
         model = Conductor
@@ -66,5 +75,9 @@ class ConductorListSerializer(serializers.ModelSerializer):
             "tipo_vinculacion",
             "licencia_categoria",
             "licencia_vencimiento",
+            "estado_licencia",
             "activo",
         ]
+
+    def get_estado_licencia(self, obj):
+        return ConductorService.estado_licencia(obj.licencia_vencimiento)

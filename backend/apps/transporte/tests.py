@@ -1986,6 +1986,270 @@ class SalidaServiceTests(TestCase):
         encontradas = SalidaService.listar({"search": "kia002"})
         self.assertEqual(list(encontradas), [otro])
 
+    def test_listar_filtro_conductor_no_reventa_con_texto(self):
+        """REGRESIÓN (2026-10-21): `?conductor=` iba a un `int()` crudo.
+
+        `GET /salidas/?conductor=JUAN` levantaba
+        `ValueError: invalid literal for int() with base 10: 'JUAN'` → 500.
+        `?vehiculo=` ya distinguía pk/placa; `conductor` ahora hace lo mismo.
+
+        NOTA: si viene todo numérico se sigue interpretando como **pk** (es el
+        contrato documentado). Para buscar por CÉDULA de quien sale está
+        `?search=`, que ya cubre cédula y nombre.
+        """
+        salida = self._salida(conductor=self.conductor)
+        self._salida(
+            vehiculo=self.vehiculo2, fecha=self.hoy + timedelta(days=1)
+        )
+
+        # pk numérico → FK.
+        self.assertEqual(
+            [
+                s.pk
+                for s in SalidaService.listar(
+                    {"conductor": str(self.conductor.pk)}
+                )
+            ],
+            [salida.pk],
+        )
+        # Texto no numérico → nombre de quien sale (antes: ValueError → 500).
+        self.assertEqual(
+            [
+                s.pk
+                for s in SalidaService.listar({"conductor": "externo"})
+            ],
+            [salida.pk],
+        )
+        # Texto sin coincidencia → 0 filas, no excepción.
+        self.assertEqual(
+            list(SalidaService.listar({"conductor": "JUAN"})), []
+        )
+
+    def test_listar_no_hace_join_cross_database(self):
+        """REGRESIÓN (2026-10-20): `tecnico_asignado` → Empleado, que vive en
+        la BD `azul`. `select_related` genera un JOIN que Django no puede
+        emitir contra `default` y MySQL responde
+        `(1146, "Table 'db_cincosas.cinco_base_de_personal' doesn't exist")`
+        → `GET /salidas/` y `/salidas/{id}/` devolvían 500.
+
+        En tests el router está desactivado y todo comparte una SQLite, por
+        eso los tests de suite no lo veían: solo explotaba contra MySQL real.
+        El contrato es prefetch (query aparte, 1 por listado) y no JOIN.
+        """
+        self._salida()
+
+        # `query.select_related` es `False` (no dict) cuando está vacío.
+        rel = SalidaService.listar({}).query.select_related
+        campos = set(rel) if isinstance(rel, dict) else set()
+        self.assertNotIn(
+            "tecnico_asignado",
+            campos,
+            "listar() debe usar prefetch_related('tecnico_asignado'), no "
+            f"select_related (JOIN cross-BD contra azul). Actual: {rel}",
+        )
+
+        # obtener() devuelve la instancia con el FK ya resuelto: acceder no
+        # debe emitir ninguna query (si volviera a select_related, aquí
+        # reventaría contra MySQL aunque en SQLite pase desapercibido).
+        salida = self._salida(tecnico_asignado=self.personal)
+        obtenida = SalidaService.obtener(salida.pk)
+        with self.assertNumQueries(0):
+            self.assertEqual(obtenida.tecnico_asignado.cedula, self.personal.cedula)
+
+    def test_listar_y_obtener_acceden_tecnico_sin_n_mas_uno(self):
+        """El prefetch debe resolver el FK cross-BD en 1 query extra."""
+        self._salida(tecnico_asignado=self.personal)
+
+        # 1 de la lista + 1 del prefetch de tecnico_asignado.
+        with self.assertNumQueries(2):
+            salidas = list(SalidaService.listar({}))
+            # Acceder al objeto precargado NO emite otra query.
+            self.assertEqual(salidas[0].tecnico_asignado.cedula, self.personal.cedula)
+
+        # obtener() es de 1 sola fila, también resuelto por el prefetch.
+        with self.assertNumQueries(2):
+            salida = SalidaService.obtener(salidas[0].pk)
+            self.assertEqual(salida.tecnico_asignado.cedula, self.personal.cedula)
+
+    def test_serializer_expone_detalle_de_personas(self):
+        """Las columnas de la tabla B1 pintan PERSONAS, no PKs.
+
+        `conductor_detalle` = legacy `movil_sale` (quién SALE) y
+        `tecnico_asignado_detalle` = legacy `cc_asignada` (móvil de nómina).
+        Ambos comparten la MISMA forma `{nombre, cedula}` para que el front
+        tenga un solo shape, y devuelven `None` cuando no hay persona —
+        así la tabla pinta '—' / 'Disponible' sin ramas extra.
+        """
+        from .serializers.salida_serializer import SalidaSerializer
+
+        completa = self._salida(
+            conductor=self.conductor, tecnico_asignado=self.personal
+        )
+        datos = SalidaSerializer(completa).data
+        self.assertEqual(
+            datos["conductor_detalle"],
+            {"nombre": "LUIS EXTERNO", "cedula": "777888999"},
+        )
+        # Empleado guarda nombre y apellido SEPARADOS: el detalle los compone.
+        self.assertEqual(
+            datos["tecnico_asignado_detalle"],
+            {"nombre": "MARIA GOMEZ", "cedula": "1234567890"},
+        )
+
+        # Sin personas → null (no {}), para que el front pueda usar `??`.
+        vacia = self._salida(
+            vehiculo=self.vehiculo2,
+            fecha=self.hoy + timedelta(days=1),
+            es_disponible=True,
+        )
+        datos_vacios = SalidaSerializer(vacia).data
+        self.assertIsNone(datos_vacios["conductor_detalle"])
+        self.assertIsNone(datos_vacios["tecnico_asignado_detalle"])
+
+    def test_serializer_expone_novedad_detalle(self):
+        """B6/B7 · `novedad_detalle` evita el borrado a ciegas.
+
+        `valor_novedad` dice CUÁNTO pero no QUÉ era ni POR QUÉ: sin este
+        detalle el front solo podría borrar sin ver, o pedirle al jefe que se
+        acuerde del motivo que escribió hace semanas. Devuelve `None` cuando
+        no hay novedad, igual que los otros `*_detalle` (para usar `??`).
+        """
+        from decimal import Decimal
+
+        from .models import Novedad, TipoNovedad
+        from .serializers.salida_serializer import SalidaSerializer
+
+        con_novedad = self._salida(
+            vehiculo=self.vehiculo,
+            fecha=self.hoy,
+            conductor=self.conductor,
+        )
+        Novedad.objects.create(
+            salida=con_novedad,
+            tipo=TipoNovedad.DESCUENTO,
+            valor=Decimal("15000"),
+            descripcion="Espera de 40 minutos en bodega",
+        )
+        datos = SalidaSerializer(con_novedad).data
+        # `DecimalField(decimal_places=2)` NO fija 2 decimales en la salida:
+        # usa `quantize` con ROUND_HALF_UP, que traeo los ceros y deja '15000'.
+        self.assertEqual(
+            datos["novedad_detalle"],
+            {
+                "tipo": "DESCUENTO",
+                "valor": "15000",
+                "descripcion": "Espera de 40 minutos en bodega",
+            },
+        )
+        # El total B10 ya descuenta: una sola implementación del cálculo.
+        # Se compara como número (no como cadena) porque el formato depende
+        # de si el Decimal viene de BD (con escala) o de memoria (sin ella).
+        self.assertEqual(Decimal(datos["valor_novedad"]), Decimal("15000"))
+
+        sin_novedad = self._salida(
+            vehiculo=self.vehiculo2,
+            fecha=self.hoy + timedelta(days=1),
+            es_disponible=True,
+        )
+        self.assertIsNone(SalidaSerializer(sin_novedad).data["novedad_detalle"])
+
+    def test_aprobar_masivo_serializa_sin_n_mas_uno(self):
+        """REGRESIÓN (2026-10-21): `POST /salidas/aprobar-lote/` (B12) devuelve
+        N filas serializadas con las relaciones SIN precargar → 1 query por
+        fila aprobada. Con `tecnico_asignado` era peor: un round-trip por fila
+        hacia **otra base de datos** (azul).
+
+        Contrato: el nº de queries de la respuesta NO crece con el nº de filas.
+        """
+        from django.test.utils import CaptureQueriesContext
+
+        from .serializers.salida_serializer import SalidaSerializer
+
+        def medir(n):
+            salidas = [
+                self._salida(
+                    fecha=self.hoy - timedelta(days=d),
+                    conductor=self.conductor,
+                    tecnico_asignado=self.personal,
+                )
+                for d in range(n)
+            ]
+            aprobadas = SalidaService.aprobar_masivo(
+                [s.pk for s in salidas], usuario=self.jefe
+            )
+            contexto = {"request": type("R", (), {"user": None})()}
+            with CaptureQueriesContext(connection) as capturadas:
+                SalidaSerializer(
+                    aprobadas, many=True, context=contexto
+                ).data
+            return len(capturadas.captured_queries)
+
+        self.assertEqual(
+            medir(1),
+            medir(4),
+            "aprobar-lote hace N+1: serializar 4 filas debe costar lo mismo "
+            "que serializar 1 (vehiculo/conductor/novedad/tecnico_asignado "
+            "van con prefetch_related).",
+        )
+
+    def test_admin_search_fields_no_cruzan_base_externa(self):
+        """REGRESIÓN (2026-10-21): `SalidaAdmin.search_fields` incluía
+        ``tecnico_asignado__cedula`` -> ``Empleado``, que vive en **azul**
+        (``managed=False``, ``db_table='cinco_base_de_personal'``).
+
+        Un lookup con ``__`` en ``search_fields`` genera un JOIN que Django
+        no puede emitir contra ``default``; MySQL responde
+        ``(1146, "Table 'db_cincosas.cinco_base_de_personal' doesn't exist")``
+        y la caja de búsqueda del admin devolvía 500.
+
+        OJO: en tests el router está desactivado, así que ``db_for_read()``
+        devuelve siempre ``default`` y NO sirve para detectarlo. Se detecta
+        por ``Meta.managed=False``, que es como están declaradas las 8
+        tablas externas de este proyecto (empleados, operaciones, common).
+        """
+        from django.apps import apps as django_apps
+        from django.contrib import admin as django_admin
+
+        externos = {
+            m._meta.label_lower
+            for m in django_apps.get_models()
+            if not m._meta.managed
+        }
+        # Empleado es la tabla externa que originó la regresión.
+        self.assertIn("empleados.empleado", externos)
+
+        violaciones = []
+        for modelo in django_apps.get_models():
+            if modelo._meta.app_label != "transporte":
+                continue
+            registro = django_admin.site._registry.get(modelo)
+            if registro is None:
+                continue
+            for campo in registro.search_fields or ():
+                tramos = campo.split("__")
+                actual = modelo
+                for tramo in tramos[:-1]:  # el último es el valor, no FK
+                    try:
+                        relacion = actual._meta.get_field(tramo)
+                    except Exception:
+                        break
+                    remoto = getattr(relacion, "related_model", None)
+                    if remoto is None:
+                        break
+                    if remoto._meta.label_lower in externos:
+                        violaciones.append(
+                            f"{modelo._meta.label}.{campo} -> {remoto._meta.label}"
+                        )
+                        break
+                    actual = remoto
+
+        self.assertEqual(
+            violaciones,
+            [],
+            "search_fields NO debe atravesar modelos externos (managed=False): "
+            f"{violaciones}. Usa un campo snapshot local en su lugar.",
+        )
+
     # ------------------------------- kiosco ------------------------------ #
     def test_escanear_resuelve_qr_a_vehiculo_y_salida_del_dia(self):
         SalidaService.registrar_salida(self._datos(), usuario=self.operador)
@@ -2671,6 +2935,115 @@ class ReporteFotograficoApiTests(TestCase):
         resp = self.api.get("/transporte/reportes-fotograficos/vehiculo-placa/?placa=API123")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["data"]["vehiculo"]["placa"], "API123")
+
+    # --------------------------- consulta (backoffice) ------------------- #
+    def _salida(self, vehiculo, fecha, estado=EstadoSalida.REPORTADO):
+        return Salida.objects.create(
+            vehiculo=vehiculo,
+            fecha_salida=fecha,
+            area="OPERACIONES", carpeta="LOGISTICA", sede="MEDELLIN",
+            valor_dia=Decimal("85000"), estado=estado,
+        )
+
+    def _crear_reporte(self):
+        with ReporteFotograficoTests._con_reloj(self.RELOJ_OK):
+            resp = self.api.post(
+                "/transporte/reportes-fotograficos/",
+                {"placa": "API123", "imagenes": [ReporteFotograficoTests._imagen()]},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        return resp.json()["data"]
+
+    def test_list_pagina_y_trae_imagenes(self):
+        """`GET /reportes-fotograficos/` debe responder y paginar.
+
+        Sin `pagination_class` declarado `self.paginator` es `None`
+        (el proyecto no fija `DEFAULT_PAGINATION_CLASS`) y la respuesta
+        revienta con `AssertionError` → HTTP 500.
+        """
+        self._crear_reporte()
+
+        resp = self.api.get("/transporte/reportes-fotograficos/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        cuerpo = resp.json()
+        # Contrato paginado que ya consume `normalizarPagina` en el front.
+        self.assertEqual(cuerpo["count"], 1)
+        fila = cuerpo["results"][0]
+        self.assertEqual(fila["placa"], "API123")
+        self.assertEqual(len(fila["imagenes"]), 1)
+        self.assertEqual(fila["responsable_cedula"], "1000002")
+
+    def test_list_filtra_por_placa_y_por_fechas(self):
+        self._crear_reporte()
+        otro = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos("OTR456")
+        )
+        self._salida(otro, self.RELOJ_OK.date())
+
+        resp = self.api.get("/transporte/reportes-fotograficos/", {"vehiculo": "API123"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["count"], 1)
+
+        # Rango que excluye el reporte (creado el día de RELOJ_OK).
+        fuera_de_rango = self.api.get(
+            "/transporte/reportes-fotograficos/",
+            {"desde": "1990-01-01", "hasta": "1990-01-02"},
+        )
+        self.assertEqual(fuera_de_rango.json()["count"], 0)
+
+    def test_list_busca_por_placa_ot_y_responsable(self):
+        """Una sola pantalla de búsqueda que cubre AMBOS orígenes.
+
+        `search` toca placa/OT (transporte) y cédula/nombre (azul). Si se
+        intentara con un solo `select_related` cruzado, MySQL rechazaría el
+        JOIN; `listar()` resuelve primero los PKs de azul y compara por id.
+        """
+        self._crear_reporte()
+
+        for termino in ("API123", "1000002", "API TEST", "api"):
+            with self.subTest(termino=termino):
+                resp = self.api.get(
+                    "/transporte/reportes-fotograficos/", {"search": termino}
+                )
+                self.assertEqual(resp.status_code, 200, resp.content)
+                self.assertEqual(resp.json()["count"], 1)
+
+        # Término que no coincide con nada.
+        nadie = self.api.get(
+            "/transporte/reportes-fotograficos/", {"search": "ZZZZZZ"}
+        )
+        self.assertEqual(nadie.json()["count"], 0)
+
+    # ---------------------------- B14 · badge ---------------------------- #
+    def test_create_marca_salida_reportada(self):
+        """REGRESIÓN B14: el badge REPORTE de la salida pasaba a "No" siempre.
+
+        En el legacy el reporte escribía `datos.reporte` en la fila de la
+        salida y el badge salía de ahí. Aquí eso se aplanó al campo
+        `reportado` pero nada lo activaba.
+        """
+        salida = self._salida(self.vehiculo, self.RELOJ_OK.date())
+        self.assertFalse(salida.reportado)
+
+        self._crear_reporte()
+
+        salida.refresh_from_db()
+        self.assertTrue(salida.reportado)
+
+    def test_create_no_remueve_eliminadas_ni_salidas_de_otro_dia(self):
+        """Dos casillas de seguridad del badge."""
+        eliminada = self._salida(
+            self.vehiculo, self.RELOJ_OK.date(), estado=EstadoSalida.ELIMINADO
+        )
+        otro_dia = self._salida(self.vehiculo, date(2020, 1, 1))
+
+        self._crear_reporte()
+
+        eliminada.refresh_from_db()
+        self.assertFalse(eliminada.reportado)
+        otro_dia.refresh_from_db()
+        self.assertFalse(otro_dia.reportado)
 
 
 class ValidarAgendaOtTests(TestCase):
@@ -3414,7 +3787,9 @@ class ExportTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # listar() hace select_related(tecnico_asignado) → FK a Empleado (azul).
+        # listar() hace prefetch_related(tecnico_asignado) → FK a Empleado
+        # (azul). En tests el router está desactivado, así que la tabla debe
+        # existir en la BD de prueba para que el prefetch funcione.
         _asegurar_tabla_empleados()
         super().setUpClass()
 

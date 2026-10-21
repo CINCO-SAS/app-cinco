@@ -28,6 +28,25 @@ class KioscoViewSet(GenericViewSet):
 
     permission_classes = [IsAuthenticatedOrAPIKey]
 
+    # Cada acción usa su propio serializer de entrada. Declarar el mapa aquí
+    # (en vez de solo @extend_schema) satisface a DRF, que exigía un
+    # `serializer_class` y emitía el aviso spectacular W002
+    # "should either include a `serializer_class` attribute, or override
+    # `get_serializer_class()`". Los métodos instancian sus serializers de
+    # forma directa, así que esto no cambia el comportamiento en runtime:
+    # solo alimenta el esquema OpenAPI.
+    _SERIALIZERS = {
+        "identificar": salida_serializer.IdentificarVehiculoSerializer,
+        "escanear": salida_serializer.IdentificarVehiculoSerializer,
+        "vehiculo": salida_serializer.IdentificarVehiculoSerializer,
+        "validar": salida_serializer.ValidarSerializer,
+    }
+
+    def get_serializer_class(self):
+        return self._SERIALIZERS.get(
+            self.action, salida_serializer.IdentificarVehiculoSerializer
+        )
+
     # ------------------------------------------------------------------ #
     # Identificación consolidada (QR o Placa)
     # ------------------------------------------------------------------ #

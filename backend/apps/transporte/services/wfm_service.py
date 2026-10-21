@@ -349,9 +349,11 @@ class WfmService:
         if area and area.upper() not in ("TODAS", "TODOS"):
             consulta = consulta.filter(area__iexact=area)
         return list(
-            consulta.select_related("conductor", "tecnico_asignado").order_by(
-                "fecha_salida", "pk"
-            )[:cantidad]
+            consulta.select_related("conductor")
+            # Cross-BD: tecnico_asignado vive en azul (Empleado); un
+            # select_related sería un JOIN imposible para Django (1146).
+            .prefetch_related("tecnico_asignado")
+            .order_by("fecha_salida", "pk")[:cantidad]
         )
 
     @classmethod
@@ -515,7 +517,9 @@ class WfmService:
             salidas = list(
                 Salida.objects.select_for_update()
                 .filter(pk__in=ids)
-                .select_related("conductor", "tecnico_asignado")
+                .select_related("conductor")
+                # Cross-BD: Empleado vive en azul, no admite JOIN (1146).
+                .prefetch_related("tecnico_asignado")
             )
             # Re-filtramos por estado: otra transacción pudo haber
             # avanzado alguna fila entre la selección y este bloqueo.

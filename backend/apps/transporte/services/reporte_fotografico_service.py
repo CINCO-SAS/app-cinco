@@ -46,13 +46,20 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth.models import AnonymousUser
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
 from apps.empleados.models import Empleado
 from apps.operaciones.models import Agenda  # SOLO LECTURA (módulo ajeno)
 
-from ..models import ReporteFotograficoVehiculo, ReporteFotoImagen, Vehiculo
+from ..models import (
+    EstadoSalida,
+    ReporteFotograficoVehiculo,
+    ReporteFotoImagen,
+    Salida,
+    Vehiculo,
+)
 
 # Zona horaria del reporte (legacy usa America/Bogota explícitamente).
 ZONA_REPORTE = ZoneInfo("America/Bogota")
@@ -503,7 +510,110 @@ class ReporteFotograficoService:
                 nombre_original=nombre,
                 creado_por=creador,
             )
+        # B14: al haber evidencia, el badge REPORTE de la salida del día pasa
+        # a "Sí" (es lo que hacía `datos.reporte` en el JSON del legacy).
+        cls.marcar_salida_reportada(vehiculo, fecha)
         return reporte
+
+    # ------------------------------------------------------------------ #
+    # B14 · el badge REPORTE de la salida
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def marcar_salida_reportada(vehiculo, fecha) -> int:
+        """Pone ``Salida.reportado = True`` en las salidas de ese día (B14).
+
+        **Por qué existía esto antes**: en el legacy el reporte se escribía
+        dentro del JSON ``datos`` de la fila de salida (``datos.reporte`` /
+        ``datos.reportes_adicionales``) y el badge salía de ahí
+        (``base_salida_transporte.php`` 2209). La migración aplanó ese JSON
+        al campo ``reportado`` pero **nada lo activaba**: el badge B14 quedó
+        pintando "No" eternamente.
+
+        Dos decisiones deliberadas:
+        * NO es obligatorio que exista la salida. El reporte fotográfico es
+          evidencia del vehículo y puede haberse capturado el mismo día sin
+          salida registrada; ahí simplemente no hay fila que marcar.
+        * Se usa ``update()`` de una sola pasada (1 query) en vez de
+          ``save()`` por fila: solo cambia un booleano y no queremos que
+          actualizar el badge dispare el guardado completo de la fila.
+        * Se excluyen ELIMINADAS (un reporte no revive una salida borrada)
+          y las que ya estaban marcadas (evita un UPDATE sin cambios).
+        """
+        return (
+            Salida.objects.filter(vehiculo=vehiculo, fecha_salida=fecha)
+            .exclude(estado=EstadoSalida.ELIMINADO)
+            .exclude(reportado=True)
+            .update(reportado=True)
+        )
+
+    # ------------------------------------------------------------------ #
+    # Consulta del backoffice
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def listar(cls, query_params):
+        """Queryset de reportes con filtros, listo para serializar.
+
+        cross-DB: ``vehiculo`` vive en transporte y ``responsable`` en
+        **azul** (router ``empleados → azul``), así que SOLO se traen con
+        ``select_related`` (mismo origen, el JOIN es válido) +
+        ``prefetch_related`` respectivamente. Un ``select_related`` sobre
+        ``responsable`` generaría un JOIN hacia la tabla de OTRA base y
+        revienta contra MySQL real (los tests en SQLite no lo ven, porque
+        ahí el router está vacío).
+        """
+        desde = (query_params.get("desde") or "").strip()
+        hasta = (query_params.get("hasta") or "").strip()
+        vehiculo = (query_params.get("vehiculo") or "").strip()
+        search = (query_params.get("search") or "").strip()
+
+        # `vehiculo` acepta placa (lo normal) o pk, igual que en Salidas.
+        filtro_vehiculo: dict = {}
+        if vehiculo:
+            if vehiculo.isdigit():
+                filtro_vehiculo = {"vehiculo_id": int(vehiculo)}
+            else:
+                filtro_vehiculo = {"vehiculo__placa__iexact": vehiculo}
+
+        queryset = ReporteFotograficoVehiculo.objects.select_related(
+            "vehiculo"
+        ).prefetch_related("responsable", "imagenes")
+
+        if desde:
+            queryset = queryset.filter(fecha__gte=desde)
+        if hasta:
+            queryset = queryset.filter(fecha__lte=hasta)
+        if filtro_vehiculo:
+            queryset = queryset.filter(**filtro_vehiculo)
+
+        if search:
+            # La búsqueda toca columnas de AMBOS orígenes. Placa/OT/
+            # observaciones viven en transporte y se filtran en la misma
+            # consulta; el cédula/nombre vive en azul, así que se resuelve
+            # ANTES como lista de PKs y luego se compara por id (2 queries,
+            # nunca un JOIN cruzado).
+            #
+            # Cada PALABRA debe encajar en algún campo del empleado. Así
+            # "API TEST" (nombre + apellido en columnas distintas) encuentra
+            # al empleado, mientras que un solo `icontains` sobre el nombre
+            # no lo haría.
+            personas = Empleado.objects.all()
+            for palabra in [p for p in search.split() if p]:
+                personas = personas.filter(
+                    Q(cedula__icontains=palabra)
+                    | Q(nombre__icontains=palabra)
+                    | Q(apellido__icontains=palabra)
+                )
+            ids_personas = list(personas.values_list("pk", flat=True)[:500])
+
+            queryset = queryset.filter(
+                Q(vehiculo__placa__icontains=search)
+                | Q(ot_actividad__icontains=search)
+                | Q(observaciones__icontains=search)
+                | Q(responsable_id__in=ids_personas)
+            )
+
+        # Más recientes primero (fecha > hora > id desempata).
+        return queryset.order_by("-fecha", "-hora", "-id")
 
     # ------------------------------------------------------------------ #
     # Resolución de vehículo

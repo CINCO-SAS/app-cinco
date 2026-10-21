@@ -347,8 +347,11 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
 
         queryset = (
             Salida.objects.select_related(
-                "vehiculo", "conductor", "tecnico_asignado", "novedad"
+                "vehiculo", "conductor", "novedad"
             )
+            # Cross-BD: tecnico_asignado vive en azul (Empleado); un
+            # select_related sería un JOIN que Django no puede emitir (1146).
+            .prefetch_related("tecnico_asignado")
             .filter(fecha_salida__gte=desde, fecha_salida__lt=hasta)
         )
 

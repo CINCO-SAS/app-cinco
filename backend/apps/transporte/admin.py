@@ -64,7 +64,15 @@ class SalidaHistorialInline(admin.TabularInline):
 class SalidaAdmin(admin.ModelAdmin):
     list_display = ("id", "vehiculo", "fecha_salida", "estado", "valor_dia", "reportado")
     list_filter = ("estado", "fecha_salida", "es_disponible", "reportado")
-    search_fields = ("vehiculo__placa", "conductor__cedula", "tecnico_asignado__cedula")
+    # CUIDADO cross-database: `tecnico_asignado` -> Empleado, que vive en
+    # 'azul' (cinco_base_de_personal, managed=False). Un lookup con `__` en
+    # search_fields hace un JOIN que Django no puede emitir contra 'default'
+    # y MySQL responde (1146, "Table ... doesn't exist") -> 500 al buscar.
+    # NO reañadir 'tecnico_asignado__cedula': Salida no guarda snapshot
+    # local de esa cédula, así que la búsqueda por técnico no es posible
+    # desde el admin. 'vehiculo__placa' y 'conductor__cedula' sí son
+    # seguros: ambos modelos viven en 'default'.
+    search_fields = ("vehiculo__placa", "conductor__cedula")
     inlines = [SalidaHistorialInline]
 
 

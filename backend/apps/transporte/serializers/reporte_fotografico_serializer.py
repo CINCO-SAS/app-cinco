@@ -74,6 +74,33 @@ class ReporteFotoImagenSerializer(serializers.ModelSerializer):
         fields = ["id", "imagen", "nombre_original"]
 
 
+class ReporteFotograficoQuerySerializer(serializers.Serializer):
+    """Filtros de `GET /reportes-fotograficos/` (solo documentación OpenAPI).
+
+    Son parámetros de query y NO se validan en runtime: la lógica de filtrado
+    vive en `ReporteFotograficoService.listar`, que además sabe separar lo que
+    se consulta en azul de lo que se consulta en transporte.
+    """
+
+    desde = serializers.DateField(
+        required=False, help_text="Fecha mínima del reporte (YYYY-MM-DD)."
+    )
+    hasta = serializers.DateField(
+        required=False, help_text="Fecha máxima del reporte (YYYY-MM-DD)."
+    )
+    vehiculo = serializers.CharField(
+        required=False,
+        help_text="Placa (lo habitual) o pk del vehículo.",
+    )
+    search = serializers.CharField(
+        required=False,
+        help_text="Texto libre: placa, OT/actividad, observaciones, "
+                  "cédula o nombre del responsable.",
+    )
+    page = serializers.IntegerField(required=False, help_text="Página (1-based).")
+    page_size = serializers.IntegerField(required=False, help_text="Tamaño de página.")
+
+
 class ReporteFotograficoSerializer(serializers.ModelSerializer):
     imagenes = ReporteFotoImagenSerializer(many=True, read_only=True)
     placa = serializers.CharField(source="vehiculo.placa", read_only=True)

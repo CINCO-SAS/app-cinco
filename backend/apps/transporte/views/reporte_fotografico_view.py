@@ -27,6 +27,7 @@ from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 
 from ..serializers.reporte_fotografico_serializer import (
     CrearReporteFotoSerializer,
+    ReporteFotograficoQuerySerializer,
     ReporteFotograficoSerializer,
 )
 from ..services.reporte_fotografico_service import (
@@ -34,14 +35,42 @@ from ..services.reporte_fotografico_service import (
     MSG_SIN_PLACA,
     ReporteFotograficoService,
 )
+from .paginacion import PaginacionTransporte
 
 
 class ReporteFotograficoViewSet(GenericViewSet):
     permission_classes = [IsAuthenticatedOrAPIKey]
+    # Obligatorio: el proyecto no define `DEFAULT_PAGINATION_CLASS`, así que
+    # sin esto `self.paginator` es `None` y la respuesta revienta con 500.
+    pagination_class = PaginacionTransporte
 
     def _responsable(self, request):
         """Resuelve el Empleado del usuario autenticado (D-A10, dos pasos)."""
         return ReporteFotograficoService.empleado_de_usuario(request.user)
+
+    # ------------------------------------------------------------------ #
+    # GET /reportes-fotograficos/ — consulta (backoffice)
+    # ------------------------------------------------------------------ #
+    @extend_schema(
+        responses={200: ReporteFotograficoSerializer(many=True)},
+        parameters=[ReporteFotograficoQuerySerializer],
+        description="Listado paginado de reportes fotográficos con filtros "
+                    "por rango de fechas, placa/pk y búsqueda (placa, OT, "
+                    "observaciones o responsable).",
+    )
+    def list(self, request):
+        queryset = ReporteFotograficoService.listar(request.query_params)
+        page = self.paginate_queryset(queryset)
+        # `page` es None solo si el paginador no está activo; con
+        # `pagination_class` declarado no ocurre, pero se respeta el contrato.
+        serializer = self.get_serializer(page, many=True)
+        if page is None:
+            return Response(serializer.data)
+        return self.get_paginated_response(serializer.data)
+
+    def get_serializer(self, *args, **kwargs):
+        kwargs.setdefault("context", self.get_serializer_context())
+        return ReporteFotograficoSerializer(*args, **kwargs)
 
     # ------------------------------------------------------------------ #
     # POST /reportes-fotograficos/ — guardar reporte + imágenes

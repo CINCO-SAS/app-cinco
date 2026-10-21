@@ -184,7 +184,10 @@ class PlanillaService:
                 fecha_salida=fecha,
             )
             .exclude(estado=EstadoSalida.ELIMINADO)
-            .select_related("conductor", "tecnico_asignado")
+            .select_related("conductor")
+            # Cross-BD: tecnico_asignado vive en azul (Empleado); un
+            # select_related sería un JOIN imposible para Django (1146).
+            .prefetch_related("tecnico_asignado")
             .order_by("creado_en")
         )
 
