@@ -14,8 +14,8 @@ from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
 from ..models import Vehiculo
-from ..serializers import vehiculo_serializer
-from ..services import FlotaService
+from ..serializers import contacto_serializer, vehiculo_serializer
+from ..services import ContactoService, FlotaService
 from .paginacion import PaginacionTransporte
 
 
@@ -173,6 +173,41 @@ class VehiculoViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
             return Response({"detail": str(exc)}, status=codigo)
         return Response(
             vehiculo_serializer.DocumentoVehiculoSerializer(documento).data
+        )
+
+    @extend_schema(
+        responses={200: contacto_serializer.ContactoConductorSerializer},
+        description=(
+            "Ficha de contacto del conductor del vehículo (A1). Reemplaza a "
+            "la acción get_telefonos_conductores del legacy, que cruzaba "
+            "3 bases: línea corporativa (Nokia, BD negra), celular del "
+            "conductor (transporte_base_conductores) y los teléfonos de "
+            "cinco_base_de_personal. La línea corporativa degrada a vacío "
+            "mientras la BD negra no esté conectada (gate G2): se puede "
+            "distinguir con nokia_disponible."
+        ),
+    )
+    @action(detail=True, methods=["get"], url_path="contacto")
+    def contacto(self, request, pk=None):
+        """
+        Ficha de contacto del conductor de este vehículo.
+
+        Contrato estandarizado ADMCINCO: {ok, data} / {ok, error}.
+        """
+        try:
+            datos = ContactoService.contacto_vehiculo(pk)
+        except ValueError as exc:
+            codigo = (
+                status.HTTP_404_NOT_FOUND
+                if "No existe" in str(exc)
+                else status.HTTP_400_BAD_REQUEST
+            )
+            return Response({"ok": False, "error": str(exc)}, status=codigo)
+        return Response(
+            {
+                "ok": True,
+                "data": contacto_serializer.ContactoConductorSerializer(datos).data,
+            }
         )
 
     @extend_schema(

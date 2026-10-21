@@ -60,6 +60,7 @@ from .serializers.jefe_serializer import JefeValidadorSerializer
 from .services import calendario
 from .services import (
     ConductorService,
+    ContactoService,
     FlotaService,
     InformeService,
     LiquidacionService,
@@ -5516,4 +5517,135 @@ class CatalogoOperativoTests(TestCase):
         self.assertIn("estado_soat", fila)
         self.assertIn("estado_cda", fila)
         self.assertIn("conductor_habitual_detalle", fila)
+
+
+class ContactoConductorTests(TestCase):
+    """
+    A1 — ficha de contacto del conductor (`base_transportadores.php` 61–113).
+
+    El legacy cruzaba 3 bases: línea corporativa (Nokia, BD negra), celular
+    del conductor (transporte_base_conductores) y los teléfonos de
+    cinco_base_de_personal. Aquí se cubren las 2 fuentes de `azul` y la
+    degradación controlada de la de Nokia (gate G2).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()  # DDL antes de las transacciones
+        super().setUpClass()
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="1000777", password="x")
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+        self.conductor = Conductor.objects.create(
+            cedula="101010101",
+            nombre_completo="PEDRO CONDUCTOR",
+            celular="3001112222",
+            fecha_ingreso=date(2024, 1, 15),
+        )
+        self.vehiculo = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos(
+                "CON001", conductor_habitual=self.conductor
+            )
+        )
+        self.vehiculo_sin_conductor = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos("SIN001")
+        )
+        # Personal en cinco_base_de_personal (BD azul).
+        self.empleado = Empleado.objects.create(
+            cedula="101010101",
+            codigo_sap="SAP-1010",
+            nombre="PEDRO",
+            apellido="CONDUCTOR",
+            password="",
+            celular_personal="3015556666",
+            celular_alterno="3027778888",
+            telefono_fijo="6041234",
+        )
+
+    # ----------------------------- servicio ----------------------------- #
+    def test_arma_la_ficha_con_las_tres_fuentes_de_azul(self):
+        datos = ContactoService.contacto_vehiculo(self.vehiculo.pk)
+        self.assertEqual(datos["vehiculo_placa"], "CON001")
+        self.assertEqual(datos["conductor_cedula"], "101010101")
+        self.assertEqual(datos["conductor_nombre"], "PEDRO CONDUCTOR")
+        # Fuente 2: celular que elconductor anotó en transporte.
+        self.assertEqual(datos["celular_conductor_externo"], "3001112222")
+        # Fuente 3: cinco_base_de_personal.
+        self.assertEqual(datos["celular_personal"], "3015556666")
+        self.assertEqual(datos["celular_alterno"], "3027778888")
+        self.assertEqual(datos["telefono_fijo"], "6041234")
+        self.assertTrue(datos["tiene_contacto"])
+
+    def test_la_linea_corporativa_degrada_sin_robar(self):
+        """Sin el alias 'negra' (gate G2) la línea viene vacía, no error."""
+        datos = ContactoService.contacto_vehiculo(self.vehiculo.pk)
+        self.assertEqual(datos["linea_corporativa"], [])
+        self.assertFalse(datos["nokia_disponible"])
+        # El resto de la ficha se entrega igual: es información, no un flujo.
+        self.assertEqual(datos["celular_personal"], "3015556666")
+
+    def test_vehiculo_sin_conductor_no_falla(self):
+        datos = ContactoService.contacto_vehiculo(self.vehiculo_sin_conductor.pk)
+        self.assertIsNone(datos["conductor_cedula"])
+        self.assertIsNone(datos["celular_conductor_externo"])
+        self.assertFalse(datos["tiene_contacto"])
+        self.assertEqual(datos["linea_corporativa"], [])
+
+    def test_cedula_sin_registro_en_personal(self):
+        """Conductor sin ficha en RRHH: igual sirve su celular propio."""
+        self.conductor.celular = "3009998888"
+        self.conductor.cedula = "202020202"
+        self.conductor.save()
+        datos = ContactoService.contacto_vehiculo(self.vehiculo.pk)
+        self.assertEqual(datos["celular_conductor_externo"], "3009998888")
+        self.assertIsNone(datos["celular_personal"])
+        self.assertIsNone(datos["celular_alterno"])
+        self.assertIsNone(datos["telefono_fijo"])
+        self.assertTrue(datos["tiene_contacto"])
+
+    def test_vehiculo_inexistente_da_error_legible(self):
+        with self.assertRaises(ValueError) as ctx:
+            ContactoService.contacto_vehiculo(999999)
+        self.assertIn("No existe", str(ctx.exception))
+
+    def test_contacto_de_conductor_suelto(self):
+        datos = ContactoService.contacto_conductor(self.conductor.pk)
+        self.assertEqual(datos["conductor_cedula"], "101010101")
+        self.assertIsNone(datos["vehiculo_placa"])
+        self.assertEqual(datos["celular_personal"], "3015556666")
+
+    def test_contacto_de_conductor_inexistente(self):
+        with self.assertRaises(ValueError) as ctx:
+            ContactoService.contacto_conductor(999999)
+        self.assertIn("No existe", str(ctx.exception))
+
+    # ------------------------------- API -------------------------------- #
+    def test_api_devuelve_ok_data(self):
+        resp = self.api.get(f"/transporte/vehiculos/{self.vehiculo.pk}/contacto/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        payload = resp.json()
+        self.assertTrue(payload["ok"])
+        data = payload["data"]
+        self.assertEqual(data["vehiculo_placa"], "CON001")
+        self.assertEqual(data["celular_conductor_externo"], "3001112222")
+        self.assertEqual(data["celular_personal"], "3015556666")
+        self.assertEqual(data["celular_alterno"], "3027778888")
+        self.assertEqual(data["telefono_fijo"], "6041234")
+        self.assertEqual(data["linea_corporativa"], [])
+        self.assertFalse(data["nokia_disponible"])
+
+    def test_api_vehiculo_inexistente_responde_404(self):
+        resp = self.api.get("/transporte/vehiculos/999999/contacto/")
+        self.assertEqual(resp.status_code, 404, resp.content)
+        payload = resp.json()
+        self.assertFalse(payload["ok"])
+        self.assertIn("No existe", payload["error"])
+
+    def test_api_exige_autenticacion(self):
+        anonimo = APIClient()
+        resp = anonimo.get(f"/transporte/vehiculos/{self.vehiculo.pk}/contacto/")
+        self.assertIn(resp.status_code, (401, 403))
 

@@ -5,6 +5,7 @@ Contrato arquitectónico ADMCINCO (D-A3): ViewSet → Service → Serializer.
 Ningún ViewSet ni Serializer contiene lógica de negocio.
 """
 from .conductor_service import ConductorService
+from .contacto_service import ContactoService
 from .flota_service import FlotaService
 from .informe_service import InformeService
 from .liquidacion_service import LiquidacionService
@@ -18,6 +19,7 @@ from .wfm_service import WfmService
 
 __all__ = [
     "ConductorService",
+    "ContactoService",
     "FlotaService",
     "InformeService",
     "LiquidacionService",
