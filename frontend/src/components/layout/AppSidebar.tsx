@@ -11,6 +11,7 @@ import { ChevronDownIcon, HorizontaLDots } from "../../icons/index";
 import { IconMessageChatbot } from '@tabler/icons-react';
 import { useAuthStore } from "@/store/auth.store";
 import { hasCertificadosPermission } from "@/utils/permission";
+import { navItemsDeTransporte } from "@/modules/transporte/transporteModulos";
 
 type NavItem = {
   name: string;
@@ -39,15 +40,7 @@ const defaultNavItems: NavItem[] = [
       },
     ],
   },
-  {
-    name: "Transporte",
-    subItems: [
-      {
-        name: "Flota Vehicular",
-        path: "/transporte/flota",
-      },
-    ],
-  },
+  ...navItemsDeTransporte(),
   {
     name: "RRHH",
     subItems: [

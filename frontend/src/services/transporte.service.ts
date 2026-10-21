@@ -7,66 +7,55 @@
 // enlace backend ↔ front sea un espejo sin interpretación.
 
 import api from "@/lib/api";
+import {
+  normalizarPagina,
+  obtenerTodasLasPaginas,
+  type RespuestaPaginada,
+} from "@/lib/paginas";
 import type {
   Conductor,
+  ConductorListado,
   DatosBancariosVehiculo,
   DocumentoVehiculo,
   Mantenimiento,
   Novedad,
   RegistrarSalidaPayload,
+  ReporteFotografico,
   RespuestaAccion,
+  ResultadoAgendaReporte,
   ResultadoValidacionSalida,
   Salida,
   SalidaHistorial,
   Vehiculo,
   VehiculoListado,
   VehiculoPayload,
+  VehiculoResuelto,
 } from "@/types/transporte.types";
 
 // El prefijo es único en la app; centralizarlo evita divergencias.
 const BASE = "/transporte";
 
-/** Listado paginado de DRF: puede venir plano o envuelto en `{results}`. */
-export interface RespuestaPaginada<T> {
-  count: number;
-  next: string | null;
-  previous: string | null;
-  results: T[];
-}
+// Re-exportados desde lib/paginas para no romper imports existentes.
+export type { RespuestaPaginada } from "@/lib/paginas";
 
 type ParamsBusqueda = Record<string, string | number | boolean | undefined>;
-
-/**
- * DRF devuelve `[...]` o `{count, results}` según `pagination_class`.
- * Normalizamos para que los consumidores siempre reciban `{results}`.
- */
-const normalizarPagina = <T>(data: unknown): RespuestaPaginada<T> => {
-  if (Array.isArray(data)) {
-    return {
-      count: data.length,
-      next: null,
-      previous: null,
-      results: data as T[],
-    };
-  }
-  const envuelto = data as Partial<RespuestaPaginada<T>>;
-  return {
-    count: envuelto.count ?? envuelto.results?.length ?? 0,
-    next: envuelto.next ?? null,
-    previous: envuelto.previous ?? null,
-    results: envuelto.results ?? [],
-  };
-};
 
 export const transporteService = {
   // ==========================================================================
   // Conductores (F2) — transporte_base_conductores
   // ==========================================================================
 
-  getConductores: async (params?: ParamsBusqueda): Promise<Conductor[]> => {
-    const res = await api.get(`${BASE}/conductores/`, { params });
-    return normalizarPagina<Conductor>(res.data).results;
-  },
+  /**
+   * F2: catálogo completo. Usa `obtenerTodasLasPaginas` porque el filtrado
+   * ocurre en el cliente (con 50 filas/página la tabla quedaría truncada).
+   */
+  getConductores: async (
+    params?: ParamsBusqueda,
+  ): Promise<ConductorListado[]> =>
+    obtenerTodasLasPaginas<ConductorListado>(
+      `${BASE}/conductores/`,
+      params,
+    ),
 
   getConductor: async (id: number): Promise<Conductor> => {
     const res = await api.get(`${BASE}/conductores/${id}/`);
@@ -86,9 +75,17 @@ export const transporteService = {
     return res.data;
   },
 
-  /** Baja lógica (el legacy borraba el registro y perdía el historial). */
-  inactivarConductor: async (id: number): Promise<RespuestaAccion> => {
-    const res = await api.post(`${BASE}/conductores/${id}/inactivar/`);
+  /**
+   * Baja lógica (el legacy borraba el registro y perdía el historial).
+   * El backend EXIGE `fecha_egreso` (§5.4), así que se envía en el cuerpo.
+   */
+  inactivarConductor: async (
+    id: number,
+    fechaEgreso: string,
+  ): Promise<Conductor> => {
+    const res = await api.post(`${BASE}/conductores/${id}/inactivar/`, {
+      fecha_egreso: fechaEgreso,
+    });
     return res.data;
   },
 
@@ -98,14 +95,13 @@ export const transporteService = {
 
   /**
    * Listado completo (`VehiculoListSerializer`), apto para la tabla de flota.
-   * Acepta `?search=` (DRF SearchFilter) y los filtros del viewset.
+   * Trae TODAS las páginas (el filtrado es en cliente) y acepta `?search=`
+   * (DRF SearchFilter) y los filtros del viewset.
    */
   getVehiculos: async (
     params?: ParamsBusqueda,
-  ): Promise<VehiculoListado[]> => {
-    const res = await api.get(`${BASE}/vehiculos/`, { params });
-    return normalizarPagina<VehiculoListado>(res.data).results;
-  },
+  ): Promise<VehiculoListado[]> =>
+    obtenerTodasLasPaginas<VehiculoListado>(`${BASE}/vehiculos/`, params),
 
   getVehiculo: async (id: number): Promise<Vehiculo> => {
     const res = await api.get(`${BASE}/vehiculos/${id}/`);
@@ -178,6 +174,21 @@ export const transporteService = {
   getSalidas: async (params?: ParamsBusqueda): Promise<Salida[]> => {
     const res = await api.get(`${BASE}/salidas/`, { params });
     return normalizarPagina<Salida>(res.data).results;
+  },
+
+  /**
+   * B1 con paginación server-side: devuelve `count` (total REAL del filtro)
+   * junto con SOLO la página pedida. Es distinto de `getSalidas` porque con
+   * ~250 mil salidas no se puede traer todo y filtrar en el cliente: aquí
+   * quien pagina, filtra y ordena es el servidor.
+   *
+   * `count` es lo que alimenta el `pageCount` del DataTable (`manualPagination`).
+   */
+  getSalidasPaginado: async (
+    params?: ParamsBusqueda,
+  ): Promise<RespuestaPaginada<Salida>> => {
+    const res = await api.get(`${BASE}/salidas/`, { params });
+    return normalizarPagina<Salida>(res.data);
   },
 
   getSalida: async (id: number): Promise<Salida> => {
@@ -291,25 +302,73 @@ export const transporteService = {
   // Reporte fotográfico (F3/B3)
   // ==========================================================================
 
-  guardarReporteFotografico: async (payload: unknown): Promise<RespuestaAccion> => {
-    const res = await api.post(`${BASE}/reportes-fotograficos/`, payload);
-    return res.data;
+  /**
+   * F3/B3: alta de reporte con 1..5 imágenes.
+   *
+   * DEBE ir en `multipart`: el backend usa `request.data.getlist("imagenes")`
+   * para recibir la lista, y con un JSON `[]` llegaría como un único string.
+   *
+   * Además el backend envuelve la respuesta en `{ok, data}` (contrato de las
+   * acciones), así que aquí se desempaqueta: quien llama recibe el reporte
+   * y no tiene que saber cómo envuelve cada endpoint su retorno.
+   */
+  guardarReporteFotografico: async (payload: {
+    placa: string;
+    imagenes: File[];
+    ot_actividad?: string;
+    observaciones?: string;
+    location?: Record<string, unknown>;
+  }): Promise<ReporteFotografico> => {
+    const formulario = new FormData();
+    formulario.append("placa", payload.placa);
+    for (const imagen of payload.imagenes) {
+      formulario.append("imagenes", imagen);
+    }
+    if (payload.ot_actividad) {
+      formulario.append("ot_actividad", payload.ot_actividad);
+    }
+    if (payload.observaciones) {
+      formulario.append("observaciones", payload.observaciones);
+    }
+    if (payload.location) {
+      // El backend hace `json.loads(location)`: viaja como string.
+      formulario.append("location", JSON.stringify(payload.location));
+    }
+
+    const res = await api.post(`${BASE}/reportes-fotograficos/`, formulario, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return (res.data?.data ?? res.data) as ReporteFotografico;
   },
 
-  /** B3 #1: pre-chequeo de OT-específica contra la agenda del día. */
+  /** Listado paginado (server-side) para la tabla del backoffice. */
+  getReportesPaginado: async (
+    params?: ParamsBusqueda,
+  ): Promise<RespuestaPaginada<ReporteFotografico>> => {
+    const res = await api.get(`${BASE}/reportes-fotograficos/`, { params });
+    return normalizarPagina<ReporteFotografico>(res.data);
+  },
+
+  /** B3 #1: pre-chequeo de agenda (y de OT-específica si se envía OT). */
   validarAgendaReporte: async (payload: {
     fecha: string;
     ot_actividad?: string;
-  }): Promise<ResultadoValidacionSalida> => {
-    const res = await api.post(`${BASE}/reportes-fotograficos/validar-agenda/`, payload);
-    return res.data;
+  }): Promise<ResultadoAgendaReporte> => {
+    const res = await api.post(
+      `${BASE}/reportes-fotograficos/validar-agenda/`,
+      payload,
+    );
+    // `{ok, data}` → `data`.
+    return (res.data?.data ?? res.data) as ResultadoAgendaReporte;
   },
 
-  getVehiculoPorPlaca: async (placa: string): Promise<Vehiculo> => {
+  /** Resuelve la placa a los datos del vehículo activo (para el modal). */
+  getVehiculoPorPlaca: async (placa: string): Promise<VehiculoResuelto> => {
     const res = await api.get(`${BASE}/reportes-fotograficos/vehiculo-placa/`, {
       params: { placa },
     });
-    return res.data;
+    const envuelto = res.data?.data ?? res.data;
+    return (envuelto?.vehiculo ?? envuelto) as VehiculoResuelto;
   },
 
   // ==========================================================================

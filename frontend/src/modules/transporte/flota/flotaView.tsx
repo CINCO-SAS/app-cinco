@@ -1,9 +1,7 @@
 // src/modules/transporte/flota/flotaView.tsx
 //
 // Vista de Flota Vehicular — T1 del módulo Transporte.
-//
-// Muestra el catálogo de flota con el semáforo SOAT/CDA calculado en
-// servidor (E1) y los filtros de gestión (contrato, estado, vigencia).
+// Deliberadamente liviana: filtros en una línea + tabla.
 
 "use client";
 
@@ -19,7 +17,6 @@ import { FlotaToolbar } from "./components/FlotaToolbar";
 const FlotaView = () => {
   const {
     vehiculos,
-    resumen,
     isLoading,
     loadError,
     filtros,
@@ -42,7 +39,7 @@ const FlotaView = () => {
 
   const toolbarActions = (
     <FlotaToolbar
-      resumen={resumen}
+      total={vehiculos.length}
       filtros={filtros}
       actualizarFiltro={actualizarFiltro}
       limpiarFiltros={limpiarFiltros}
@@ -52,23 +49,17 @@ const FlotaView = () => {
 
   return (
     <div className="mx-auto max-w-screen-2xl p-4 sm:p-6">
-      <PageBreadcrumb pageTitle={["Transporte", "Flota Vehicular"]} />
+      <PageBreadcrumb pageTitle={["Transporte", "Maestros", "Flota Vehicular"]} />
 
-      <div className="mb-4 flex flex-col gap-3">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Catálogo de flota automotor (4+ ruedas). El semáforo SOAT/CDA se
-          calcula en servidor con la regla: vigente &gt; 60 días, por vencer
-          31–60, vencida ≤ 30.
-        </p>
-
-        {loadError && (
+      {loadError && (
+        <div className="mb-4">
           <Alert
             variant="error"
             title="Error al cargar la flota"
             message={loadError}
           />
-        )}
-      </div>
+        </div>
+      )}
 
       <FlotaTable
         vehiculos={vehiculos}

@@ -64,6 +64,8 @@ export function DataTable<TData>({
   isLoading = false,
   emptyMessage = "No data available",
   enablePagination = true,
+  manualPagination = false,
+  pageCount: pageCountProp,
   pageSize = 10,
   enableGlobalFilter = false,
   enableColumnFilters = false,
@@ -157,10 +159,17 @@ export function DataTable<TData>({
       onColumnVisibilityChange?.(nextVisibility);
     },
     enableSorting,
+    // Paginación server-side: la tabla ya no "rebanan" nada; `pageCount` le
+    // dice cuántas páginas hay para que "Anterior/Siguiente" se deshabiliten
+    // en los extremos.
+    manualPagination,
+    ...(manualPagination &&
+      pageCountProp !== undefined && { pageCount: pageCountProp }),
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: enableSorting ? getSortedRowModel() : undefined,
-    ...(enablePagination && { getPaginationRowModel: getPaginationRowModel() }),
+    ...(enablePagination &&
+      !manualPagination && { getPaginationRowModel: getPaginationRowModel() }),
     initialState: {
       pagination: {
         pageSize: initialPageSize,

@@ -16,6 +16,23 @@ interface DataTableProps<TData> {
   enablePagination?: boolean;
   pageSize?: number;
 
+  /**
+   * La paginación la resuelve el SERVIDOR (una página de datos a la vez) en
+   * vez de paginar en cliente. Imprescindible en listados grandes —salidas
+   * tiene ~250 mil filas— donde traerlo todo no es una opción.
+   *
+   * Si está activo, el DataTable NO aplica `getPaginationRowModel` (si no
+   * paginaría dos veces) y el paginador usa `pageCount` en vez de contar
+   * filas que ya son solo la página actual.
+   *
+   * En este modo conviene apagar `enableGlobalFilter`: el filtrado global
+   * del cliente solo vería la página cargada. La búsqueda debe ir al
+   * servidor, que es quien conoce las ~250 mil filas.
+   */
+  manualPagination?: boolean;
+  /** Nº total de páginas que reportó el servidor. Requiere `manualPagination`. */
+  pageCount?: number;
+
   enableGlobalFilter?: boolean;
   enableColumnFilters?: boolean;
   enableSorting?: boolean;

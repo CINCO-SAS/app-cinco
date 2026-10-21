@@ -95,7 +95,30 @@ export interface Conductor {
   fecha_egreso: string | null;
   fecha_nacimiento: string | null;
   activo: boolean;
+  /** Derivados solo en detalle (`ConductorSerializer`): nunca se persisten. */
+  edad?: number | null;
+  /** Semáforo §5.3 calculado EN SERVIDOR (también en el listado). */
+  estado_licencia?: EstadoVigencia;
 }
+
+/**
+ * Fila del listado (`ConductorListSerializer`): compacto, sin dirección ni
+ * fechas de ingreso/egreso (esas llegan en el detalle al editar).
+ */
+export type ConductorListado = Pick<
+  Conductor,
+  | "id"
+  | "cedula"
+  | "nombre_completo"
+  | "celular"
+  | "tipo_vinculacion"
+  | "licencia_categoria"
+  | "licencia_vencimiento"
+  | "activo"
+> & {
+  /** Siempre presente en el listado (calculado en servidor). */
+  estado_licencia: EstadoVigencia;
+};
 
 // Referencia ligera embebida en los vehículos.
 export interface ConductorReferencia {
@@ -234,13 +257,27 @@ export interface DatosBancariosVehiculo {
 // Salidas (models/salida.py · Salida) — el corazón del módulo
 // ---------------------------------------------------------------------------
 
+/**
+ * Persona detrás de una salida. El backend devuelve SIEMPRE la misma forma
+ * para `conductor_detalle` (quien sale) y `tecnico_asignado_detalle`
+ * (móvil de nómina), aunque vienen de modelos distintos.
+ */
+export interface DetallePersona {
+  nombre: string;
+  cedula: string;
+}
+
 export interface Salida {
   id: number;
   vehiculo: number;
   vehiculo_placa: string;
   fecha_salida: string;
   conductor: number | null;
+  /** Quién SALE (legacy `movil_sale`) — `null` si la salida es 'disponible'. */
+  conductor_detalle: DetallePersona | null;
   tecnico_asignado: number | null;
+  /** Móvil asignada de nómina (legacy `cc_asignada`), resuelta en servidor. */
+  tecnico_asignado_detalle: DetallePersona | null;
   es_disponible: boolean;
   area: string | null;
   carpeta: string | null;
@@ -251,6 +288,12 @@ export interface Salida {
   reportado: boolean;
   /** B10: valor de la novedad (0 si no tiene). */
   valor_novedad: string;
+  /** B6/B7: la novedad como objeto (para verla antes de borrarla) o null. */
+  novedad_detalle: {
+    tipo: TipoNovedad;
+    valor: string;
+    descripcion: string;
+  } | null;
   /** B10: valor_dia ± novedad — única implementación determinista. */
   total_a_pagar: string;
   /** B15: ¿el usuario actual puede gestionar esta fila (jefe/programación)? */
@@ -287,6 +330,73 @@ export interface SalidaHistorial {
   fecha_cambio: string;
   creado_por: number | null;
   creado_por_cedula: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Reporte fotográfico diario (F3/B3)
+// ---------------------------------------------------------------------------
+
+export interface ReporteFotoImagen {
+  id: number;
+  /** URL ya servida por Django (`MEDIA_URL`); no hace falta armar nada. */
+  imagen: string;
+  nombre_original: string;
+}
+
+export interface ReporteFotografico {
+  id: number;
+  /** Placa resuelta en servidor (el backoffice piensa en placas, no en PKs). */
+  placa: string;
+  /** `YYYY-MM-DD`. */
+  fecha: string;
+  /** `HH:MM:SS` — hora Colombia, dentro de la ventana 10:00–16:00. */
+  hora: string;
+  ot_actividad: string | null;
+  responsable_cedula: string;
+  responsable_nombre: string;
+  /** Resultado de la validación OT-específica (agenda del día). */
+  validacion_ot: Record<string, unknown>;
+  /** Georreferencia del móvil (lat/lon/precisión) o null. */
+  location: Record<string, number | string> | null;
+  observaciones: string;
+  imagenes: ReporteFotoImagen[];
+  creado_en: string;
+}
+
+/** Filtros de `GET /transporte/reportes-fotograficos/`. */
+export interface FiltrosReporteFoto {
+  /** `YYYY-MM-DD` o vacío. */
+  desde: string;
+  hasta: string;
+  /** Placa o pk; el servidor acepta cualquiera de los dos. */
+  vehiculo: string;
+}
+
+/** Respuesta de `POST .../validar-agenda/` (desempaquetada por el servicio). */
+export interface ResultadoAgendaReporte {
+  tiene_agenda: boolean;
+  /** `area_exenta` (no exige agenda) · `agenda` · `sin_identidad`. */
+  origen: string;
+  agendas: Array<Record<string, unknown>>;
+  /** Vacío cuando `tiene_agenda` es true. Es el texto que ve el usuario. */
+  msg: string;
+  fecha?: string;
+  /** Solo si se envió `ot_actividad`: match OT-específica del día. */
+  ot?: {
+    valida: boolean;
+    origen: string;
+    ot: string;
+    msg: string;
+  };
+}
+
+/** Lo que devuelve `GET .../vehiculo-placa/?placa=` (desempaquetado). */
+export interface VehiculoResuelto {
+  placa: string;
+  tipo_vehiculo: string;
+  marca: string;
+  referencia: string;
+  ciudad: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -114,21 +114,6 @@ export const useFlotaData = () => {
     });
   }, [vehiculos, filtros, globalFilter]);
 
-  // -------------------------------------------------------------------------
-  // Contadores del toolbar (KPIs del semáforo).
-  // -------------------------------------------------------------------------
-  const resumen = useMemo(() => {
-    const total = vehiculosFiltrados.length;
-    const activos = vehiculosFiltrados.filter((v) => v.activo).length;
-    const conSoatVencido = vehiculosFiltrados.filter(
-      (v) => v.estado_soat === "VENCIDA",
-    ).length;
-    const conCdaVencido = vehiculosFiltrados.filter(
-      (v) => v.estado_cda === "VENCIDA",
-    ).length;
-    return { total, activos, conSoatVencido, conCdaVencido };
-  }, [vehiculosFiltrados]);
-
   const actualizarFiltro = useCallback(
     (clave: keyof FiltrosFlota, valor: string) => {
       setFiltros((prev) => ({ ...prev, [clave]: valor }));
@@ -154,7 +139,6 @@ export const useFlotaData = () => {
     vehiculos: vehiculosFiltrados,
     vehiculosSinFiltrar: vehiculos,
     totalVehiculos: vehiculos.length,
-    resumen,
     isLoading,
     loadError,
     recargar: cargar,
