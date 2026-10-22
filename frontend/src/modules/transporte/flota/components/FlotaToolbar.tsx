@@ -1,13 +1,14 @@
 // src/modules/transporte/flota/components/FlotaToolbar.tsx
 //
-// Barra de filtros de Flota. deliberadamente liviana: una sola línea de
-// selects + contador. Los KPIs se quitaron a petición (peso visual).
+// Barra de filtros de Flota. Deliberadamente liviana: una sola línea de
+// selects. Los KPIs NO viven aquí porque compiten visualmente con los
+// filtros dentro de la tarjeta de la tabla; están en `FlotaKpis`, justo
+// encima de la tabla.
 
 import type { FiltrosFlota } from "../flotaView.hooks";
 import { ETIQUETAS_TIPO_CONTRATO } from "../flotaView.utils";
 
 interface FlotaToolbarProps {
-  total: number;
   filtros: FiltrosFlota;
   actualizarFiltro: (clave: keyof FiltrosFlota, valor: string) => void;
   limpiarFiltros: () => void;
@@ -20,7 +21,6 @@ const SELECT_CLASES =
   "dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
 
 export const FlotaToolbar = ({
-  total,
   filtros,
   actualizarFiltro,
   limpiarFiltros,
@@ -74,9 +74,5 @@ export const FlotaToolbar = ({
         Limpiar
       </button>
     )}
-
-    <span className="ml-auto text-sm text-gray-500 dark:text-gray-400">
-      {total} vehículo{total === 1 ? "" : "s"}
-    </span>
   </div>
 );

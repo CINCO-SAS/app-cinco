@@ -20,6 +20,14 @@ export interface FiltrosFlota {
   vigencia: string;
 }
 
+/** Contadores del catálogo, recalculados con cada cambio de filtro. */
+export interface ResumenFlota {
+  total: number;
+  activos: number;
+  conSoatVencido: number;
+  conCdaVencido: number;
+}
+
 const FILTROS_INICIALES: FiltrosFlota = {
   tipo_contrato: "",
   activo: "",
@@ -114,6 +122,22 @@ export const useFlotaData = () => {
     });
   }, [vehiculos, filtros, globalFilter]);
 
+  // -------------------------------------------------------------------------
+  // KPIs del semáforo del toolbar. Siguen a los filtros a propósito: al
+  // filtrar por "Solo activos" el contador debe reflejar ese subconjunto.
+  // -------------------------------------------------------------------------
+  const resumen = useMemo(() => {
+    const total = vehiculosFiltrados.length;
+    const activos = vehiculosFiltrados.filter((v) => v.activo).length;
+    const conSoatVencido = vehiculosFiltrados.filter(
+      (v) => v.estado_soat === "VENCIDA",
+    ).length;
+    const conCdaVencido = vehiculosFiltrados.filter(
+      (v) => v.estado_cda === "VENCIDA",
+    ).length;
+    return { total, activos, conSoatVencido, conCdaVencido };
+  }, [vehiculosFiltrados]);
+
   const actualizarFiltro = useCallback(
     (clave: keyof FiltrosFlota, valor: string) => {
       setFiltros((prev) => ({ ...prev, [clave]: valor }));
@@ -139,6 +163,7 @@ export const useFlotaData = () => {
     vehiculos: vehiculosFiltrados,
     vehiculosSinFiltrar: vehiculos,
     totalVehiculos: vehiculos.length,
+    resumen,
     isLoading,
     loadError,
     recargar: cargar,

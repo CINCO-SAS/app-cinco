@@ -11,12 +11,14 @@ import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import Alert from "@/components/ui/alert/Alert";
 import { useFlotaData } from "./flotaView.hooks";
 import { getFlotaColumns } from "./flotaView.utils";
+import { FlotaKpis } from "./components/FlotaKpis";
 import { FlotaTable } from "./components/FlotaTable";
 import { FlotaToolbar } from "./components/FlotaToolbar";
 
 const FlotaView = () => {
   const {
     vehiculos,
+    resumen,
     isLoading,
     loadError,
     filtros,
@@ -39,7 +41,6 @@ const FlotaView = () => {
 
   const toolbarActions = (
     <FlotaToolbar
-      total={vehiculos.length}
       filtros={filtros}
       actualizarFiltro={actualizarFiltro}
       limpiarFiltros={limpiarFiltros}
@@ -60,6 +61,8 @@ const FlotaView = () => {
           />
         </div>
       )}
+
+      <FlotaKpis resumen={resumen} />
 
       <FlotaTable
         vehiculos={vehiculos}
