@@ -9,6 +9,7 @@
 // aquí solo se refleja como nota.
 
 import Alert from "@/components/ui/alert/Alert";
+import type { ReactNode } from "react";
 
 import type { AreaInforme } from "@/types/transporte.types";
 import { InformeTablaAreas } from "./InformeTablaAreas";
@@ -17,7 +18,10 @@ interface InformeBloqueProps {
   titulo: string;
   /** Rótulo del período visible, p. ej. `05/10/2026` u `OCTUBRE 2026`. */
   periodo: string;
-  areas: AreaInforme[];
+  /** Contenido propio; si se omite se pinta la tabla de áreas estándar. */
+  children?: ReactNode;
+  /** Solo el contenido por defecto (bloques Día y Mes). */
+  areas?: AreaInforme[];
   isLoading?: boolean;
   error?: string | null;
   /** Nota bajo el encabezado (se omite si es `undefined`). */
@@ -27,6 +31,7 @@ interface InformeBloqueProps {
 export const InformeBloque = ({
   titulo,
   periodo,
+  children,
   areas,
   isLoading = false,
   error = null,
@@ -58,7 +63,9 @@ export const InformeBloque = ({
           />
         </div>
       ) : (
-        <InformeTablaAreas areas={areas} isLoading={isLoading} />
+        children ?? (
+          <InformeTablaAreas areas={areas ?? []} isLoading={isLoading} />
+        )
       )}
     </div>
   </section>
