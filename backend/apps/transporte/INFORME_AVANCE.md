@@ -129,7 +129,7 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 
 | Bloque | Entregado | Pendiente |
 |---|---|---|
-| **B (gestión)** | B1 filtros `?desde=&hasta=` ✅ · B2 ver cierres ✅ · B8 ficha+semáforo ✅ · B10 valor día/total ✅ (`total_a_pagar`) · B14 badge reportado ✅ · **B4 export xlsx ✅ (F5-4)** · B6/B7 novedades ✅ · B5/B12/B13 🟡 servicio, falta HTTP | B3 ruta cierres `{mes}/{anio}/` · B9 `buscar_movil` (G2/G4) · B11 centros de costos (G3) · B15 permisos por fila |
+| **B (gestión)** | B1 filtros `?desde=&hasta=` ✅ · B2 ver cierres ✅ · B8 ficha+semáforo ✅ · B10 valor día/total ✅ (`total_a_pagar`) · B14 badge reportado ✅ · **B4 export xlsx ✅ (F5-4)** · B6/B7 novedades ✅ · **B9 ficha móvil ✅** · **B11 centros de costos ✅** · B5/B12/B13 🟡 servicio, falta HTTP | B3 ruta cierres `{mes}/{anio}/` (refinamiento #2) · B15 permisos por fila |
 | **S (kiosco)** | S1 escanear ✅ · S6 grabar salida ✅ · S3 pre-chequeo ✅ · S4 consulta por placa ✅ · **S5 planillas ✅ (F5-6)** | S2 asignar móvil (G4/D-A9) |
 | **T (flota)** | T1 ficha · T2 fotos/docs · T3 bancarios · T4 CSV · T5 QR ✅ | T6 teléfonos (G2 + D-A9/D-A10) |
 | **D (backoffice/tabla3)** | D1 jefes · D2 cierres · D3 liquidaciones · D4 pagos ✅ | — |
@@ -142,8 +142,8 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 
 | Métrica | Valor |
 |---|---|
-| Tests | **405 OK** (393 transporte + 12 `apps.common`; evolución 87 → 105 → 126 → 134 → 162 → 182 → 214 → 225 → 238 → 246 → 255 → 260 → 330 → 339 → 351 → 353 → 355 → 365 → 377 → 389 → 405) |
-| Modelos Django | 16 (+ `0001_initial`–`0005`, choices, admin) |
+| Tests | **462 OK** en `apps.transporte` (+12 en `apps.common`; evolución 87 → 105 → 126 → 134 → 162 → 182 → 214 → 225 → 238 → 246 → 255 → 260 → 330 → 339 → 351 → 353 → 355 → 365 → 377 → 389 → 405 → 441 → 443 → **462**) |
+| Modelos Django | 19 (+ `0001_initial`–`0008`, choices, admin) |
 | Endpoints activos | 13 recursos router (`/conductores/`, `/vehiculos/`, `/parametros/cierres/`, `/parametros/jefes/`, `/liquidaciones/`, `/planillas/`, `/informes/`, `/salidas/`, `/kiosco/`, `/reportes-fotograficos/`, `/validaciones/`, `/wfm/`, `/permisos/`) + acciones (`catalogo-operativo`, `permisos/estado`, `resumen`, `documentos`, `importar-bancarios`, `qr.png`, `inactivar`×2, `pago-mensual`, `pronto-pago`, `sabana`, `consecutivo`, `pago`, `escanear`, `identificar`, `vehiculo/{placa}`, `validar`×3, `aprobar-lote`, `aprobar`, `rechazar`, `novedad`, `historial`, `export`, `cuenta-cobro`, `series-chart`, `mensual`, `areas`, `dia`, `area`, `areas-mes`, `nomina`, `liquidacion`, `generar`, `formato`, `validar-agenda`, `vehiculo-placa`, `wfm/validar`, `wfm/crear-job`, `wfm/estado-job`) |
 | Comandos CLI | `migrate_transporte_legacy` (ETL) · **`wfm_worker` (cola WFM)** |
 | Archivos PHP legacy modificados | **0** |

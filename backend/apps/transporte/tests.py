@@ -23,7 +23,7 @@ from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import connection
+from django.db import NotSupportedError, connection
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -43,6 +43,7 @@ from .models import (
     EstadoSalida,
     EstadoWfmJob,
     FechaLimiteCierre,
+    InfraestructuraParametro,
     JefeValidador,
     Novedad,
     PagoVehiculoMensual,
@@ -105,6 +106,34 @@ def _asegurar_tablas_wfm():
             editor.create_model(ResidencialWfm)
         if "logistica_actividades_modulo_agenda" not in existentes:
             editor.create_model(AgendaLogistica)
+
+
+def _asegurar_tabla_infraestructura():
+    """
+    InfraestructuraParametro es managed=False (BD azul, módulo ajeno) y en
+    tests el router está desactivado, así que la tabla no se crea sola: se
+    levanta aquí desde este archivo, igual que Empleado y las WFM.
+
+    Andamiaje solo de tests de transporte; en producción esta función no se
+    ejecuta y la tabla la sigue creando el PHP legacy.
+    """
+    if "infraestructura_parametros" not in connection.introspection.table_names():
+        with connection.schema_editor() as editor:
+            editor.create_model(InfraestructuraParametro)
+
+
+def _sembrar_infraestructura(filas):
+    """
+    Inserta filas de `infraestructura_parametros` en los tests.
+
+    Usa `bulk_create` deliberadamente: `save()` de este modelo LANZA
+    (NotSupportedError) porque la tabla es de solo lectura, y `bulk_create`
+    no lo invoca. Así los tests comprueban que la vía normal de escritura
+    está bloqueada sin tener que saltarse la propia salvaguarda a mano.
+    """
+    return InfraestructuraParametro.objects.bulk_create(
+        [InfraestructuraParametro(**fila) for fila in filas]
+    )
 
 
 class EdadDerivadaTests(SimpleTestCase):
@@ -6048,4 +6077,250 @@ class FichaMovilB9Tests(TestCase):
         anonimo = APIClient()
         resp = anonimo.get("/transporte/personas/900900900/ficha-movil/")
         self.assertIn(resp.status_code, (401, 403))
+
+
+class CentroCostosB11Tests(TestCase):
+    """
+    B11 · área–carpeta con centro de costos (plan §6).
+
+    Fuente ÚNICA: `infraestructura_parametros` (BD azul, `managed=False`).
+    Es la única tabla del legacy que guarda `centro_costo` — verificado:
+    `cinco_base_de_personal` no tiene ni una columna de costo y su JSON
+    `datos` es de RRHH.
+
+    Se reproduce con datos reales de la BD (2026-10-22): las 6 carpetas
+    ambiguas, el subcentro ausente, el subcentro array y una carpeta sin
+    centro de costos.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()        # GET /salidas/ resuelve el perfil
+        _asegurar_tabla_infraestructura()  # DDL antes de las transacciones
+        super().setUpClass()
+
+    def setUp(self):
+        _sembrar_infraestructura([
+            # Las 6 ambiguas reales (mismo valor, dos áreas y dos ccostos).
+            dict(tipo="CARPETA", valor="BROWNFIELD",
+                 condicion="IMPLEMENTACION FO",
+                 datos={"centro_costo": 17, "subcentro_costo": 4},
+                 estado="ACTIVO"),
+            dict(tipo="CARPETA", valor="BROWNFIELD", condicion="I&M",
+                 datos={"centro_costo": 20, "subcentro_costo": 1},
+                 estado="ACTIVO"),
+            dict(tipo="CARPETA", valor="OBRA CIVIL",
+                 condicion="IMPLEMENTACION FO",
+                 datos={"centro_costo": 14, "subcentro_costo": 1},
+                 estado="ACTIVO"),
+            dict(tipo="CARPETA", valor="OBRA CIVIL", condicion="CLARO MOVIL",
+                 datos={"centro_costo": 12, "subcentro_costo": 4},
+                 estado="ACTIVO"),
+            # Carpeta única: el área ni hace falta.
+            dict(tipo="CARPETA", valor="FTTH", condicion="I&M",
+                 datos={"centro_costo": 20, "subcentro_costo": 1},
+                 estado="ACTIVO"),
+            # Los DOS bugs de presentación del JS.
+            dict(tipo="CARPETA", valor="COMERCIAL", condicion="COMERCIAL",
+                 datos={"centro_costo": 23}, estado="ACTIVO"),
+            dict(tipo="CARPETA", valor="ANALISTAS", condicion="LOGISTICA",
+                 datos={"centro_costo": 16, "subcentro_costo": [1]},
+                 estado="ACTIVO"),
+            # Carpeta existente pero SIN centro de costos.
+            dict(tipo="CARPETA", valor="WOM", condicion="WOM",
+                 datos={}, estado="ACTIVO"),
+            # Fila de otra naturaleza: NO debe entrar en el catálogo.
+            dict(tipo="AREA", valor="I&M", condicion="",
+                 datos={"centro_costo": 99}, estado="ACTIVO"),
+        ])
+
+    # ---------------------- desambigüación ---------------------- #
+    def test_las_ambiguas_se_resuelven_con_carpeta_y_area(self):
+        """(carpeta, área) decide: el legacy no lo hacía y le pasaba el
+        problema al contador mostrando los dos códigos."""
+        self.assertEqual(
+            ParametrosService.centro_costos("BROWNFIELD", "I&M"), "[20(1)]"
+        )
+        self.assertEqual(
+            ParametrosService.centro_costos("BROWNFIELD", "IMPLEMENTACION FO"),
+            "[17(4)]",
+        )
+        self.assertEqual(
+            ParametrosService.centro_costos("OBRA CIVIL", "CLARO MOVIL"),
+            "[12(4)]",
+        )
+
+    def test_carpeta_unica_no_necesita_area(self):
+        self.assertEqual(ParametrosService.centro_costos("FTTH"), "[20(1)]")
+        self.assertEqual(
+            ParametrosService.centro_costos("FTTH", "AREA INEXISTENTE"),
+            "[20(1)]",
+        )
+
+    def test_area_que_no_coincide_muestra_las_dos_opciones(self):
+        """Comportamiento legacy: `Array.from(Set).join('; ')`."""
+        self.assertEqual(
+            ParametrosService.centro_costos("BROWNFIELD", "DEPARTAMENTO TI"),
+            "[17(4)]; [20(1)]",
+        )
+
+    def test_texto_desambiguado_no_esta_duplicado(self):
+        """Dos filas idénticas no deben repetir el mismo texto."""
+        _sembrar_infraestructura([
+            dict(tipo="CARPETA", valor="DUPE", condicion="I&M",
+                 datos={"centro_costo": 20, "subcentro_costo": 1},
+                 estado="ACTIVO"),
+            dict(tipo="CARPETA", valor="DUPE", condicion="I&M",
+                 datos={"centro_costo": 20, "subcentro_costo": 1},
+                 estado="ACTIVO"),
+        ])
+        self.assertEqual(
+            ParametrosService.centro_costos("DUPE", "I&M"), "[20(1)]"
+        )
+
+    # -------------------------- fallback ------------------------ #
+    def test_carpeta_desconocida_dai_sin_asignar(self):
+        self.assertEqual(
+            ParametrosService.centro_costos("CARPETA QUE NO EXISTE"),
+            "Sin asignar",
+        )
+
+    def test_carpeta_vacia_dai_sin_asignar(self):
+        """`movil_sale` tiene ~70k sentinelas; el área/carpeta no escapa."""
+        self.assertEqual(ParametrosService.centro_costos(""), "Sin asignar")
+        self.assertEqual(ParametrosService.centro_costos(None), "Sin asignar")
+        self.assertEqual(
+            ParametrosService.centro_costos("   "), "Sin asignar"
+        )
+
+    def test_carpeta_sin_centro_de_costos_dai_sin_asignar(self):
+        """Está en infraestructura pero `datos` no trae `centro_costo`."""
+        self.assertEqual(
+            ParametrosService.centro_costos("WOM", "WOM"), "Sin asignar"
+        )
+
+    def test_es_case_insensitive_como_el_php(self):
+        """El PHP compara con la collation de MySQL, que ignora mayúsculas."""
+        self.assertEqual(
+            ParametrosService.centro_costos("ftth", "i&m"), "[20(1)]"
+        )
+        self.assertEqual(
+            ParametrosService.centro_costos("  Ftth  "), "[20(1)]"
+        )
+
+    # -------------- correcciones de presentación ---------------- #
+    def test_subcentro_ausente_no_imprime_none(self):
+        """El JS imprimía `[23(None)]` en pantalla. Aquí sale `[23]`."""
+        self.assertEqual(ParametrosService.centro_costos("COMERCIAL"), "[23]")
+
+    def test_subcentro_array_se_lista_con_comas(self):
+        """El JS imprimía `[16([1])]`. Aquí sale `[16(1)]`."""
+        self.assertEqual(
+            ParametrosService.centro_costos("ANALISTAS"), "[16(1)]"
+        )
+
+    def test_array_vacio_omite_el_parentesis(self):
+        texto = ParametrosService._texto_centro_costos(
+            {"centro_costo": 5, "subcentro_costo": []}
+        )
+        self.assertEqual(texto, "[5]")
+
+    def test_sin_centro_de_costos_no_produce_texto(self):
+        self.assertIsNone(ParametrosService._texto_centro_costos({}))
+        self.assertIsNone(ParametrosService._texto_centro_costos(None))
+        self.assertIsNone(
+            ParametrosService._texto_centro_costos({"centro_costo": ""})
+        )
+
+    # ------------------------ catálogo -------------------------- #
+    def test_el_catalogo_no_mezcla_las_filas_area(self):
+        """`infraestructura_parametros` es polimórfica: solo CARPETA cuenta."""
+        catalogo = ParametrosService.catalogo_centros_costos()
+        # La fila tipo='AREA' trae centro_costo 99 y NO debe aparecer.
+        self.assertNotIn("[99", str(catalogo))
+        self.assertNotIn("I&M", catalogo)
+
+    def test_el_catalogo_consulta_una_sola_vez(self):
+        """Las 90 filas en 1 query: un listado no puede hacer 100."""
+        with self.assertNumQueries(1):
+            catalogo = ParametrosService.catalogo_centros_costos()
+        self.assertIn("BROWNFIELD", catalogo)
+        self.assertEqual(len(catalogo["BROWNFIELD"]), 2)
+
+    def test_resolver_con_catalogo_inyectado_no_consulta(self):
+        """El serializer cachea el catálogo por request: 0 queries extra."""
+        catalogo = ParametrosService.catalogo_centros_costos()
+        with self.assertNumQueries(0):
+            self.assertEqual(
+                ParametrosService.centro_costos("BROWNFIELD", "I&M", catalogo),
+                "[20(1)]",
+            )
+
+    # --------------------- solo lectura ------------------------- #
+    def test_no_permite_escribir_en_la_tabla_legacy(self):
+        """La promesa de solo lectura está impuesta por el código."""
+        fila = InfraestructuraParametro(
+            tipo="CARPETA", valor="X", condicion="Y", datos={}
+        )
+        with self.assertRaises(NotSupportedError):
+            fila.save()
+        with self.assertRaises(NotSupportedError):
+            fila.delete()
+
+    def test_no_puede_instanciar_sobre_una_fila_existente_y_borrarla(self):
+        """Tampoco se borra una fila real ya cargada."""
+        fila = InfraestructuraParametro.objects.filter(
+            tipo="CARPETA", valor="FTTH"
+        ).first()
+        self.assertIsNotNone(fila)
+        with self.assertRaises(NotSupportedError):
+            fila.delete()
+
+    # -------------------------- API ----------------------------- #
+    def test_listado_incluye_centro_costos(self):
+        vehiculo = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos("CC001")
+        )
+        hoy = timezone.localdate()
+        Salida.objects.create(
+            vehiculo=vehiculo,
+            fecha_salida=hoy,
+            area="I&M",
+            carpeta="BROWNFIELD",
+            valor_dia=Decimal("80000"),
+            estado=EstadoSalida.REPORTADO,
+        )
+        user = User.objects.create_user(username="1122", password="x")
+        api = APIClient()
+        api.force_authenticate(user=user)
+
+        resp = api.get("/transporte/salidas/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        fila = resp.json()["results"][0]
+        self.assertEqual(fila["carpeta"], "BROWNFIELD")
+        self.assertEqual(fila["area"], "I&M")
+        # Desambiguada por (carpeta, área), no las dos juntas.
+        self.assertEqual(fila["centro_costos"], "[20(1)]")
+
+    def test_listado_con_carpeta_sin_ccosto_dai_sin_asignar(self):
+        vehiculo = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos("CC002")
+        )
+        Salida.objects.create(
+            vehiculo=vehiculo,
+            fecha_salida=timezone.localdate(),
+            area="WOM",
+            carpeta="WOM",
+            valor_dia=Decimal("70000"),
+            estado=EstadoSalida.REPORTADO,
+        )
+        user = User.objects.create_user(username="1133", password="x")
+        api = APIClient()
+        api.force_authenticate(user=user)
+
+        resp = api.get("/transporte/salidas/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(
+            resp.json()["results"][0]["centro_costos"], "Sin asignar"
+        )
 

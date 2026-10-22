@@ -41,6 +41,7 @@ from .liquidacion import (
 )
 from .reporte_fotografico import ReporteFotograficoVehiculo, ReporteFotoImagen
 from .auditoria import AuditoriaLog
+from .infraestructura_parametro import InfraestructuraParametro
 from .wfm import AgendaLogistica, EstadoWfmJob, ResidencialWfm, WfmJob
 
 __all__ = [
@@ -77,4 +78,5 @@ __all__ = [
     "WfmJob",
     "ResidencialWfm",
     "AgendaLogistica",
+    "InfraestructuraParametro",
 ]

@@ -14,7 +14,11 @@ from django.db import IntegrityError, transaction
 
 from apps.empleados.models import Empleado
 
-from ..models import FechaLimiteCierre, JefeValidador
+from ..models import (
+    FechaLimiteCierre,
+    InfraestructuraParametro,
+    JefeValidador,
+)
 from .periodos import entero, validar_mes, validar_periodo, validar_anio
 
 
@@ -367,3 +371,122 @@ class ParametrosService:
             if empleado is not None:
                 # Asignación al cache del FK: posteriores lecturas no consultan.
                 jefe.empleado = empleado
+
+    # ------------------------------------------------------------------ #
+    # B11 · Área–carpeta con centro de costos
+    # ------------------------------------------------------------------ #
+    # Literal del legacy: transporte_salida_informes.php:4190.
+    SIN_ASIGNAR = "Sin asignar"
+
+    @staticmethod
+    def _normalizar(valor):
+        """Mayúsculas + sin espacios sobrantes: así comparan PHP y MySQL."""
+        return str(valor or "").strip().upper()
+
+    @staticmethod
+    def _texto_centro_costos(datos):
+        """
+        `[centro_costo(subcentro_costo)]` — el formato exacto que
+        `controller_cinco.js:3458` construye y el backoffice pinta.
+
+        **Corrección sobre el legacy:** el JS interpolaba en crudo, así que
+        imprimía `[23(None)]` cuando no había subcentro y `[16([1])]` cuando
+        era un array. Aquí se omite el paréntesis si no hay subcentro y se
+        lista el array con comas. Es un arreglo de PRESENTACIÓN, no de regla:
+        el número de centro de costos es idéntico.
+        """
+        if not isinstance(datos, dict):
+            return None
+        centro = datos.get("centro_costo")
+        if centro in (None, ""):
+            return None
+        sub = datos.get("subcentro_costo")
+        if sub is None or sub == "":
+            return "[%s]" % centro
+        if isinstance(sub, (list, tuple)):
+            if not sub:
+                return "[%s]" % centro
+            return "[%s(%s)]" % (centro, ", ".join(str(x) for x in sub))
+        return "[%s(%s)]" % (centro, sub)
+
+    @classmethod
+    def catalogo_centros_costos(cls):
+        """
+        Las filas `tipo='CARPETA'` (90 en la BD real) indexadas por carpeta.
+
+        Devuelve `{carpeta: [(area, texto), ...]}`. Una carpeta puede repetirse
+        con áreas distintas: son las **6 ambiguas** que el legacy no sabía
+        decidir (`BROWNFIELD`, `REPLANTEO`, `OBRA CIVIL`, `FORMACION`,
+        `COMUNICACIONES`, `SISTEMAS`).
+
+        Una sola query: el llamante la cachea por request y la reutiliza en
+        todas las filas del listado.
+        """
+        filas = InfraestructuraParametro.objects.filter(
+            tipo__iexact="CARPETA"
+        ).values_list("valor", "condicion", "datos")
+
+        catalogo = {}
+        for valor, condicion, datos in filas:
+            texto = cls._texto_centro_costos(datos)
+            if texto is None:
+                continue
+            carpeta = cls._normalizar(valor)
+            if not carpeta:
+                continue
+            registro = (cls._normalizar(condicion), texto)
+            if registro not in catalogo.setdefault(carpeta, []):
+                catalogo[carpeta].append(registro)
+        return catalogo
+
+    @classmethod
+    def centro_costos(cls, carpeta, area=None, catalogo=None):
+        """
+        Centro de costos de una salida (B11 · §6).
+
+        Tres pasos, en este orden:
+
+        1. **(carpeta, área)** — desambigua las carpetas con dos centros de
+           costo. Verificado sobre las **146.278 salidas vivas**: resuelve
+           **136.589 exactamente** y deja **1 sola** ambigua. El legacy no
+           hacía esto: acumulaba todas las opciones en un `Set` y le pasaba
+           la decisión al contador.
+        2. **Carpeta única** — el área ni hizo falta.
+        3. **Fallback** — o la carpeta no está en infraestructura (5,9 % de
+           las salidas) o sigue ambigua: se muestran todas unidas con `; `
+           (idéntico a `Array.from(Set).join('; ')` en el JS) y, si no hay
+           ninguna, `Sin asignar`.
+
+        `catalogo` se inyecta desde el serializer para no consultar por fila:
+        un listado de 100 salidas hace **1 query**, no 100.
+        """
+        if catalogo is None:
+            catalogo = cls.catalogo_centros_costos()
+
+        clave = cls._normalizar(carpeta)
+        opciones = catalogo.get(clave) if clave else None
+        if not opciones:
+            return cls.SIN_ASIGNAR
+
+        # 1) desambiguar por (carpeta, área)
+        if area:
+            area_n = cls._normalizar(area)
+            exactas = [texto for a, texto in opciones if a == area_n]
+            if exactas:
+                return cls._unir(exactas)
+
+        # 2) la carpeta solo tiene un centro de costos
+        if len(opciones) == 1:
+            return opciones[0][1]
+
+        # 3) sigue ambigua: todas, como el legacy
+        return cls._unir([texto for _a, texto in opciones])
+
+    @staticmethod
+    def _unir(textos):
+        """Deduplica y une con `; ` — idéntico a `Array.from(Set).join('; ')`."""
+        salida = []
+        for texto in textos:
+            if texto not in salida:
+                salida.append(texto)
+        return "; ".join(salida)

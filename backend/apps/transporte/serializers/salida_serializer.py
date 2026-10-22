@@ -20,7 +20,7 @@ from rest_framework import serializers
 
 from ..models import Salida, SalidaHistorial, TipoNovedad
 from ..models.vehiculo import Vehiculo
-from ..services import SalidaService
+from ..services import ParametrosService, SalidaService
 
 # Anotación OpenAPI de los "*_detalle": objeto {nombre, cedula} o null.
 # Es SOLO un esquema (no un campo declarado) y por eso vive fuera de la clase:
@@ -44,6 +44,8 @@ class SalidaSerializer(serializers.ModelSerializer):
     conductor_detalle = serializers.SerializerMethodField()
     tecnico_asignado_detalle = serializers.SerializerMethodField()
     novedad_detalle = serializers.SerializerMethodField()
+    # B11: centro de costos de la carpeta de la salida.
+    centro_costos = serializers.SerializerMethodField()
 
     class Meta:
         model = Salida
@@ -59,6 +61,7 @@ class SalidaSerializer(serializers.ModelSerializer):
             "es_disponible",
             "area",
             "carpeta",
+            "centro_costos",
             "sede",
             "valor_dia",
             "estado",
@@ -74,6 +77,7 @@ class SalidaSerializer(serializers.ModelSerializer):
             "estado",
             "reportado",
             "valor_novedad",
+            "centro_costos",
             "total_a_pagar",
             "puede_gestionar",
             "creado_en",
@@ -84,6 +88,24 @@ class SalidaSerializer(serializers.ModelSerializer):
         """Columna B10: valor de la novedad (0 si no tiene)."""
         novedad = getattr(obj, "novedad", None)
         return novedad.valor if novedad else Decimal("0")
+
+    @extend_schema_field(str)
+    def get_centro_costos(self, obj):
+        """B11: centro de costos de la carpeta de la salida.
+
+        Fallback `Sin asignar` (literal del legacy) cuando la carpeta no
+        está en `infraestructura_parametros`.
+
+        El catálogo (90 filas) se cachea en el contexto: un listado de
+        100 salidas hace **1 query**, no 100.
+        """
+        catalogo = self.context.get("catalogo_centros_costos")
+        if catalogo is None:
+            catalogo = ParametrosService.catalogo_centros_costos()
+            self.context["catalogo_centros_costos"] = catalogo
+        return ParametrosService.centro_costos(
+            obj.carpeta, obj.area, catalogo
+        )
 
     @extend_schema_field(Decimal)
     def get_total_a_pagar(self, obj):
