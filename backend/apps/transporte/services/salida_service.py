@@ -71,6 +71,7 @@ from ..models import (
     Vehiculo,
 )
 from . import calendario
+from .nokia import lineas_nokia, nokia_configurada
 from .parametros_service import ParametrosService
 from .permiso_service import PermisoService
 
@@ -417,6 +418,205 @@ class SalidaService:
             "registro": registro,
             "salida": salida_viva,
         }
+
+    # ------------------------------------------------------------------ #
+    # B9 · Ficha del móvil
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def buscar_movil(cedula, hoy=None):
+        """
+        Ficha de un MÓVIL (B9 · §5.1): quién es, qué vehículo tiene
+        asignado y con qué salida salió hoy.
+
+        Cascada (la del plan §5.1, en este orden):
+          1) **Conductor externo** — `transporte_base_conductores` → `Conductor`.
+          2) **Personal de nómina** — `cinco_base_de_personal` → `Empleado`.
+          3) **Línea corporativa** — `nokia_base_lineas` (BD negra). No está
+             disponible: el alias `negra` no existe en `DATABASES` (gate
+             G4/D-A10). Se informa con `nokia_disponible=False` en vez de
+             fallar.
+
+        Esta cascada es la versión normalizada del `movil_sale` legacy, que
+        guardaba en UNA sola columna valores de tres naturalezas distintas:
+        la cédula de un transporte externo, la de un empleado de nómina, o la
+        sentinela `'disponible'`. En Django eso son tres campos (`conductor`,
+        `tecnico_asignado`, `es_disponible`), así que la cascada mapea 1:1.
+
+        Cross-database (D-A10): **nunca** JOIN hacia `Empleado` (vive en
+        'azul', `managed=False`). Se resuelve en dos pasos: cédula → Empleado
+        (1 query) y placa → Vehiculo (otra query). Igual que
+        `ParametrosService._adjuntar_empleados`.
+
+        `hoy` es inyectable para poder probar el "salida de hoy" sin
+        congelar el reloj.
+        """
+        cedula = str(cedula or "").strip()
+        if not cedula:
+            raise ValueError("La cédula es obligatoria.")
+
+        hoy = hoy or timezone.localdate()
+        ficha = {
+            "cedula": cedula,
+            # `origen` dice en qué escalón de la cascada se resolvió.
+            "origen": None,
+            "nombre": None,
+            "area": None,
+            "carpeta": None,
+            "sede": None,
+            "movil": None,
+            "cargo": None,
+            "activo": None,
+            # Vehículo ASIGNADO al móvil (el `placa` del personal).
+            "vehiculo": None,
+            "vehiculo_placa": None,
+            # Salida de HOY de ese móvil y el vehículo con el que salió.
+            "salida": None,
+            "vehiculo_sale": None,
+            # Estado de la 3ª fuente de la cascada.
+            "nokia_disponible": False,
+        }
+
+        # --- 1) Conductor externo -------------------------------------- #
+        conductor = Conductor.objects.filter(cedula=cedula).first()
+        if conductor is not None:
+            ficha["origen"] = "conductor_externo"
+            ficha["nombre"] = conductor.nombre_completo
+            ficha["movil"] = conductor.celular or None
+            ficha["activo"] = conductor.activo
+            # Un conductor externo NO tiene área/carpeta en el modelo: en el
+            # legacy salían de la fila del vehículo (ver más abajo).
+            salida = SalidaService._salida_de_hoy(
+                conductor_id=conductor.pk, hoy=hoy
+            )
+        else:
+            # --- 2) Personal de nómina (BD azul) ---------------------- #
+            empleado = (
+                Empleado.objects.filter(cedula=cedula)
+                .only(
+                    "id",
+                    "cedula",
+                    "nombre",
+                    "apellido",
+                    "area",
+                    "carpeta",
+                    "sede",
+                    "placa",
+                    "movil",
+                    "cargo",
+                    "estado",
+                )
+                .first()
+            )
+            if empleado is None:
+                # --- 3) Línea corporativa (gate G4/D-A10) --------------- #
+                # No hay alias `negra` en DATABASES: se consulta (y si no
+                # está, degrada) en vez de fallar. La ficha se entrega
+                # igual, sin la fuente Nokia.
+                lineas, nokia_ok = lineas_nokia(cedula)
+                ficha["nokia_disponible"] = nokia_ok
+                if lineas:
+                    # La cédula es una LÍNEA corporativa: es un móvil de la
+                    # empresa, no una persona (así la tenía el legacy).
+                    ficha["origen"] = "linea_corporativa"
+                    ficha["movil"] = ", ".join(lineas)
+                return ficha
+
+            ficha["origen"] = "personal"
+            ficha["nombre"] = " ".join(
+                parte for parte in (empleado.nombre, empleado.apellido) if parte
+            ).strip()
+            ficha["area"] = empleado.area or None
+            ficha["carpeta"] = empleado.carpeta or None
+            ficha["sede"] = empleado.sede or None
+            ficha["movil"] = empleado.movil or None
+            ficha["cargo"] = empleado.cargo or None
+            ficha["activo"] = (
+                str(empleado.estado or "").upper() == "ACTIVO"
+            )
+            salida = SalidaService._salida_de_hoy(
+                tecnico_asignado_id=empleado.pk, hoy=hoy
+            )
+
+            # Vehículo asignado: `cinco_base_de_personal.placa` → Vehiculo.
+            # (Segunda fuente de verdad de la placa del móvil, junto a la BD
+            # negra; D-A9 sigue abierta.)
+            if empleado.placa:
+                vehiculo = Vehiculo.objects.filter(
+                    placa=str(empleado.placa).strip().upper()
+                ).first()
+                if vehiculo is not None:
+                    ficha["vehiculo_placa"] = vehiculo.placa
+                    ficha["vehiculo"] = {
+                        "id": vehiculo.pk,
+                        "placa": vehiculo.placa,
+                        "marca": vehiculo.marca,
+                        "referencia": vehiculo.referencia,
+                        "tipo_vehiculo": vehiculo.tipo_vehiculo,
+                        "ciudad_operacion": vehiculo.ciudad_operacion,
+                        "activo": vehiculo.activo,
+                    }
+
+        # --- La salida de hoy y el vehículo con el que salió ----------- #
+        if salida is not None:
+            ficha["salida"] = {
+                "id": salida.pk,
+                "fecha_salida": salida.fecha_salida.isoformat(),
+                "estado": salida.estado,
+                "area": salida.area or None,
+                "carpeta": salida.carpeta or None,
+                "sede": salida.sede or None,
+                "valor_dia": str(salida.valor_dia),
+                "es_disponible": salida.es_disponible,
+                "reportado": salida.reportado,
+            }
+            # El área/carpeta de la ficha: si el móvil es un empleado de
+            # nómina, manda la suya; si es un conductor externo, la que
+            # quedó en el snapshot de la salida (el legacy la tomaba de ahí).
+            if not ficha["area"]:
+                ficha["area"] = salida.area or None
+                ficha["carpeta"] = ficha["carpeta"] or salida.carpeta or None
+                ficha["sede"] = ficha["sede"] or salida.sede or None
+            vehiculo_sale = salida.vehiculo
+            ficha["vehiculo_sale"] = {
+                "id": vehiculo_sale.pk,
+                "placa": vehiculo_sale.placa,
+                "marca": vehiculo_sale.marca,
+                "referencia": vehiculo_sale.referencia,
+                "tipo_vehiculo": vehiculo_sale.tipo_vehiculo,
+                "ciudad_operacion": vehiculo_sale.ciudad_operacion,
+            }
+        return ficha
+
+    @staticmethod
+    def _salida_de_hoy(conductor_id=None, tecnico_asignado_id=None, hoy=None):
+        """
+        Salida viva de HOY de un móvil (la de la ficha B9).
+
+        Excluye `ELIMINADO` (borrado lógico: no cuenta como salida viva, la
+        misma regla que usa `listar`).
+
+        `prefetch_related("tecnico_asignado")` y NO `select_related`: el
+        técnico vive en la BD 'azul' y un JOIN ahí es imposible (D-A10).
+        """
+        hoy = hoy or timezone.localdate()
+        queryset = Salida.objects.filter(
+            fecha_salida=hoy
+        ).exclude(estado=EstadoSalida.ELIMINADO)
+        if conductor_id is not None:
+            queryset = queryset.filter(conductor_id=conductor_id)
+        if tecnico_asignado_id is not None:
+            queryset = queryset.filter(tecnico_asignado_id=tecnico_asignado_id)
+        return (
+            queryset.select_related("vehiculo", "conductor", "novedad")
+            .prefetch_related("tecnico_asignado")
+            .order_by("fecha_salida", "pk")
+            .first()
+        )
+
+    @staticmethod
+    def _nokia_disponible():
+        """¿Está configurada la BD negra (Nokia)? Gate G4 / D-A10."""
+        return nokia_configurada()
 
     # ------------------------------------------------------------------ #
     # Consulta (B1)

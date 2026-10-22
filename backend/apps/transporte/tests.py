@@ -5865,3 +5865,187 @@ class LicenciaYHiladosHuecosTests(TestCase):
         self.conductor.refresh_from_db()
         self.assertIsNone(self.conductor.posee_licencia)
 
+
+class FichaMovilB9Tests(TestCase):
+    """
+    B9 — ficha del móvil (`SalidaService.buscar_movil`, §5.1).
+
+    El legacy guardaba en UNA sola columna (`movil_sale`) valores de tres
+    naturalezas: la cédula de un transporte externo, la de un empleado de
+    nómina, o la sentinela 'disponible'. La cascada de `buscar_movil` es la
+    versión normalizada de eso: conductor externo → personal → línea
+    corporativa Nokia (esa última, tras el gate G4/D-A10).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()  # DDL antes de las transacciones
+        super().setUpClass()
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="1000888", password="x")
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.hoy = timezone.localdate()
+
+        self.vehiculo = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos("MOV001")
+        )
+        # Personal de nómina: es un móvil y tiene un vehículo ASIGNADO
+        # (cinco_base_de_personal.placa → transporte_vehiculo).
+        self.personal = Empleado.objects.create(
+            cedula="900900900",
+            codigo_sap="SAP-900900900",
+            nombre="ANA",
+            apellido="RUIZ",
+            area="OPERACIONES",
+            carpeta="LOGISTICA",
+            sede="MEDELLIN",
+            placa="MOV001",
+            movil="3001112222",
+            cargo="CONDUCTOR",
+            estado="ACTIVO",
+            password="",
+        )
+        # Transportista externo.
+        self.conductor = Conductor.objects.create(
+            cedula="800800800",
+            nombre_completo="CARLOS EXTERNO",
+            celular="3009998888",
+            fecha_ingreso=date(2024, 1, 1),
+        )
+
+    def _salida(self, **extra):
+        datos = {
+            "vehiculo": self.vehiculo,
+            "fecha_salida": self.hoy,
+            "area": "OPERACIONES",
+            "carpeta": "LOGISTICA",
+            "sede": "MEDELLIN",
+            "valor_dia": Decimal("85000"),
+            "estado": EstadoSalida.REPORTADO,
+        }
+        datos.update(extra)
+        return Salida.objects.create(**datos)
+
+    # ------------------------- la cascada ------------------------- #
+    def test_cascada_resuelve_personal_de_nomina(self):
+        ficha = SalidaService.buscar_movil("900900900")
+        self.assertEqual(ficha["origen"], "personal")
+        self.assertEqual(ficha["nombre"], "ANA RUIZ")
+        self.assertEqual(ficha["area"], "OPERACIONES")
+        self.assertEqual(ficha["carpeta"], "LOGISTICA")
+        self.assertEqual(ficha["sede"], "MEDELLIN")
+        self.assertEqual(ficha["movil"], "3001112222")
+        self.assertTrue(ficha["activo"])
+
+    def test_cascada_resuelve_conductor_externo(self):
+        ficha = SalidaService.buscar_movil("800800800")
+        self.assertEqual(ficha["origen"], "conductor_externo")
+        self.assertEqual(ficha["nombre"], "CARLOS EXTERNO")
+        self.assertEqual(ficha["movil"], "3009998888")
+        # Un conductor externo no tiene área en el modelo.
+        self.assertIsNone(ficha["area"])
+
+    def test_cedula_inexistente_no_revienta(self):
+        """Sin coincidencia solo podría resolverla la línea corporativa (G4)."""
+        ficha = SalidaService.buscar_movil("000000000")
+        self.assertIsNone(ficha["origen"])
+        self.assertIsNone(ficha["nombre"])
+        self.assertIsNone(ficha["salida"])
+        self.assertFalse(ficha["nokia_disponible"])
+
+    def test_cascada_usa_la_linea_corporativa_si_nokia_responde(self):
+        """3er escalón: la cédula es una línea corporativa de Nokia."""
+        with mock.patch(
+            "apps.transporte.services.salida_service.lineas_nokia",
+            return_value=(["3009990001", "3009990002"], True),
+        ):
+            ficha = SalidaService.buscar_movil("555000555")
+        self.assertEqual(ficha["origen"], "linea_corporativa")
+        self.assertEqual(ficha["movil"], "3009990001, 3009990002")
+        self.assertTrue(ficha["nokia_disponible"])
+
+    def test_cascada_degrada_cuando_nokia_no_esta_configurada(self):
+        """Sin alias 'negra' (gate G4) la ficha se entrega igual, sin 500."""
+        with mock.patch(
+            "apps.transporte.services.salida_service.lineas_nokia",
+            return_value=([], False),
+        ):
+            ficha = SalidaService.buscar_movil("555000555")
+        self.assertIsNone(ficha["origen"])
+        self.assertFalse(ficha["nokia_disponible"])
+
+    def test_cedula_vacia_da_error_legible(self):
+        with self.assertRaises(ValueError) as ctx:
+            SalidaService.buscar_movil("")
+        self.assertIn("cédula", str(ctx.exception))
+
+    # --------------------- vehiculo y salida --------------------- #
+    def test_vehiculo_asignado_viene_del_placa_del_personal(self):
+        ficha = SalidaService.buscar_movil("900900900")
+        self.assertEqual(ficha["vehiculo_placa"], "MOV001")
+        self.assertEqual(ficha["vehiculo"]["marca"], "KIA")
+        self.assertTrue(ficha["vehiculo"]["activo"])
+
+    def test_personal_sin_placa_no_tiene_vehiculo_asignado(self):
+        self.personal.placa = ""
+        self.personal.save()
+        ficha = SalidaService.buscar_movil("900900900")
+        self.assertIsNone(ficha["vehiculo"])
+        self.assertIsNone(ficha["vehiculo_placa"])
+
+    def test_salida_de_hoy_y_vehiculo_sale(self):
+        salida = self._salida(tecnico_asignado=self.personal)
+        ficha = SalidaService.buscar_movil("900900900")
+        self.assertIsNotNone(ficha["salida"])
+        self.assertEqual(ficha["salida"]["id"], salida.pk)
+        self.assertEqual(ficha["salida"]["estado"], EstadoSalida.REPORTADO)
+        self.assertEqual(ficha["salida"]["valor_dia"], "85000.00")
+        self.assertEqual(ficha["vehiculo_sale"]["placa"], "MOV001")
+
+    def test_salida_eliminada_no_cuenta_como_viva(self):
+        self._salida(tecnico_asignado=self.personal, estado=EstadoSalida.ELIMINADO)
+        ficha = SalidaService.buscar_movil("900900900")
+        self.assertIsNone(ficha["salida"])
+        self.assertIsNone(ficha["vehiculo_sale"])
+
+    def test_salida_de_otro_dia_no_cuenta(self):
+        self._salida(
+            tecnico_asignado=self.personal,
+            fecha_salida=self.hoy - timedelta(days=1),
+        )
+        ficha = SalidaService.buscar_movil("900900900")
+        self.assertIsNone(ficha["salida"])
+
+    def test_conductor_externo_toma_el_area_del_snapshot_de_la_salida(self):
+        """El legacy sacaba área/carpeta del vehículo, no del conductor."""
+        self._salida(conductor=self.conductor)
+        ficha = SalidaService.buscar_movil("800800800")
+        self.assertEqual(ficha["area"], "OPERACIONES")
+        self.assertEqual(ficha["carpeta"], "LOGISTICA")
+        self.assertEqual(ficha["sede"], "MEDELLIN")
+
+    # ---------------------------- API ----------------------------- #
+    def test_api_devuelve_ok_data(self):
+        self._salida(tecnico_asignado=self.personal)
+        resp = self.api.get("/transporte/personas/900900900/ficha-movil/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        payload = resp.json()
+        self.assertTrue(payload["ok"])
+        data = payload["data"]
+        self.assertEqual(data["origen"], "personal")
+        self.assertEqual(data["vehiculo_placa"], "MOV001")
+        self.assertIsNotNone(data["salida"])
+        self.assertFalse(data["nokia_disponible"])
+
+    def test_api_cedula_inexistente_responde_200_con_ficha_vacia(self):
+        resp = self.api.get("/transporte/personas/000000000/ficha-movil/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertIsNone(resp.json()["data"]["origen"])
+
+    def test_api_exige_autenticacion(self):
+        anonimo = APIClient()
+        resp = anonimo.get("/transporte/personas/900900900/ficha-movil/")
+        self.assertIn(resp.status_code, (401, 403))
+

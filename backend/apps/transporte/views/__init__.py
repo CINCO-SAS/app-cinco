@@ -11,6 +11,7 @@ from .jefe_view import JefeValidadorViewSet
 from .kiosco_view import KioscoViewSet
 from .liquidacion_view import LiquidacionViewSet
 from .permiso_view import PermisoViewSet
+from .persona_view import PersonaViewSet
 from .planilla_view import PlanillaViewSet
 from .reporte_fotografico_view import ReporteFotograficoViewSet
 from .salida_view import SalidaViewSet
@@ -26,6 +27,7 @@ __all__ = [
     "KioscoViewSet",
     "LiquidacionViewSet",
     "PermisoViewSet",
+    "PersonaViewSet",
     "PlanillaViewSet",
     "ReporteFotograficoViewSet",
     "SalidaViewSet",

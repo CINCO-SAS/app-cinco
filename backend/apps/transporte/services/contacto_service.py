@@ -28,12 +28,11 @@ Reglas de esta implementación:
 
 Este servicio es de SOLO LECTURA: no escribe en ninguna base.
 """
-from django.conf import settings
-
 from apps.empleados.models import Empleado
 
 from ..models import Conductor
 from .flota_service import FlotaService
+from .nokia import lineas_nokia
 
 # Alias de la base negra (Nokia). No está en DATABASES: aparece con el gate
 # G2 (conectividad a las 3 bases). Si no existe, la línea corporativa se
@@ -163,42 +162,14 @@ class ContactoService:
 
         HOY devuelve `([], False)`: el alias 'negra' no está en DATABASES
         (gate G2 — conectividad a las 3 bases). Cuando se añada el alias, la
-        consulta queda implementada aquí y basta con añadir el alias a
-        settings; el resto del flujo no cambia.
+        consulta queda implementada en `services/nokia.py` y basta con añadir
+        el alias a settings; el resto del flujo no cambia.
 
         La degradación es deliberada: es preferible mostrar 4 de 5 fuentes con
         un aviso "no disponible" a devolver un 500 y dejar al usuario sin
         ninguna ficha.
         """
-        if not cedula:
-            return [], False
-        if ALIAS_NOKIA not in settings.DATABASES:
-            return [], False
-
-        from django.db import connections
-
-        try:
-            with connections[ALIAS_NOKIA].cursor() as cursor:
-                cursor.execute(
-                    f"SELECT DISTINCT `{COLUMNA_NOKIA_NUMERO}` "  # noqa: S608
-                    f"FROM `{TABLA_NOKIA_LINEAS}` "
-                    f"WHERE `{COLUMNA_NOKIA_ASIGNADO}` = %s",
-                    [cedula],
-                )
-                filas = cursor.fetchall()
-        except Exception:  # noqa: BLE001 - la BD negra es opcional (gate G2)
-            # Si la base no responde, la ficha se entrega igual sin la línea
-            # corporativa: es información, no un flujo crítico.
-            return [], False
-
-        numeros = []
-        for (numero,) in filas:
-            if numero is None:
-                continue
-            texto = str(numero).strip()
-            if texto and texto not in numeros:
-                numeros.append(texto)
-        return numeros, True
+        return lineas_nokia(cedula)
 
     # ------------------------------------------------------------------ #
     # Utilidades

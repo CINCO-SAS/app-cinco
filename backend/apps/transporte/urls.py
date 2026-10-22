@@ -27,6 +27,7 @@ from .views import (
     KioscoViewSet,
     LiquidacionViewSet,
     PermisoViewSet,
+    PersonaViewSet,
     PlanillaViewSet,
     ReporteFotograficoViewSet,
     SalidaViewSet,
@@ -47,6 +48,9 @@ router.register(
 router.register(
     r"liquidaciones", LiquidacionViewSet, basename="liquidaciones"
 )
+# B9: ficha del móvil (la "pk" del recurso es la CÉDULA, no un id).
+# GET /personas/{cedula}/ficha-movil/ → SalidaService.buscar_movil.
+router.register(r"personas", PersonaViewSet, basename="personas")
 # F5-6: Planilla Oficial de Salida consolidada (S5 / CR-11).
 # Alcances: PLACA | PROPIO | EXTERNO | RENTING | TODAS.
 # POST /planillas/generar/ → genera la planilla con consecutivo atómico y QR en disco.
