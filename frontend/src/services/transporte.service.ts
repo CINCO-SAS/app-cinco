@@ -15,10 +15,21 @@ import {
 import type {
   Conductor,
   ConductorListado,
+  CuentaCobroParams,
   DatosBancariosVehiculo,
   DocumentoVehiculo,
+  FiltrosInformeArea,
+  FiltrosInformeMensual,
+  InformeArea,
+  InformeAreasMes,
+  InformeAreasPeriodo,
+  InformeDia,
+  InformeLiquidacion,
+  InformeNomina,
+  InformeSeriesChart,
   Mantenimiento,
   Novedad,
+  PeriodoInforme,
   RegistrarSalidaPayload,
   ReporteFotografico,
   RespuestaAccion,
@@ -26,6 +37,7 @@ import type {
   ResultadoValidacionSalida,
   Salida,
   SalidaHistorial,
+  SerieChartParams,
   Vehiculo,
   VehiculoListado,
   VehiculoPayload,
@@ -373,51 +385,98 @@ export const transporteService = {
 
   // ==========================================================================
   // Informes (F5) — tablero de gestión
+  //
+  // Todos, salvo `mensual` y `cuenta-cobro`, envuelven su respuesta en
+  // `{ok, data}` (contrato de las acciones de informes): aquí se
+  // desempaqueta para que quien llama reciba el dato y no la envoltura.
+  // `mensual` viene paginado de DRF y `cuenta-cobro` devuelve HTML.
   // ==========================================================================
 
-  getInformeCuentaCobro: async (params: ParamsBusqueda): Promise<unknown> => {
+  /**
+   * F5-1: cuenta de cobro imprimible del alquiler (HTML).
+   *
+   * El importe y el pagador se calculan EN SERVIDOR desde las salidas del
+   * mes: aquí solo viajan placa + periodo. El legacy recibía esos valores
+   * en campos ocultos del formulario, manipulables desde el navegador.
+   */
+  getInformeCuentaCobro: async (params: CuentaCobroParams): Promise<string> => {
     const res = await api.get(`${BASE}/informes/cuenta-cobro/`, { params });
-    return res.data;
+    return typeof res.data === "string" ? res.data : "";
   },
 
-  getSeriesChart: async (params: ParamsBusqueda): Promise<unknown> => {
+  /** F5-2: series del gráfico "Pagos por Mes, por Área" (sin año = histórico). */
+  getSeriesChart: async (
+    params?: SerieChartParams,
+  ): Promise<InformeSeriesChart> => {
     const res = await api.get(`${BASE}/informes/series-chart/`, { params });
-    return res.data;
+    return (res.data?.data ?? res.data) as InformeSeriesChart;
   },
 
-  getInformeMensual: async (params: ParamsBusqueda): Promise<unknown> => {
+  /**
+   * F5-3: informe mensual día a día, paginado (server-side pagina y filtra).
+   *
+   * Es el ÚNICO de los 9 que no envuelve en `{ok, data}`: `mensual` usa
+   * `get_paginated_response`, así que devuelve `{count, next, previous,
+   * results}`. Las filas son `Salida` completas (con `centro_costos`, B11).
+   *
+   * `count` es el total REAL del filtro, útil para el paginador.
+   */
+  getInformeMensual: async (
+    params: FiltrosInformeMensual & { page?: number; page_size?: number },
+  ): Promise<RespuestaPaginada<Salida>> => {
     const res = await api.get(`${BASE}/informes/mensual/`, { params });
-    return res.data;
+    return normalizarPagina<Salida>(res.data);
   },
 
-  getInformeDia: async (params: ParamsBusqueda): Promise<unknown> => {
+  /** F5-7: agregado de UNA fecha, con desglose por área y por carpeta. */
+  getInformeDia: async (params: { fecha: string }): Promise<InformeDia> => {
     const res = await api.get(`${BASE}/informes/dia/`, { params });
-    return res.data;
+    return (res.data?.data ?? res.data) as InformeDia;
   },
 
-  getInformeAreas: async (params: ParamsBusqueda): Promise<unknown> => {
+  /** F5-7: áreas presentes en el periodo (para poblar el filtro del mes). */
+  getInformeAreas: async (
+    params: PeriodoInforme,
+  ): Promise<InformeAreasPeriodo> => {
     const res = await api.get(`${BASE}/informes/areas/`, { params });
-    return res.data;
+    return (res.data?.data ?? res.data) as InformeAreasPeriodo;
   },
 
-  getInformeArea: async (params: ParamsBusqueda): Promise<unknown> => {
+  /**
+   * F5-7: agregado del mes por área con desglose por carpetas.
+   * `solo_aprobados` es el interruptor de la sábana (bloque "Mes").
+   */
+  getInformeArea: async (params: FiltrosInformeArea): Promise<InformeArea> => {
     const res = await api.get(`${BASE}/informes/area/`, { params });
-    return res.data;
+    return (res.data?.data ?? res.data) as InformeArea;
   },
 
-  getInformeAreasMes: async (params: ParamsBusqueda): Promise<unknown> => {
+  /** F5-7: matriz área × meses del año (base del gráfico y de Día a Día). */
+  getInformeAreasMes: async (params: {
+    anio: number;
+  }): Promise<InformeAreasMes> => {
     const res = await api.get(`${BASE}/informes/areas-mes/`, { params });
-    return res.data;
+    return (res.data?.data ?? res.data) as InformeAreasMes;
   },
 
-  getInformeNomina: async (params: ParamsBusqueda): Promise<unknown> => {
+  /**
+   * F5-7: nómina del mes por (carpeta, placa). Excluye REPORTADO/ELIMINADO;
+   * retefuente 1 %; pagador desde los datos bancarios del vehículo.
+   */
+  getInformeNomina: async (params: PeriodoInforme): Promise<InformeNomina> => {
     const res = await api.get(`${BASE}/informes/nomina/`, { params });
-    return res.data;
+    return (res.data?.data ?? res.data) as InformeNomina;
   },
 
-  getInformeLiquidacion: async (params: ParamsBusqueda): Promise<unknown> => {
+  /**
+   * F5-7: liquidación por placa (UNA fila por vehículo). Mismos criterios
+   * que nómina; el importe a pagar es `pagar`.
+   */
+  getInformeLiquidacion: async (
+    params: PeriodoInforme,
+  ): Promise<InformeLiquidacion> => {
     const res = await api.get(`${BASE}/informes/liquidacion/`, { params });
-    return res.data;
+    return (res.data?.data ?? res.data) as InformeLiquidacion;
   },
 
   // ==========================================================================

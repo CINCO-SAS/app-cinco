@@ -400,6 +400,276 @@ export interface VehiculoResuelto {
 }
 
 // ---------------------------------------------------------------------------
+// Informes / sábana (F5) — services/informe_service.py
+// ---------------------------------------------------------------------------
+//
+// ⚠ FORMATO DEL DINERO: conviven dos formas según cómo serialize el backend.
+//
+//  · Agregados (`dia`, `area`, `areas-mes`, `nomina`, `liquidacion`):
+//    `InformeService` devuelve `Decimal` CRUDO dentro de `Response()` y el
+//    encoder de DRF lo convierte en **number**
+//    (`rest_framework/utils/encoders.py:43-45`).
+//  · Filas de salida (`mensual`): pasan por `SalidaSerializer`, cuyo
+//    `DecimalField` los envía como **string**.
+//
+// Por eso aquí los importes de agregado son `number` y los de `Salida`
+// siguen siendo `string`. Quien formatee debe saber cuál es cuál.
+// (Decisión pendiente: unificar a string en backend.)
+
+/** Parámetros de los endpoints con periodo (mes/año). */
+export interface PeriodoInforme {
+  mes: number;
+  anio: number;
+}
+
+/** `GET /informes/mensual/` — periodo + filtros server-side (§5.7). */
+export interface FiltrosInformeMensual extends PeriodoInforme {
+  estado?: string;
+  sede?: string;
+  area?: string;
+  carpeta?: string;
+  search?: string;
+}
+
+/** `GET /informes/cuenta-cobro/` — entrada mínima (F5-1). */
+export interface CuentaCobroParams extends PeriodoInforme {
+  /** Mayúsculas; el backend la normaliza. */
+  placa: string;
+}
+
+/** `GET /informes/series-chart/` — año opcional (sin año = histórico). */
+export interface SerieChartParams {
+  anio?: number;
+}
+
+/** `GET /informes/area/` — periodo + interruptor "Aprobados" de la sábana. */
+export interface FiltrosInformeArea extends PeriodoInforme {
+  /** true = los TOTALES solo suman APROBADO/VALIDADO (ver `arr_estado`). */
+  solo_aprobados?: boolean;
+}
+
+/** Contador de salidas + importe acumulado en UN estado. */
+export interface ContadorEstadoInforme {
+  cnt: number;
+  /** Decimal crudo → llega como número. Formatear en el front. */
+  valor: number;
+}
+
+/**
+ * `arr_estado` de un bloque agregado. El legacy llamaba `pendiente` a
+ * REPORTADO; el backend usa el nombre real del estado.
+ */
+export interface DesgloseEstadosInforme {
+  aprobado: ContadorEstadoInforme;
+  validado: ContadorEstadoInforme;
+  reportado: ContadorEstadoInforme;
+  rechazado: ContadorEstadoInforme;
+  /** Suma de los 4 anteriores (todas las filas del bloque). */
+  total: ContadorEstadoInforme;
+}
+
+/**
+ * Contadores de un bloque de agregado (`_bloque_vacio`).
+ *
+ * RENTING se cuenta APARTE: el legacy lo mezclaba dentro de `propios`.
+ * El legacy también pintaba `Ttl_Pro`/`Ttl_Ext` (dinero propio/externo por
+ * separado) y el backend NO los expone todavía — hueco E del informe F5.
+ */
+export interface BloqueAgregadoInforme {
+  propios: number;
+  renting: number;
+  externos: number;
+  total_vehi: number;
+  /** Σ `total_a_pagar` (valor_dia ± novedad) del bloque. */
+  total_dia: number;
+  /**
+   * Desglose por estado. SIEMPRE refleja todas las filas, aunque
+   * `solo_aprobados` haya restringido `total_dia` y los contadores.
+   */
+  arr_estado: DesgloseEstadosInforme;
+}
+
+/** Fila del desglose por carpetas dentro de un área. */
+export interface CarpetaInforme extends BloqueAgregadoInforme {
+  /** `'SIN CARPETA'` si la salida no traía carpeta. */
+  carpeta: string;
+}
+
+/** Área con su desglose por carpetas (bloques Día y Mes). */
+export interface AreaInforme extends BloqueAgregadoInforme {
+  /** En mayúsculas; `'SIN AREA'` si la salida no traía área. */
+  area: string;
+  carpetas: CarpetaInforme[];
+}
+
+/** `GET /informes/dia/?fecha=` → data del agregado de UNA fecha. */
+export interface InformeDia {
+  /** `YYYY-MM-DD`. */
+  fecha: string;
+  areas: AreaInforme[];
+}
+
+/** `GET /informes/area/?mes=&anio=&solo_aprobados=` → data del mes. */
+export interface InformeArea {
+  mes: number;
+  anio: number;
+  areas: AreaInforme[];
+}
+
+/** Fila de la matriz área × meses (solo los meses que tienen salidas). */
+export interface MesAreaInforme {
+  mes: number;
+  propios: number;
+  renting: number;
+  externos: number;
+  total_vehi: number;
+  total_dia: number;
+}
+
+export interface AreaMatrizInforme {
+  area: string;
+  meses: MesAreaInforme[];
+}
+
+/** `GET /informes/areas-mes/?anio=` → data de la matriz del año. */
+export interface InformeAreasMes {
+  anio: number;
+  areas: AreaMatrizInforme[];
+}
+
+/** `GET /informes/areas/?mes=&anio=` — áreas del periodo (poblar filtro). */
+export interface InformeAreasPeriodo {
+  areas: string[];
+}
+
+/**
+ * Fila de la nómina del mes, agrupada por (carpeta, placa).
+ * Excluye REPORTADO y ELIMINADO.
+ */
+export interface FilaNominaInforme {
+  mes: number;
+  placa: string;
+  /** `'SIN CARPETA'` si la salida no traía carpeta. */
+  carpeta: string;
+  /**
+   * B11: centro de costos de la carpeta. HOY VACÍO — `InformeService.nomina`
+   * aún no consume `ParametrosService.centro_costos` aunque B11 ya existe
+   * (deuda C del informe F5).
+   */
+  centro_costo: string;
+  area: string;
+  tipo_contrato: TipoContrato;
+  /** Pagador leído del dato bancario vigente EN SERVIDOR (CR-13); sin dato
+   *  bancario, el propietario del vehículo. */
+  cedula_pago: string;
+  nombre_pago: string;
+  total_dias: number;
+  /** `valor_dia` del PRIMER día del grupo (las novedades van en `valor_base`). */
+  valor_dia: number;
+  /** Σ `total_a_pagar` = valor_dia ± novedad, de todos los días del grupo. */
+  valor_base: number;
+  /** Estado de la PRIMERA salida del grupo (orden placa, fecha). */
+  estado: EstadoSalida;
+  observacion: string;
+  /** Consecutivo mensual si ya fue generado (A2); vacío si no. */
+  consecutivo: string;
+  /** Retefuente 1 % de `valor_base`. */
+  rte: number;
+  /** `valor_base − rte`. */
+  total_pagar: number;
+}
+
+/** `GET /informes/nomina/?mes=&anio=` → data de la nómina. */
+export interface InformeNomina {
+  mes: number;
+  anio: number;
+  filas: FilaNominaInforme[];
+}
+
+/** Fila de la liquidación por placa: UNA por vehículo del mes. */
+export interface FilaLiquidacionInforme {
+  placa: string;
+  /** `'SIN PROPIETARIO'` si el vehículo no traía propietario. */
+  propietario: string;
+  tipo_contrato: TipoContrato;
+  total_dias: number;
+  valor_dia: number;
+  valor_base: number;
+  cedula_pago: string;
+  nombre_pago: string;
+  tipo_cuenta: string;
+  banco: string;
+  cuenta_pago: string;
+  /** Consecutivo mensual si ya existe; vacío si no. */
+  consecutivo: string;
+  /** Retefuente 1 %. */
+  rte: number;
+  /** `valor_base − rte`. */
+  pagar: number;
+}
+
+/** `GET /informes/liquidacion/?mes=&anio=` → data de la liquidación. */
+export interface InformeLiquidacion {
+  mes: number;
+  anio: number;
+  filas: FilaLiquidacionInforme[];
+}
+
+/** Punto del gráfico: `["<mes>/1/<año>", importe]` — eje X de tiempo. */
+export type PuntoSerieInforme = [string, number];
+
+/** Serie del gráfico "Pagos por Mes, por Área" (F5-2). */
+export interface SerieInforme {
+  /** Nombre del área. */
+  name: string;
+  /** Solo el área I&M: va al eje secundario (derecha). */
+  yAxis?: "a2";
+  /** Solo el área I&M: estilo de línea/marcador del eje secundario. */
+  defaultPoint?: {
+    type: string;
+    marker: {
+      size: number;
+      type: string;
+      outline: { color: string; width: number };
+    };
+  };
+  points: PuntoSerieInforme[];
+}
+
+/** `GET /informes/series-chart/?anio=` → data del gráfico. */
+export interface InformeSeriesChart {
+  series: SerieInforme[];
+}
+
+/**
+ * Datos que el backend calcula EN SERVIDOR para la cuenta de cobro (F5-1).
+ *
+ * El endpoint NO devuelve este objeto: devuelve el HTML ya renderizado
+ * (que el navegador abre en pestaña nueva e imprime a PDF). El tipo
+ * documenta qué contiene ese documento y será la forma de la impresión
+ * múltiple cuando exista (hueco B3 del informe F5).
+ */
+export interface CuentaCobroInforme {
+  placa: string;
+  mes: number;
+  anio: number;
+  /** `'ENERO'` … `'DICIEMBRE'`. */
+  nombre_mes: string;
+  /** Último día del mes (texto "Del 01 de X al N de X"). */
+  ultimo_dia: number;
+  consecutivo: string;
+  total_dias: number;
+  valor_base: number;
+  retefuente: number;
+  pagar: number;
+  cedula_pago: string;
+  nombre_pago: string;
+  tipo_cuenta: string;
+  banco: string;
+  cuenta_pago: string;
+}
+
+// ---------------------------------------------------------------------------
 // Respuestas de acciones del backoffice (B4) y del kiosco (S1–S6)
 // ---------------------------------------------------------------------------
 

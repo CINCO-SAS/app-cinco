@@ -77,8 +77,10 @@ export const MODULOS_TRANSPORTE: ModuloTransporte[] = [
     pantallas: [
       // F4/B4: backoffice (Tab 1 del legacy).
       { segmento: "gestion", etiqueta: "Gestión de Salidas", disponible: false },
-      // F5: sábana de informes y nómina (Tab 2).
-      { segmento: "informes", etiqueta: "Informes", disponible: false },
+      // F5: sábana de informes y nómina (Tab 2). Pasos 2 completos
+      // (Transporte Día y Transporte Mes); el resto de bloques avanzan
+      // por pasos y quedan marcados dentro de la vista.
+      { segmento: "informes", etiqueta: "Informes", disponible: true },
       // F5: liquidaciones financieras (Tab 3).
       { segmento: "liquidaciones", etiqueta: "Liquidaciones", disponible: false },
       // F5-6: planilla oficial de salida F-104.
