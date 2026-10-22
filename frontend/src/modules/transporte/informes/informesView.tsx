@@ -2,10 +2,10 @@
 //
 // Pantalla de Informes (F5) — Tab 2 del legacy "TRANSPORTE / INFORMES".
 //
-// PANTALLA POR PASOS: hoy se entregan los bloques de los PASOS 2 y 3
-// (Transporte Día, Transporte Mes y Reporte Área). El resto del legacy —
-// Reporte Áreas, Día a Día, Área y Carpeta, Nómina, Liquidación y Cuenta
-// de Cobro— van delimitados por `BloquePendiente` para que se vea desde ya
+// PANTALLA POR PASOS: hoy se entregan los bloques de los PASOS 2, 3 y 4
+// (Transporte Día, Transporte Mes, Reporte Área y Reporte Áreas). El resto
+// del legacy — Día a Día, Área y Carpeta, Nómina, Liquidación y Cuenta de
+// Cobro— van delimitados por `BloquePendiente` para que se vea desde ya
 // QUÉ falta, sin inventar datos ni dejar huecos en blanco.
 //
 // PENDIENTE FUERA DE ESTOS PASOS: el legacy añadía en la cabecera de
@@ -27,8 +27,20 @@ import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import { useInformesData } from "./informesView.hooks";
 import { etiquetaFecha, etiquetaPeriodo } from "./informesView.utils";
 import { InformeBloque } from "./components/InformeBloque";
+import { InformeGraficoAreas } from "./components/InformeGraficoAreas";
 import { InformeReporteArea } from "./components/InformeReporteArea";
 import { InformeToolbar } from "./components/InformeToolbar";
+import type { AreaInforme, SerieInforme } from "@/types/transporte.types";
+
+/**
+ * Referencias ESTABLES para "aún no hay datos".
+ *
+ * Sin esto, `serieChart?.series ?? []` literal construiría un array nuevo
+ * en cada render, `useMemo` del gráfico lo detectaría como cambio y
+ * volvería a montar amCharts sin ningún motivo.
+ */
+const AREAS_VACIAS: AreaInforme[] = [];
+const SERIES_VACIAS: SerieInforme[] = [];
 
 /**
  * Reserva visible de un bloque del legacy que aún no se ha migrado en este
@@ -72,6 +84,9 @@ export const InformesView = () => {
     cargandoArea,
     errorDia,
     errorArea,
+    serieChart,
+    cargandoSerie,
+    errorSerie,
     recargar,
   } = useInformesData();
 
@@ -102,7 +117,7 @@ export const InformesView = () => {
         <InformeBloque
           titulo="Transporte Día"
           periodo={etiquetaFecha(fecha)}
-          areas={informeDia?.areas ?? []}
+          areas={informeDia?.areas ?? AREAS_VACIAS}
           isLoading={cargandoDia}
           error={errorDia}
         />
@@ -110,7 +125,7 @@ export const InformesView = () => {
         <InformeBloque
           titulo="Transporte Mes"
           periodo={etiquetaPeriodo(mes, anio)}
-          areas={informeArea?.areas ?? []}
+          areas={informeArea?.areas ?? AREAS_VACIAS}
           isLoading={cargandoArea}
           error={errorArea}
           nota={
@@ -135,16 +150,28 @@ export const InformesView = () => {
             nota="No responde al interruptor «Solo aprobados»: los estados se cuentan sobre todas las salidas del mes."
           >
             <InformeReporteArea
-              areas={informeArea?.areas ?? []}
+              areas={informeArea?.areas ?? AREAS_VACIAS}
               isLoading={cargandoArea}
             />
           </InformeBloque>
         )}
 
-        <BloquePendiente
-          titulo="Reporte Áreas"
-          motivo="Paso 4 del plan de migración: gráfico del año y matriz área × mes (/informes/areas-mes/)."
-        />
+        {/* Histórico completo: NO sigue al selector de periodo (así lo
+            cargaba el legacy y así lo eligió el negocio). Solo se mueve
+            con el botón ↻ de la barra. */}
+        <InformeBloque
+          titulo="Reporte Áreas · Pagos por Mes, por Área"
+          periodo="Histórico"
+          isLoading={cargandoSerie}
+          error={errorSerie}
+          nota="Histórico completo de salidas APROBADO/VALIDADO: no sigue el selector de año ni el interruptor de arriba."
+        >
+          <InformeGraficoAreas
+            series={serieChart?.series ?? SERIES_VACIAS}
+            isLoading={cargandoSerie}
+          />
+        </InformeBloque>
+
         <BloquePendiente
           titulo="Día a Día"
           motivo="Paso 5 del plan: matriz día × área del mes."

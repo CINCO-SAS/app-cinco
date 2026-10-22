@@ -19,7 +19,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "@/lib/errorHandler";
 import { logDevelopmentError } from "@/lib/environment";
 import { transporteService } from "@/services/transporte.service";
-import type { InformeArea, InformeDia } from "@/types/transporte.types";
+import type {
+  InformeArea,
+  InformeDia,
+  InformeSeriesChart,
+} from "@/types/transporte.types";
 import { fechaISO, ultimoDiaDelMes } from "./informesView.utils";
 
 /**
@@ -49,6 +53,12 @@ export const useInformesData = () => {
   const [informeDia, setInformeDia] = useState<InformeDia | null>(null);
   const [informeArea, setInformeArea] = useState<InformeArea | null>(null);
 
+  // Histórico completo: el gráfico NO sigue al selector de periodo (ver
+  // `cargarSeries`), así que su estado es independiente de mes/año/día.
+  const [serieChart, setSerieChart] = useState<InformeSeriesChart | null>(null);
+  const [cargandoSerie, setCargandoSerie] = useState(true);
+  const [errorSerie, setErrorSerie] = useState<string | null>(null);
+
   const [cargandoDia, setCargandoDia] = useState(true);
   const [cargandoArea, setCargandoArea] = useState(true);
 
@@ -61,6 +71,7 @@ export const useInformesData = () => {
   // llegue después (se vería diciembre rotulado con los datos de enero).
   const peticionDia = useRef(0);
   const peticionArea = useRef(0);
+  const peticionSerie = useRef(0);
 
   const maximoDia = useMemo(() => ultimoDiaDelMes(anio, mes), [anio, mes]);
   const fecha = useMemo(() => fechaISO(anio, mes, dia), [anio, mes, dia]);
@@ -118,6 +129,40 @@ export const useInformesData = () => {
     }
   }, [mes, anio, soloAprobados]);
 
+  /**
+   * Series del gráfico "Pagos por Mes, por Área".
+   *
+   * Se pide SIN año, es decir histórico completo: es lo que el legacy
+   * realmente dibujaba (`loadChartInfoMonthArea` se llamaba UNA sola vez
+   * en `DOMContentLoaded` y sin parámetros, y el eje X era de tipo
+   * `time`). Su rótulo decía "2024" fijo en el HTML y nunca se
+   * actualizaba; aquí el rótulo dice "Histórico" para no mentir.
+   *
+   * Por eso no entra en las dependencias de periodo: cambiar de mes o año
+   * no debe volver a pedirla.
+   */
+  const cargarSeries = useCallback(async () => {
+    const peticion = ++peticionSerie.current;
+    const esVigente = () => peticion === peticionSerie.current;
+
+    setCargandoSerie(true);
+    setErrorSerie(null);
+    try {
+      const resultado = await transporteService.getSeriesChart();
+      if (!esVigente()) return;
+      setSerieChart(resultado);
+    } catch (error) {
+      if (!esVigente()) return;
+      const apiError = error as ApiError;
+      setErrorSerie(
+        apiError?.message ?? "No fue posible cargar el gráfico de áreas.",
+      );
+      logDevelopmentError("Error cargando series del gráfico:", error);
+    } finally {
+      if (esVigente()) setCargandoSerie(false);
+    }
+  }, []);
+
   useEffect(() => {
     void cargarDia();
   }, [cargarDia]);
@@ -125,6 +170,10 @@ export const useInformesData = () => {
   useEffect(() => {
     void cargarArea();
   }, [cargarArea]);
+
+  useEffect(() => {
+    void cargarSeries();
+  }, [cargarSeries]);
 
   // -------------------------------------------------------------------------
   // Cambios de periodo. Al mover año o mes el día puede quedar fuera del
@@ -158,7 +207,8 @@ export const useInformesData = () => {
   const recargar = useCallback(() => {
     void cargarDia();
     void cargarArea();
-  }, [cargarDia, cargarArea]);
+    void cargarSeries();
+  }, [cargarDia, cargarArea, cargarSeries]);
 
   return {
     /** Periodo del bloque Día. */
@@ -184,6 +234,10 @@ export const useInformesData = () => {
     cargandoArea,
     errorDia,
     errorArea,
+    /** Histórico completo, independiente del periodo. */
+    serieChart,
+    cargandoSerie,
+    errorSerie,
     recargar,
   };
 };

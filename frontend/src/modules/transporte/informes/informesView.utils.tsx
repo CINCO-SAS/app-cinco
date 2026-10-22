@@ -33,6 +33,26 @@ export const MESES = [
 ] as const;
 
 /**
+ * Meses abreviados para ejes de gráfico (`Ene 2024`). Con histórico
+ * completo el eje acumula un punto por mes desde 2024, así que usar los
+ * nombres completos dejaría las etiquetas ilegibles.
+ */
+export const MESES_CORTOS = [
+  "Ene",
+  "Feb",
+  "Mar",
+  "Abr",
+  "May",
+  "Jun",
+  "Jul",
+  "Ago",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dic",
+] as const;
+
+/**
  * `$ 1.234.567` — sin decimales, igual que formateaba la sábana
  * (`toLocaleString('es-CO', {currency:'COP'})`).
  *
