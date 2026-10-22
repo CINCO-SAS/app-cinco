@@ -115,6 +115,39 @@ def cargar_conductores(filas, tamano_lote=2000, dry_run=False):
     return reporte
 
 
+def _enriquecer_conductor(conductor_id, licencia):
+    """
+    Rellena los datos de licencia del CONDUCTOR con los que traía la fila
+    legacy del vehículo (que duplicaba 4 columnas: `licencia`,
+    `estado_licencia`, `categoria` y `fecha_licencia`).
+
+    SOLO rellena campos que estén VACÍOS. Dos motivos:
+      · El resultado NO depende del orden de carga: un conductor puede tener
+        varios vehículos y el "último en ganaría" haría el resultado
+        dependiente del orden de las filas.
+      · Los datos propios de `transporte_base_conductores` mandan sobre la
+        copia del vehículo (que es solo un duplicado de la era legacy).
+
+    Es idempotente: volver a cargar el mismo lote no cambia nada.
+    """
+    if not licencia:
+        return
+    campos = {campo: valor for campo, valor in licencia.items() if valor is not None}
+    if not campos:
+        return
+    conductor = Conductor.objects.filter(pk=conductor_id).first()
+    if conductor is None:
+        return
+    a_actualizar = [
+        campo for campo, valor in campos.items() if not getattr(conductor, campo, None)
+    ]
+    if not a_actualizar:
+        return
+    for campo in a_actualizar:
+        setattr(conductor, campo, campos[campo])
+    conductor.save(update_fields=a_actualizar)
+
+
 def cargar_vehiculos(filas, tamano_lote=2000, dry_run=False):
     """Upsert de `transportadores_vehiculos` por placa + bancarios + pagos.
 
@@ -167,6 +200,11 @@ def cargar_vehiculos(filas, tamano_lote=2000, dry_run=False):
                         if cid:
                             vehiculo.conductor_habitual_id = cid
                             vehiculo.save(update_fields=["conductor_habitual"])
+                            # La fila legacy del vehículo duplicaba 4 columnas
+                            # de licencia del conductor: se las devolvemos.
+                            _enriquecer_conductor(
+                                cid, datos.get(conv.LICENCIA_CONDUCTOR)
+                            )
                         else:
                             _advertir(reporte, indice,
                                       "conductor cédula %s no existe" % cedula)

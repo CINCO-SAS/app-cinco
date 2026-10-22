@@ -28,6 +28,8 @@ class ConductorSerializer(serializers.ModelSerializer):
             "barrio",
             "licencia_categoria",
             "licencia_vencimiento",
+            "posee_licencia",
+            "situacion_licencia",
             "tipo_vinculacion",
             "fecha_ingreso",
             "fecha_egreso",
@@ -75,6 +77,8 @@ class ConductorListSerializer(serializers.ModelSerializer):
             "tipo_vinculacion",
             "licencia_categoria",
             "licencia_vencimiento",
+            "posee_licencia",
+            "situacion_licencia",
             "estado_licencia",
             "activo",
         ]

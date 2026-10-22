@@ -12,6 +12,8 @@ valor_dia / area_sale / carpeta_sale / sede_sale mapean al modelo Salida.
 """
 from ..models.choices import (
     CategoriaLicencia,
+    EstadoLicencia,
+    PoseeLicencia,
     TipoContrato,
     TipoNovedad,
     TipoPago,
@@ -29,6 +31,10 @@ ADVERTENCIAS = "_advertencias"
 PLACA = "_placa"
 CEDULA_CONDUCTOR = "_cedula_conductor"
 CEDULA_TECNICO = "_cedula_tecnico"
+# Datos de licencia que la fila legacy del VEHÍCULO duplicaba del conductor.
+# En Django viven en `Conductor` (que es de quien son), así que se extraen
+# aparte para ENRIQUECERLO en carga.py (§7.3).
+LICENCIA_CONDUCTOR = "_licencia_conductor"
 
 # Campos que el modelo NO persiste (verificado: se descartan en el modelo
 # legacy → Django; se reportan como descarte para conciliar con §7.1).
@@ -119,6 +125,9 @@ def convertir_vehiculo(fila):
         ),
         "marca": nz.texto(fila.get("marca"), "marca", requerido=True),
         "modelo_anio": nz.entero(fila.get("modelo"), "modelo"),
+        # Legacy `cilindraje` varchar(11) "numérico como texto": se conserva
+        # como TEXTO (el legacy lo guardaba con strtoupper y sin normalizar).
+        "cilindraje": nz.texto(fila.get("cilindraje")) or None,
         "color": nz.texto(fila.get("color")),
         "municipio_matricula": nz.texto(fila.get("municipio_matricula")),
         "numero_motor": nz.texto(fila.get("numero_motor")),
@@ -144,10 +153,66 @@ def convertir_vehiculo(fila):
         "activo": nz.activo_por_estado(fila.get("estado")),
         # FK por cédula resuelta en carga.py (§7.3).
         CEDULA_CONDUCTOR: nz.texto(fila.get("cedual_conductor")) or None,
+        # Licencia del conductor que la fila del vehículo duplicaba.
+        LICENCIA_CONDUCTOR: _licencia_del_vehiculo(fila, advertencias),
         REL_BANCARIOS: bancarios,
         REL_PAGOS: pagos,
         ADVERTENCIAS: advertencias,
     }
+
+
+def _licencia_del_vehiculo(fila, advertencias):
+    """
+    Datos de licencia del CONDUCTOR, extraídos de la fila legacy del vehículo.
+
+    En `transportadores_vehiculos` el legacy duplicaba 4 columnas que en
+    realidad son del conductor:
+      · `licencia`        → SI / NO / NO APLICA  (¿tiene licencia?)
+      · `estado_licencia` → ACTIVA / INACTIVA
+      · `categoria`       → A1..C3               (clase de la licencia)
+      · `fecha_licencia`  → vencimiento
+
+    En Django viven en `Conductor`, así que se devuelven aparte para
+    enriquecerlo en `carga.py`. Solo se devuelven valores VÁLIDOS: uno fuera
+    de catálogo se descarta con advertencia en vez de ensuciar el modelo.
+
+    Nota: `categoria` usa el catálogo ampliado (A1..C3). Con el catálogo
+    reducido a B1/C1/C2/C3, las licencias A1/A2/B2/B3 del legacy se perdían.
+    """
+    datos = {}
+
+    tiene = nz.texto(fila.get("licencia"))
+    if tiene:
+        if tiene.upper() in PoseeLicencia.values:
+            datos["posee_licencia"] = tiene.upper()
+        else:
+            advertencias.append(
+                f"licencia '{tiene}' fuera de catálogo → NULL"
+            )
+
+    estado = nz.texto(fila.get("estado_licencia"))
+    if estado:
+        if estado.upper() in EstadoLicencia.values:
+            datos["situacion_licencia"] = estado.upper()
+        else:
+            advertencias.append(
+                f"estado_licencia '{estado}' fuera de catálogo → NULL"
+            )
+
+    categoria = nz.texto(fila.get("categoria"))
+    if categoria:
+        if categoria.upper() in CategoriaLicencia.values:
+            datos["licencia_categoria"] = categoria.upper()
+        else:
+            advertencias.append(
+                f"categoria '{categoria}' fuera de catálogo → NULL"
+            )
+
+    fecha = nz.fecha_legacy(fila.get("fecha_licencia"))
+    if fecha:
+        datos["licencia_vencimiento"] = fecha
+
+    return datos
 
 
 def _desempaquetar_pagos(datos_json):

@@ -32,6 +32,7 @@ from apps.empleados.models import Empleado
 from apps.operaciones.models import Actividad, ActividadDetalle, Agenda
 
 from .etl import convertidores as cv
+from .etl import carga as carga_etl
 from .etl import normalizadores as nz
 from .models import (
     AgendaLogistica,
@@ -336,6 +337,77 @@ class EtlConvertidoresTests(SimpleTestCase):
         )
         self.assertEqual(datos["mes"], 9)
         self.assertEqual(datos["fecha_limite"], date(2026, 10, 5))
+
+    # ------------------------------------------------------------------ #
+    # Huecos recuperados al auditar `base_transportadores.php`
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _fila_vehiculo(**extra):
+        """Fila legacy mínima de `transportadores_vehiculos`."""
+        fila = {
+            "placa": "ABC123",
+            "tipo": "camioneta",
+            "tipo_contrato": "externo",
+            "marca": "CHEVROLET",
+            "modelo": "2021",
+            "valor_dia": "450000",
+            "propietario": "TRANSPORTE NORTE SAS",
+            "cedula": "900123456",
+            "cedual_conductor": "1032456789",
+            "estado": "ACTIVO",
+            "datos": json.dumps({}),
+        }
+        fila.update(extra)
+        return fila
+
+    def test_convertir_vehiculo_mapea_cilindraje_como_texto(self):
+        """`cilindraje` es varchar(11) 'numérico como texto' en el legacy."""
+        datos = cv.convertir_vehiculo(self._fila_vehiculo(cilindraje="1.6"))
+        self.assertEqual(datos["cilindraje"], "1.6")
+
+    def test_cilindraje_ausente_queda_null(self):
+        datos = cv.convertir_vehiculo(self._fila_vehiculo())
+        self.assertIsNone(datos["cilindraje"])
+
+    def test_vehiculo_extrae_la_licencia_del_conductor(self):
+        """Las 4 columnas que el vehículo duplicaba del conductor."""
+        datos = cv.convertir_vehiculo(self._fila_vehiculo(
+            licencia="SI",
+            estado_licencia="ACTIVA",
+            categoria="C1",
+            fecha_licencia="2027-03-15",
+        ))
+        licencia = datos[cv.LICENCIA_CONDUCTOR]
+        self.assertEqual(licencia["posee_licencia"], "SI")
+        self.assertEqual(licencia["situacion_licencia"], "ACTIVA")
+        self.assertEqual(licencia["licencia_categoria"], "C1")
+        self.assertEqual(licencia["licencia_vencimiento"], date(2027, 3, 15))
+
+    def test_categoria_a1_ya_no_se_pierde(self):
+        """
+        Con el catálogo de 4 valores, A1/A2/B2/B3 se convertían a NULL.
+        Con el catálogo ampliado (A1..C3) se conservan.
+        """
+        for categoria in ("A1", "A2", "B2", "B3", "C3"):
+            with self.subTest(categoria=categoria):
+                datos = cv.convertir_vehiculo(
+                    self._fila_vehiculo(categoria=categoria)
+                )
+                self.assertEqual(
+                    datos[cv.LICENCIA_CONDUCTOR]["licencia_categoria"],
+                    categoria,
+                )
+                self.assertEqual(datos[cv.ADVERTENCIAS], [])
+
+    def test_licencia_fuera_de_catalogo_se_descarta_con_advertencia(self):
+        datos = cv.convertir_vehiculo(self._fila_vehiculo(
+            licencia="QUIZAS", categoria="Z9"
+        ))
+        licencia = datos[cv.LICENCIA_CONDUCTOR]
+        self.assertNotIn("posee_licencia", licencia)
+        self.assertNotIn("licencia_categoria", licencia)
+        self.assertEqual(len(datos[cv.ADVERTENCIAS]), 2)
+        self.assertIn("fuera de catálogo", datos[cv.ADVERTENCIAS][0])
 
 
 class EtlComandoTests(TestCase):
@@ -5648,4 +5720,148 @@ class ContactoConductorTests(TestCase):
         anonimo = APIClient()
         resp = anonimo.get(f"/transporte/vehiculos/{self.vehiculo.pk}/contacto/")
         self.assertIn(resp.status_code, (401, 403))
+
+
+class LicenciaYHiladosHuecosTests(TestCase):
+    """
+    Huecos recuperados al auditar `base_transportadores.php`:
+
+      · `cilindraje` (columna 6 de transportadores_vehiculos) no estaba
+        modelado → ahora sí, como texto ("numérico como texto").
+      · `licencia` (SI/NO/NO APLICA), `estado_licencia` (ACTIVA/INACTIVA),
+        `categoria` (A1..C3) y `fecha_licencia` los duplicaba la fila del
+        VEHÍCULO pero son del CONDUCTOR → ahora viven en `Conductor`.
+      · El catálogo `CategoriaLicencia` solo tenía 4 de las 8 categorías que
+        el legacy ofrecía: A1/A2/B2/B3 se perdían en la ETL.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="1000666", password="x")
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.conductor = Conductor.objects.create(
+            cedula="505050505",
+            nombre_completo="MARIA CONDUCTORA",
+            celular="3005554444",
+            fecha_ingreso=date(2023, 5, 1),
+        )
+
+    # --------------------------- modelo --------------------------- #
+    def test_vehiculo_acepta_cilindraje(self):
+        vehiculo = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos(
+                "CIL001", cilindraje="2000"
+            )
+        )
+        vehiculo.refresh_from_db()
+        self.assertEqual(vehiculo.cilindraje, "2000")
+
+    def test_conductor_acepta_posee_y_situacion_licencia(self):
+        self.conductor.posee_licencia = "SI"
+        self.conductor.situacion_licencia = "ACTIVA"
+        self.conductor.save()
+        self.conductor.refresh_from_db()
+        self.assertEqual(self.conductor.posee_licencia, "SI")
+        self.assertEqual(self.conductor.situacion_licencia, "ACTIVA")
+
+    def test_api_expone_los_campos_nuevos(self):
+        self.conductor.posee_licencia = "SI"
+        self.conductor.situacion_licencia = "ACTIVA"
+        self.conductor.save()
+        vehiculo = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos(
+                "CIL002", cilindraje="1600", conductor_habitual=self.conductor
+            )
+        )
+        resp = self.api.get(f"/transporte/vehiculos/{vehiculo.pk}/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json()["cilindraje"], "1600")
+
+        resp = self.api.get(f"/transporte/conductores/{self.conductor.pk}/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        data = resp.json()
+        self.assertEqual(data["posee_licencia"], "SI")
+        self.assertEqual(data["situacion_licencia"], "ACTIVA")
+
+    def test_el_semaforo_no_choca_con_la_situacion_legacy(self):
+        """
+        `estado_licencia` sigue siendo el SEMÁFORO (VIGENTE/POR_VENCER/
+        VENCIDA) que el front ya consume; el flag manual del legacy vive en
+        `situacion_licencia`. No pueden pisarse.
+        """
+        self.conductor.licencia_vencimiento = date(2030, 1, 1)
+        self.conductor.situacion_licencia = "INACTIVA"
+        self.conductor.save()
+        resp = self.api.get(f"/transporte/conductores/{self.conductor.pk}/")
+        data = resp.json()
+        self.assertEqual(data["estado_licencia"], "VIGENTE")
+        self.assertEqual(data["situacion_licencia"], "INACTIVA")
+
+    # ---------------------------- ETL ----------------------------- #
+    @staticmethod
+    def _fila_vehiculo(placa, **extra):
+        fila = {
+            "placa": placa,
+            "tipo": "camioneta",
+            "tipo_contrato": "externo",
+            "marca": "CHEVROLET",
+            "modelo": "2021",
+            "cilindraje": "2000",
+            "valor_dia": "450000",
+            "propietario": "TRANSPORTE NORTE SAS",
+            "cedula": "900123456",
+            "cedual_conductor": "505050505",
+            "estado": "ACTIVO",
+            "datos": json.dumps({}),
+        }
+        fila.update(extra)
+        return fila
+
+    def test_etl_enriquece_el_conductor_desde_el_vehiculo(self):
+        carga_etl.cargar_vehiculos([
+            self._fila_vehiculo(
+                "ENR001",
+                licencia="SI",
+                estado_licencia="ACTIVA",
+                categoria="C1",
+                fecha_licencia="2027-03-15",
+            )
+        ])
+        self.conductor.refresh_from_db()
+        self.assertEqual(self.conductor.posee_licencia, "SI")
+        self.assertEqual(self.conductor.situacion_licencia, "ACTIVA")
+        self.assertEqual(self.conductor.licencia_categoria, "C1")
+        self.assertEqual(self.conductor.licencia_vencimiento, date(2027, 3, 15))
+
+    def test_etl_no_pisa_lo_que_el_conductor_ya_tenia(self):
+        """El dato propio de la tabla de conductores manda sobre la copia."""
+        self.conductor.licencia_categoria = "B2"
+        self.conductor.licencia_vencimiento = date(2028, 6, 1)
+        self.conductor.save()
+        carga_etl.cargar_vehiculos([
+            self._fila_vehiculo(
+                "ENR002", categoria="C1", fecha_licencia="2027-03-15"
+            )
+        ])
+        self.conductor.refresh_from_db()
+        self.assertEqual(self.conductor.licencia_categoria, "B2")
+        self.assertEqual(self.conductor.licencia_vencimiento, date(2028, 6, 1))
+
+    def test_etl_enriquecimiento_es_idempotente(self):
+        fila = self._fila_vehiculo("ENR003", licencia="SI", categoria="C1")
+        carga_etl.cargar_vehiculos([fila])
+        carga_etl.cargar_vehiculos([fila])
+        self.conductor.refresh_from_db()
+        self.assertEqual(self.conductor.posee_licencia, "SI")
+        self.assertEqual(self.conductor.licencia_categoria, "C1")
+        self.assertEqual(
+            Vehiculo.objects.filter(placa="ENR003").count(), 1
+        )
+
+    def test_etl_no_enriquece_con_vehiculo_sin_conductor(self):
+        carga_etl.cargar_vehiculos([
+            self._fila_vehiculo("ENR004", cedual_conductor="", licencia="SI")
+        ])
+        self.conductor.refresh_from_db()
+        self.assertIsNone(self.conductor.posee_licencia)
 

@@ -25,6 +25,7 @@ class VehiculoSerializer(serializers.ModelSerializer):
             "marca",
             "referencia",
             "modelo_anio",
+            "cilindraje",
             "color",
             "municipio_matricula",
             "numero_vin",

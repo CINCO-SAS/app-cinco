@@ -10,6 +10,8 @@ from .base import AuditoriaModel
 from .choices import (
     CategoriaLicencia,
     CiudadOperacion,
+    EstadoLicencia,
+    PoseeLicencia,
     TipoContrato,
     TipoDocumentoVehiculo,
     TipoMantenimiento,
@@ -38,6 +40,25 @@ class Conductor(AuditoriaModel):
         max_length=10, choices=CategoriaLicencia.choices, null=True, blank=True
     )
     licencia_vencimiento = models.DateField(null=True, blank=True)
+    # Legacy `transportadores_vehiculos.licencia` (SI/NO/NO APLICA) y
+    # `estado_licencia` (ACTIVA/INACTIVA). El docstring de esta clase decía
+    # que "pertenecen al conductor", pero NO se habían añadido: era un hueco
+    # real de información. Viven en el Conductor (y no duplicados en el
+    # Vehiculo) porque la licencia es del conductor; el vehículo lo referencia
+    # por FK. La ETL los rellena desde la fila legacy del vehículo SOLO si el
+    # conductor aún no los tiene (así el orden de carga no altera el dato).
+    #
+    # NOMBRES: el semáforo de vencimiento que ya expone la API se llama
+    # `estado_licencia` (VIGENTE/POR_VENCER/VENCIDA) y NO se toca. El flag
+    # manual del legacy se llama `situacion_licencia` para no chocar con él.
+    # Son cosas distintas: el semáforo se CALCULA de la fecha real; este lo
+    # escribía una persona a mano (y por eso puede contradecir al semáforo).
+    posee_licencia = models.CharField(
+        max_length=12, choices=PoseeLicencia.choices, null=True, blank=True
+    )
+    situacion_licencia = models.CharField(
+        max_length=10, choices=EstadoLicencia.choices, null=True, blank=True
+    )
     tipo_vinculacion = models.CharField(
         max_length=20, choices=TipoVinculacion.choices, default=TipoVinculacion.EXTERNO
     )
@@ -61,17 +82,26 @@ class Vehiculo(AuditoriaModel):
     Flota vehicular. Legacy `transportadores_vehiculos` (55 columnas → modelo acotado).
 
     Se ELIMINAN (verificado): nombre_conductor/cedual_conductor (→FK),
-    tipo_conductor (→Conductor), licencia/fecha_licencia/estado_licencia/categoria
-    (pertenecen al conductor), como_cond (ambigua, no utilizada),
+    tipo_conductor (→Conductor), como_cond (ambigua, no utilizada),
     codigo_barras (obsoleto; codigo_qr se persiste en media/transporte/codigos-qr/),
     6 columnas de mantenimiento (→ Mantenimiento 1:N), edit/fecha_edit (→ AuditoriaModel),
     estado texto (→ activo bool).
+
+    # RECUPERADAS (hueco real detectado al auditar `base_transportadores.php`):
+    # `cilindraje` (vuelve al Vehiculo) y `licencia`/`fecha_licencia`/
+    # `estado_licencia`/`categoria` (vuelven al Conductor, que es de quien son:
+    # el docstring decía "pertenecen al conductor" pero nunca se habían añadido).
     """
     placa = models.CharField(max_length=10, unique=True, db_index=True)
     tipo_vehiculo = models.CharField(max_length=50, choices=TipoVehiculo.choices)
     marca = models.CharField(max_length=50)
     referencia = models.CharField(max_length=50, null=True, blank=True)
     modelo_anio = models.PositiveSmallIntegerField()  # era varchar(11)
+    # Legacy `cilindraje` varchar(11), documentado como "numérico como texto"
+    # (DICCIONARIO §transportadores_vehiculos #6). Se conserva como TEXTO:
+    # el legacy lo guardaba con strtoupper() y sin normalizar, y hay valores
+    # con decimales ("1.6") que un entero no representaría.
+    cilindraje = models.CharField(max_length=11, null=True, blank=True)
     color = models.CharField(max_length=40, null=True, blank=True)
     municipio_matricula = models.CharField(max_length=60, null=True, blank=True)
     numero_vin = models.CharField(max_length=50, null=True, blank=True)

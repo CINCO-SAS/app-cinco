@@ -32,7 +32,7 @@ from django.conf import settings
 
 from apps.empleados.models import Empleado
 
-from ..models import Conductor, Vehiculo
+from ..models import Conductor
 from .flota_service import FlotaService
 
 # Alias de la base negra (Nokia). No está en DATABASES: aparece con el gate

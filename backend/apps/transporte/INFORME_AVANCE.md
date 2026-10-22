@@ -19,27 +19,35 @@
   export server-side, **WFM masivo (cola + lote + worker CLI)**,
   **planilla oficial de salida** (consecutivo atómico + QR) y
   **agregados de sábana** (día/área/matriz/nómina/liquidación).
-- **377 tests OK** (365 transporte + 12 `apps.common`), `manage.py check` sin
-  issues, DoD cumplido en cada hito (tests verdes → check → commit local).
-- **Cero ejecución contra MySQL real** (G2 sin conectividad); los tests
-  corren en SQLite aislado (`config.settings_test_transporte`).
+- **428 tests OK** (416 transporte + 12 `apps.common`), `manage.py check` sin
+  issues, `pyflakes` sin incidencias propias y **0 errores de OpenAPI** en el
+  módulo; DoD cumplido en cada hito (tests verdes → check → commit local).
+- **G2 ABIERTO desde el 20-oct**: `0001`–`0006` ya aplicados contra `default`
+  = `db_cincosas` (17 tablas `transporte_*` + 79 permisos) y las auditorías
+  C2 ejecutadas en modo **solo lectura** sobre `azul`. El backend **sigue sin
+  escribir en la BD de producción**: la carga real (C3) la ejecuta el usuario.
+  ⚠️ `sql_mode` vacío en `default` y `azul` → sin `STRICT_TRANS_TABLES` MySQL
+  trunca en silencio: **habilitarlo antes de C3**.
 - **PHP legacy intacto**: hasta el cutover único (D1) el sistema
-  actual sigue vivo; el backend nuevo aún no escribe en BD de producción.
-- Únicos insumos externos que faltan del negocio/infra: **G1** (solo la
-  **tabla** `common.Festivo`; el calendario ya corre con algoritmo ∪ catálogo
-  JSON editable) y **G2** (conectividad BD).
+  actual sigue vivo.
+- **Insumos externos que faltan**: **G1** (solo la **tabla** `common.Festivo`;
+  el calendario ya corre con algoritmo ∪ catálogo JSON editable), **G3** (el
+  modelo `common.Area` — **la fuente ya está decidida** en D-A2/B11, solo
+  falta escribirlo) y **G4** (D-A9 asignar móvil + D-A10 router de la BD
+  negra). Del lado de la infraestructura falta el **alias `negra`** en
+  `DATABASES` (hoy solo hay `default`, `azul`, `logistica_cinco`).
 
 ### Estado por fase
 
 | Fase | Contenido | Avance |
 |---|---|---|
-| F0 Diccionario y mapeo FKs | Mapeo aplicado en los modelos | ~90% (auditorías CR-3 → C2) |
-| F1 Base Django y Festivos | 16 modelos + migración; algoritmo de festivos portado + **catálogo JSON editable** (`apps/common/festivos/`); falta la tabla `common.Festivo` | ~85% (solo falta la tabla → G1; migrate real → C1) |
-| F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) + **ficha de contacto del conductor (A1)** | ~92% (falta T6 → C3; línea corporativa → G2) |
-| F3 Kiosco y Fotos | Núcleo cerrado (B2): alta S6, consulta B1, escaneo S1; fotos y S2–S4 pendientes | ~35% |
-| F4 Backoffice y Novedades | CERRADO (B4): aprobar-lote, rechazar, validar, eliminar, novedades, historial | ~60% (falta B11 → G3) |
+| F0 Diccionario y mapeo FKs | Mapeo aplicado en los modelos | **~95%** (auditorías CR-3 → C2 ya ejecutadas) |
+| F1 Base Django y Festivos | 16 modelos + migración; algoritmo de festivos portado + **catálogo JSON editable** (`apps/common/festivos/`); falta la tabla `common.Festivo` | ~85% (solo falta la tabla → G1) |
+| F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) + **ficha de contacto del conductor (A1)** + **licencias y cilindraje recuperados** | ~95% (falta T6 → C3; línea corporativa → G2) |
+| F3 Kiosco y Fotos | **CERRADO**: núcleo B2 (alta S6, consulta B1, escaneo S1) + fotos B3 (ventana 10:00–16:00, agenda, 1–5 imágenes, match OT) + kiosco S3 (pre-chequeo) y S4 (consulta por placa). Pendiente **solo S2** (asignar móvil → G4) | ~80% |
+| F4 Backoffice y Novedades | **CERRADO** (B4): aprobar-lote, rechazar, validar, eliminar, novedades, historial | ~85% (falta B11 → G3, ya con fuente decidida) |
 | F5 Liquidaciones e Informes | **F5-1…F5-7 cerrados**, incluido el **formato físico F-104** (P1) | **100%** |
-| F6 ETL histórico | Esqueleto cerrado (A3); corrida real → C3 | ~40% |
+| F6 ETL histórico | 5 cargadores + 2 comandos de auditoría (solo lectura); corrida real → C3 | ~55% |
 | F7 Cutover / F8 Estabilización | — | 0% |
 
 ---
@@ -238,3 +246,4 @@ Leyenda: ✅ implementada y testeada · 🟡 servicio listo, falta endpoint/Dato
 | 2026-10-19 | **P1 CERRADO**: formato físico F-104 en `POST /planillas/formato/`, verificado contra `planilla_salida.php` (LETTER horizontal, una hoja por vehículo, QR embebido en base64, casillas en blanco para firmas de salida/retorno). Mejoras sobre el legacy: fecha real (imprimía "16/02/2022" fijo), CONDUCTOR/TELÉFONO/VALOR DÍA reales (la consulta del legacy estaba comentada y salían vacíos), CONSECUTIVO impreso (§3.6) y sin código de barras (D-A8 lo eliminó); F5 al 100 %. +12 tests (389 tests) | `7e00e26` |
 | 2026-10-20 | **Refinamiento B3 #1 CERRADO**: match OT-específica `validar_agenda_ot` (port de `validarOtActividadTransporte` + `validarOtActividadAgendaTransporte`, controlador_fix 319–360/175–244): la OT declarada debe coincidir exactamente (mayúsculas + espacios colapsados) con `actividad.ot`, `tipo_trabajo`, `descripcion` u `observacion` de una agenda no borrada del día; se aplica en `guardar()` y en el pre-chequeo `validar-agenda/`; áreas exentas y WFM/IM intactas y sin OT declarada no se endurece el gate ya cerrado. Queda el #2 (ventana de días anteriores con excepción). +16 tests (405 tests) | *(este commit)* |
 | 2026-10-21 | **A1 ficha de contacto del conductor CERRADA** (última acción de `base_transportadores.php` que faltaba): `GET /vehiculos/{id}/contacto/` + `ContactoService`, que cruza las 3 fuentes del legacy — línea corporativa (Nokia, BD negra), celular de `transporte_base_conductores` y los 3 teléfonos de `cinco_base_de_personal`. Cross-BD sin JOIN (D-A10) y con degradación explícita de la fuente Nokia (`nokia_disponible=false`) mientras no haya gate G2: la ficha se entrega igual con las 2 fuentes de `azul`, en vez de un 500. Mejora sobre el legacy: `linea_corporativa` es lista, no la cadena `300111,300222` del `group_concat`. +10 tests |
+| 2026-10-21 | **Huecos del legacy recuperados en flota** (al auditar `base_transportadores.php` contra `DICCIONARIO_DATOS.md`): `cilindraje` (varchar 11, "numérico como texto") vuelve al `Vehiculo`; `licencia` (SI/NO/NO APLICA → `posee_licencia`), `estado_licencia` (ACTIVA/INACTIVA → `situacion_licencia`), `categoria` (A1..C3) y `fecha_licencia` vuelven al `Conductor` (de quien son) — era un hueco real: el docstring decía "pertenecen al conductor" pero nunca se habían añadido. **Fix de pérdida de datos:** `CategoriaLicencia` solo tenía 4 de las 8 categorías del legacy, por lo que la ETL convertía a NULL las licencias A1/A2/B2/B3 → catálogo ampliado a 8. La ETL enriquece al conductor con la copia del vehículo **solo en campos vacíos** (resultado independiente del orden de carga). El semáforo `estado_licencia` (VIGENTE/POR_VENCER/VENCIDA) NO se toca: el flag manual del legacy va en `situacion_licencia` para que no choquen. Migración 0007 (3 AddField nullable + AlterField de choices), sin migración de datos; `migrate` contra la BD real **no ejecutado**. +13 tests (428 tests, 0 rojos). |

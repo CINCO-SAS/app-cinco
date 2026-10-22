@@ -39,10 +39,59 @@ class CiudadOperacion(models.TextChoices):
 
 
 class CategoriaLicencia(models.TextChoices):
+    """
+    Categoría de la licencia de conducción.
+
+    El legacy tenía DOS columnas distintas con nombre parecido:
+      · `transporte_base_conductores.licencia` → la categoría (el diccionario
+        la documenta como B1/C1/C2/C3).
+      · `transportadores_vehiculos.categoria` → la categoría, y el formulario
+        legacy ofrecía A1..C3 (8 valores: A1, A2, B1, B2, B3, C1, C2, C3).
+
+    Se modela el SUPERCONJUNTO (8) a propósito: con el catálogo de 4 valores,
+    la ETL convertía a NULL las licencias A1/A2/B2/B3 del legacy, es decir
+    perdía datos de conductores que sí existían. Ampliar el catálogo no
+    rompe la ETL de la tabla de conductores (allí el valor esperado sigue
+    siendo una categoría válida) y evita esa pérdida.
+    """
+
+    A1 = "A1", "A1"
+    A2 = "A2", "A2"
     B1 = "B1", "B1"
+    B2 = "B2", "B2"
+    B3 = "B3", "B3"
     C1 = "C1", "C1"
     C2 = "C2", "C2"
     C3 = "C3", "C3"
+
+
+class PoseeLicencia(models.TextChoices):
+    """
+    Legacy `transportadores_vehiculos.licencia`: SI / NO / NO APLICA.
+
+    NO es el número de licencia: es la respuesta a "¿el conductor de este
+    vehículo tiene licencia?". El número/clase de licencia vive en
+    `Conductor.licencia_categoria` y el vencimiento en
+    `Conductor.licencia_vencimiento`.
+    """
+
+    SI = "SI", "Sí"
+    NO = "NO", "No"
+    NO_APLICA = "NO APLICA", "No aplica"
+
+
+class EstadoLicencia(models.TextChoices):
+    """
+    Legacy `transportadores_vehiculos.estado_licencia`: ACTIVA / INACTIVA.
+
+    NO es el semáforo de vencimiento de la API (`estado_licencia` =
+    VIGENTE/POR_VENCER/VENCIDA, que se CALCULA de la fecha real). Este es el
+    flag que una persona escribía a mano, y por eso puede contradecir al
+    semáforo: por eso vive en el campo `situacion_licencia`.
+    """
+
+    ACTIVA = "ACTIVA", "Activa"
+    INACTIVA = "INACTIVA", "Inactiva"
 
 
 class TipoVinculacion(models.TextChoices):
