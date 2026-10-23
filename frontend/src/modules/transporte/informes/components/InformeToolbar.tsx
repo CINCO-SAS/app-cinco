@@ -28,12 +28,17 @@ interface InformeToolbarProps {
   recargar: () => void;
 }
 
-const SELECT_CLASES =
+/**
+ * Clases del selector y del botón planos de la barra de Informes.
+ * Compartidas con los filtros propios de los bloques (Día a Día), para que
+ * la pantalla entera se vea con el mismo control.
+ */
+export const SELECT_CLASES =
   "h-9 rounded-lg border border-gray-300 bg-white px-2.5 text-sm text-gray-700 " +
   "focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 " +
   "dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
 
-const BOTON_CLASES =
+export const BOTON_CLASES =
   "h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 " +
   "hover:bg-gray-50 focus:border-brand-500 focus:outline-none focus:ring-2 " +
   "focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 " +

@@ -10,47 +10,25 @@
 import { ColumnDef } from "@tanstack/react-table";
 
 import Badge from "@/components/ui/badge/Badge";
-import type {
-  EstadoSalida,
-  Salida,
-} from "@/types/transporte.types";
+import type { Salida } from "@/types/transporte.types";
+
+import {
+  BadgeEstadoSalida,
+  ETIQUETA_ESTADO,
+} from "../../components/EstadoSalidaBadge";
+
+// El badge de estado es del MÓDULO — lo comparte con Informes (bloque "Día a
+// Día"), que pinta las mismas filas. Se re-exporta aquí para no romper los
+// imports existentes de esta pantalla.
+export { BadgeEstadoSalida, ETIQUETA_ESTADO };
 
 export const SALIDAS_TABLE_CONFIG = {
   defaultPageSize: 25,
   defaultPageIndex: 0,
 } as const;
 
-/**
- * Estado → color del Badge. Sigue la máquina de estados del backend
- * (D-A11: REPORTADO → APROBADO/RECHAZADO/ELIMINADO; APROBADO → VALIDADO).
- */
-const COLOR_ESTADO: Record<
-  EstadoSalida,
-  "warning" | "success" | "error" | "primary" | "light"
-> = {
-  REPORTADO: "warning",
-  APROBADO: "success",
-  RECHAZADO: "error",
-  VALIDADO: "primary",
-  ELIMINADO: "light",
-};
-
-const ETIQUETA_ESTADO: Record<EstadoSalida, string> = {
-  REPORTADO: "Reportado",
-  APROBADO: "Aprobado",
-  RECHAZADO: "Rechazado",
-  VALIDADO: "Validado",
-  ELIMINADO: "Eliminado",
-};
-
 /** Reutilizado por el `<select>` de estado del toolbar. */
 export const ETIQUETAS_ESTADO = ETIQUETA_ESTADO;
-
-export const BadgeEstadoSalida = ({ estado }: { estado: EstadoSalida }) => (
-  <Badge color={COLOR_ESTADO[estado]} size="sm">
-    {ETIQUETA_ESTADO[estado] ?? estado}
-  </Badge>
-);
 
 /**
  * Botón destructivo. `Button` de la design system solo trae `primary` y

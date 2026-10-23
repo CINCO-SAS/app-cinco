@@ -2,11 +2,12 @@
 //
 // Pantalla de Informes (F5) — Tab 2 del legacy "TRANSPORTE / INFORMES".
 //
-// PANTALLA POR PASOS: hoy se entregan los bloques de los PASOS 2, 3 y 4
-// (Transporte Día, Transporte Mes, Reporte Área y Reporte Áreas). El resto
-// del legacy — Día a Día, Área y Carpeta, Nómina, Liquidación y Cuenta de
-// Cobro— van delimitados por `BloquePendiente` para que se vea desde ya
-// QUÉ falta, sin inventar datos ni dejar huecos en blanco.
+// PANTALLA POR PASOS: hoy se entregan los bloques de los PASOS 2, 3, 4 y 5
+// (Transporte Día, Transporte Mes, Reporte Área y Reporte Áreas, y el
+// listado "Día a Día"). El resto del legacy — Área y Carpeta (Paso 6),
+// Nómina, Liquidación y Cuenta de Cobro (Paso 7)— va delimitado por
+// `BloquePendiente` para que se vea desde ya QUÉ falta, sin inventar datos
+// ni dejar huecos en blanco.
 //
 // PENDIENTE FUERA DE ESTOS PASOS: el legacy añadía en la cabecera de
 // "Transporte Mes" un botón de exportación y, dentro de "Reporte Área",
@@ -27,6 +28,7 @@ import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import { useInformesData } from "./informesView.hooks";
 import { etiquetaFecha, etiquetaPeriodo } from "./informesView.utils";
 import { InformeBloque } from "./components/InformeBloque";
+import { InformeDiaADia } from "./components/InformeDiaADia";
 import { InformeGraficoAreas } from "./components/InformeGraficoAreas";
 import { InformeReporteArea } from "./components/InformeReporteArea";
 import { InformeToolbar } from "./components/InformeToolbar";
@@ -87,6 +89,7 @@ export const InformesView = () => {
     serieChart,
     cargandoSerie,
     errorSerie,
+    diaADia,
     recargar,
   } = useInformesData();
 
@@ -172,10 +175,23 @@ export const InformesView = () => {
           />
         </InformeBloque>
 
-        <BloquePendiente
+        {/* Paso 5: el informe mensual F5-3 como listado. Su estado es
+            propio (filtros + paginación server-side); el periodo y el ↻
+            global sí le llegan desde la barra. */}
+        <InformeBloque
           titulo="Día a Día"
-          motivo="Paso 5 del plan: matriz día × área del mes."
-        />
+          periodo={etiquetaPeriodo(mes, anio)}
+          isLoading={diaADia.isLoading}
+          error={diaADia.error}
+          nota={
+            "Salidas no eliminadas del periodo, ordenadas día a día. Estado, área, " +
+            "carpeta, sede y búsqueda se filtran en el servidor; sin filtro, las " +
+            "eliminadas quedan fuera."
+          }
+        >
+          <InformeDiaADia datos={diaADia} />
+        </InformeBloque>
+
         <BloquePendiente
           titulo="Área y Carpeta"
           motivo="Paso 6 del plan."

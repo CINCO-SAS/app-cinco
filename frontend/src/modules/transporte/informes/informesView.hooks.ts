@@ -25,6 +25,7 @@ import type {
   InformeSeriesChart,
 } from "@/types/transporte.types";
 import { fechaISO, ultimoDiaDelMes } from "./informesView.utils";
+import { useInformeDiaADia } from "./informeDiaADia.hooks";
 
 /**
  * Hoy en la zona horaria del backend (`America/Bogota`), como `YYYY-MM-DD`.
@@ -75,6 +76,16 @@ export const useInformesData = () => {
 
   const maximoDia = useMemo(() => ultimoDiaDelMes(anio, mes), [anio, mes]);
   const fecha = useMemo(() => fechaISO(anio, mes, dia), [anio, mes, dia]);
+
+  // Contador del ↻ global: los bloques que cargan sus propios datos (hoy
+  // "Día a Día") se suscriben a él para repetir su consulta sin duplicar
+  // callbacks en este hook.
+  const [tick, setTick] = useState(0);
+
+  // Bloque "Día a Día" (Paso 5): informe mensual paginado con filtros
+  // server-side. Su estado es PROPIO porque tiene paginación y filtros que
+  // no son los de la barra global.
+  const diaADia = useInformeDiaADia(mes, anio, tick);
 
   // -------------------------------------------------------------------------
   // Cargas. Dependencias distintas a propósito: el bloque Día solo debe
@@ -208,6 +219,7 @@ export const useInformesData = () => {
     void cargarDia();
     void cargarArea();
     void cargarSeries();
+    setTick((previo) => previo + 1);
   }, [cargarDia, cargarArea, cargarSeries]);
 
   return {
@@ -238,6 +250,10 @@ export const useInformesData = () => {
     serieChart,
     cargandoSerie,
     errorSerie,
+    /** Contador del ↻ global (bloques con carga propia). */
+    tick,
+    /** Bloque "Día a Día" (Paso 5): filas, filtros y paginación. */
+    diaADia,
     recargar,
   };
 };

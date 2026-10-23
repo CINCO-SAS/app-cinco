@@ -281,6 +281,9 @@ export interface Salida {
   es_disponible: boolean;
   area: string | null;
   carpeta: string | null;
+  /** B11: centro de costos de la carpeta, resuelto EN SERVIDOR con
+   *  fallback `'Sin asignar'` (literal del legacy). */
+  centro_costos: string;
   sede: string | null;
   valor_dia: string;
   estado: EstadoSalida;
