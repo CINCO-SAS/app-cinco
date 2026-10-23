@@ -26,6 +26,7 @@ import type {
 } from "@/types/transporte.types";
 import { fechaISO, ultimoDiaDelMes } from "./informesView.utils";
 import { useInformeDiaADia } from "./informeDiaADia.hooks";
+import { useInformeMatriz } from "./informeMatriz.hooks";
 
 /**
  * Hoy en la zona horaria del backend (`America/Bogota`), como `YYYY-MM-DD`.
@@ -86,6 +87,10 @@ export const useInformesData = () => {
   // server-side. Su estado es PROPIO porque tiene paginación y filtros que
   // no son los de la barra global.
   const diaADia = useInformeDiaADia(mes, anio, tick);
+
+  // Bloque "Área y Carpeta" (Paso 6): matriz área × meses del año. Solo
+  // depende del año (es la forma tabular del histórico del gráfico).
+  const matriz = useInformeMatriz(anio, tick);
 
   // -------------------------------------------------------------------------
   // Cargas. Dependencias distintas a propósito: el bloque Día solo debe
@@ -254,6 +259,8 @@ export const useInformesData = () => {
     tick,
     /** Bloque "Día a Día" (Paso 5): filas, filtros y paginación. */
     diaADia,
+    /** Bloque "Área y Carpeta" (Paso 6): matriz área × meses del año. */
+    matriz,
     recargar,
   };
 };

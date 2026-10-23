@@ -2,12 +2,11 @@
 //
 // Pantalla de Informes (F5) — Tab 2 del legacy "TRANSPORTE / INFORMES".
 //
-// PANTALLA POR PASOS: hoy se entregan los bloques de los PASOS 2, 3, 4 y 5
-// (Transporte Día, Transporte Mes, Reporte Área y Reporte Áreas, y el
-// listado "Día a Día"). El resto del legacy — Área y Carpeta (Paso 6),
-// Nómina, Liquidación y Cuenta de Cobro (Paso 7)— va delimitado por
-// `BloquePendiente` para que se vea desde ya QUÉ falta, sin inventar datos
-// ni dejar huecos en blanco.
+// PANTALLA POR PASOS: hoy se entregan los bloques de los PASOS 2, 3, 4, 5 y 6
+// (Transporte Día, Transporte Mes, Reporte Área y Reporte Áreas, el listado
+// "Día a Día" y la matriz "Área y Carpeta"). Falta el PASO 7 — Nómina,
+// Liquidación y Cuenta de Cobro—, delimitado por `BloquePendiente` para que
+// se vea desde ya QUÉ falta, sin inventar datos ni dejar huecos en blanco.
 //
 // PENDIENTE FUERA DE ESTOS PASOS: el legacy añadía en la cabecera de
 // "Transporte Mes" un botón de exportación y, dentro de "Reporte Área",
@@ -30,9 +29,14 @@ import { etiquetaFecha, etiquetaPeriodo } from "./informesView.utils";
 import { InformeBloque } from "./components/InformeBloque";
 import { InformeDiaADia } from "./components/InformeDiaADia";
 import { InformeGraficoAreas } from "./components/InformeGraficoAreas";
+import { InformeMatrizAnual } from "./components/InformeMatrizAnual";
 import { InformeReporteArea } from "./components/InformeReporteArea";
 import { InformeToolbar } from "./components/InformeToolbar";
-import type { AreaInforme, SerieInforme } from "@/types/transporte.types";
+import type {
+  AreaInforme,
+  AreaMatrizInforme,
+  SerieInforme,
+} from "@/types/transporte.types";
 
 /**
  * Referencias ESTABLES para "aún no hay datos".
@@ -43,6 +47,7 @@ import type { AreaInforme, SerieInforme } from "@/types/transporte.types";
  */
 const AREAS_VACIAS: AreaInforme[] = [];
 const SERIES_VACIAS: SerieInforme[] = [];
+const AREAS_MATRIZ_VACIAS: AreaMatrizInforme[] = [];
 
 /**
  * Reserva visible de un bloque del legacy que aún no se ha migrado en este
@@ -90,6 +95,7 @@ export const InformesView = () => {
     cargandoSerie,
     errorSerie,
     diaADia,
+    matriz,
     recargar,
   } = useInformesData();
 
@@ -192,10 +198,22 @@ export const InformesView = () => {
           <InformeDiaADia datos={diaADia} />
         </InformeBloque>
 
-        <BloquePendiente
+        {/* Paso 6: la matriz área × meses, que es el mismo histórico del
+            gráfico en forma de tabla. Responde SOLO al año. */}
+        <InformeBloque
           titulo="Área y Carpeta"
-          motivo="Paso 6 del plan."
-        />
+          periodo={`AÑO ${anio}`}
+          isLoading={matriz.isLoading}
+          error={matriz.error}
+          nota={
+            "Σ total_a_pagar (valor día ± novedad) de las salidas no eliminadas, por " +
+            "área y mes: la tabla del gráfico de arriba. No sigue el selector de mes " +
+            "ni el interruptor «Solo aprobados», solo el año. «—» = mes sin salidas."
+          }
+        >
+          <InformeMatrizAnual areas={matriz.matriz?.areas ?? AREAS_MATRIZ_VACIAS} />
+        </InformeBloque>
+
         <BloquePendiente
           titulo="Nómina · Liquidación · Cuenta de Cobro"
           motivo="Paso 7 del plan."
