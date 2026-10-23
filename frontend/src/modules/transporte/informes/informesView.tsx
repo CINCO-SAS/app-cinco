@@ -8,10 +8,10 @@
 // Liquidación y Cuenta de Cobro—, delimitado por `BloquePendiente` para que
 // se vea desde ya QUÉ falta, sin inventar datos ni dejar huecos en blanco.
 //
-// PENDIENTE FUERA DE ESTOS PASOS: el legacy añadía en la cabecera de
-// "Transporte Mes" un botón de exportación y, dentro de "Reporte Área",
-// un botón de Excel y un icono de refresco WFM para el área "I&M". No
-// están cableados todavía (son una decisión de alcance, no un bloque).
+// PENDIENTE FUERA DE ESTOS PASOS: dentro de "Reporte Área" el legacy
+// añadía un botón de Excel y un icono de refresco WFM para el área "I&M".
+// No están cableados todavía (decisión de alcance: el export de
+// "Transporte Mes" sí, en este paso).
 //
 // Los KPIs van FUERA de la barra de filtros. Aquí cada bloque enseña su
 // total en el pie de tabla (fila TOTALES), así que no se duplican en
@@ -28,6 +28,7 @@ import { useInformesData } from "./informesView.hooks";
 import { etiquetaFecha, etiquetaPeriodo } from "./informesView.utils";
 import { InformeBloque } from "./components/InformeBloque";
 import { InformeDiaADia } from "./components/InformeDiaADia";
+import { InformeExportarMes } from "./components/InformeExportarMes";
 import { InformeGraficoAreas } from "./components/InformeGraficoAreas";
 import { InformeMatrizAnual } from "./components/InformeMatrizAnual";
 import { InformeReporteArea } from "./components/InformeReporteArea";
@@ -134,14 +135,21 @@ export const InformesView = () => {
         <InformeBloque
           titulo="Transporte Mes"
           periodo={etiquetaPeriodo(mes, anio)}
+          acciones={<InformeExportarMes mes={mes} anio={anio} />}
           areas={informeArea?.areas ?? AREAS_VACIAS}
           isLoading={cargandoArea}
           error={errorArea}
           nota={
-            soloAprobados
-              ? "Solo aprobados: los TOTALES suman únicamente salidas APROBADO o VALIDADO. " +
-                "El desglose de la columna Estado refleja todas las salidas."
-              : undefined
+            [
+              soloAprobados
+                ? "Solo aprobados: los TOTALES suman únicamente salidas APROBADO o VALIDADO. " +
+                  "El desglose de la columna Estado refleja todas las salidas."
+                : undefined,
+              "El archivo exportado trae TODAS las salidas del mes excepto las eliminadas: " +
+                "el interruptor «Solo aprobados» es de la tabla, no del export.",
+            ]
+              .filter(Boolean)
+              .join(" ")
           }
         />
 

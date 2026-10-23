@@ -26,6 +26,8 @@ interface InformeBloqueProps {
   error?: string | null;
   /** Nota bajo el encabezado (se omite si es `undefined`). */
   nota?: string;
+  /** Acciones de la cabecera (p. ej. export), a la izquierda del período. */
+  acciones?: ReactNode;
 }
 
 export const InformeBloque = ({
@@ -36,15 +38,19 @@ export const InformeBloque = ({
   isLoading = false,
   error = null,
   nota,
+  acciones,
 }: InformeBloqueProps) => (
   <section className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
     <header className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-4 py-3 dark:border-white/5">
       <h3 className="text-sm font-semibold text-gray-800 dark:text-white/90">
         {titulo}
       </h3>
-      <span className="text-sm font-medium text-brand-500 dark:text-brand-400">
-        {periodo}
-      </span>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {acciones}
+        <span className="text-sm font-medium text-brand-500 dark:text-brand-400">
+          {periodo}
+        </span>
+      </div>
     </header>
 
     {nota && (
