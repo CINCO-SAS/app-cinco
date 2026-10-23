@@ -272,17 +272,24 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
 ### Frontend — estado y pendiente (23-oct)
 
 5 pantallas operativas (Salidas, Reporte Fotográfico, Flota, Conductores,
-Informes), sin datos mock: todo pasa por `transporte.service.ts`. **~37
+Informes), sin datos mock: todo pasa por `transporte.service.ts`. **~33
 endpoints del backend ya definidos en el servicio y sin consumir.**
 
-- [ ] **Informes**: 3 bloques-reserva visibles (`BloquePendiente`): Paso 5
-      "Día a Día", Paso 6 "Área y Carpeta" y Paso 7 "Nómina · Liquidación ·
-      Cuenta de Cobro"; botones sin cablear (export de "Transporte Mes",
-      Excel de "Reporte Área", refresco WFM). Endpoints backend ya listos.
+- [x] **Informes — Pasos 5 y 6 CERRADOS (23-oct):** "Día a Día" (`4560643`:
+      `/informes/mensual/` como listado paginado con filtros server-side)
+      y "Área y Carpeta" (`f6a9af4`: matriz área × meses de
+      `/informes/areas-mes/`). **Export de "Transporte Mes" cableado**
+      (`fbae935`: `GET /salidas/export/` con el rango del mes; XLSX y CSV).
+- [ ] **Informes — Paso 7:** bloque-reserva "Nómina · Liquidación · Cuenta
+      de Cobro" (endpoints ya listos: `/informes/nomina/`,
+      `/informes/liquidacion/`, `/informes/cuenta-cobro/`).
+- [ ] **Informes — botones sin cablear:** Excel de "Reporte Área" y
+      refresco WFM del área I&M (⚠️ `/wfm/validar/` **escribe**
+      validaciones: requiere permiso y confirmación explícita).
 - [ ] **Pantallas sin crear** (`disponible: false` en `transporteModulos.ts`):
       `kiosco`, `liquidaciones`, `planillas`.
-- [ ] Flota es solo consulta (sin CRUD ni ficha) y `exportarSalidas` no tiene
-      botón en la toolbar.
+- [ ] Flota es solo consulta (sin CRUD ni ficha); en Salidas no hay botón de
+      exportación (el de Informes ya existe).
 
 ---
 
@@ -370,3 +377,6 @@ G3 y G4 desbloquean los últimos dos puntos sueltos (B11 y S2/T6).
 | 2026-10-23 | **Frontend Informes**: bloque **Reporte Área** (matriz área × carpetas) | `73cd6c2` |
 | 2026-10-23 | **Frontend Informes**: gráfico **"Pagos por Mes, por Área" (F5-2)** con amCharts 5, consumiendo `GET /informes/series-chart/` | `6d5ff4d` |
 | 2026-10-23 | **Refinamiento F5-2 CERRADO**: decisión sobre el legacy — el PHP omitía las salidas sin `area_sale` (`continue`) y el total del gráfico no cuadraba con la tabla de Transporte Mes; ahora entran como serie **`SIN AREA`**. Además `_area_de` deshace entidades HTML: `E&amp;N` (124 filas legacy) se fusiona con `E&N` (12.549), y `I&M`/`E&N` (no son entidades válidas) vuelven idénticos. Agrupado con `_area_de` (normaliza mayúsculas/espacios) en vez del área cruda del legacy. +4 tests (**465 tests**, verificados 23-oct) | `266341b` |
+| 2026-10-23 | **Frontend Informes · Paso 5 CERRADO: bloque "Día a Día"** (`4560643`): `/informes/mensual/` (F5-3) como listado paginado con filtros server-side (estado/área/carpeta/sede/búsqueda con debounce) y las columnas de la sábana + centro de costos B11. El badge de estado se mudó a `modules/transporte/components/EstadoSalidaBadge.tsx` (ahora dos pantallas pintan las mismas filas) y el tipo `Salida` ganó `centro_costos`, que el backend llevaba dos hitos devolviendo | `4560643` |
+| 2026-10-23 | **Frontend Informes · Paso 6 CERRADO: bloque "Área y Carpeta"** (`f6a9af4`): matriz área × meses de `/informes/areas-mes/` (F5-7) como tabla —fila por área, 12 columnas, TOTAL y pie por mes—, que es la forma tabular del gráfico F5-2. Responde SOLO al año (el endpoint no admite mes ni "Solo aprobados"); celda vacía = «—», no «$ 0» | `f6a9af4` |
+| 2026-10-23 | **Frontend Informes · export de "Transporte Mes" cableado** (`fbae935`): botones Excel/CSV en la cabecera del bloque que bajan las salidas del mes vía `GET /salidas/export/` (F5-4) con el rango `desde`/`hasta`. Límite expuesto en la interfaz: el export no entiende «Solo aprobados» (el filtro B1 admite UN estado), así que trae todas las salidas del mes salvo las eliminadas. `InformeBloque` ganó el slot `acciones` | `fbae935` |
