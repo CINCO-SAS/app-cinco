@@ -3,7 +3,7 @@
 > Documento vivo de seguimiento. Los `.md` de `MIGRACIONES/` son la
 > **especificación**; éste solo registra **qué falta, en qué orden y qué lo
 > desbloquea**. Actualizar la §6 al cerrar cada hito.
-> Última actualización: 2026-10-15 · Rama: `feat/modulo_transporte` · Commits locales sin push.
+> Última actualización: 2026-10-23 · Rama: `feat/modulo_transporte` · Commits locales sin push.
 
 ---
 
@@ -15,14 +15,14 @@
 | F1 Base Django y Festivos | 16 modelos + migración; **algoritmo de festivos portado + caché** y **catálogo JSON editable** (`apps/common/festivos/`, compartido con otros módulos); falta la tabla `common.Festivo` | ~85% (solo falta la tabla → G1; migrate real → C1) |
 | F2 Flota y Conductores | CRUD + semáforo + documentos + CSV (CR-13) + QR (D-A8) + **ficha de contacto del conductor (A1: 3 fuentes, Nokia degradado → G2)** + **licencias y cilindraje recuperados (hueco del legacy)** | ~95% (falta T6 → C3; línea corporativa → G2) |
 | F3 Kiosco y Fotos | Núcleo **CERRADO** (B2): alta de salidas S6, consulta B1, escaneo S1; **fotos B3 núcleo cerrado** (ventana/agenda/imágenes en servidor); **kiosco S3 (pre-chequeo) y S4 (consulta por placa) cerrados**; pendiente solo S2 (gated G4) y refinamientos B3 | ~70% |
-| F4 Backoffice y Novedades | Backoffice **CERRADO** (B4): `aprobar-lote`, `aprobar`, `rechazar`, `validar`, `DELETE`, novedades (B6/B7), historial y `/validaciones/` (cierre por área) | ~60% (falta B11 centros de costos → G3) |
-| F5 Liquidaciones e Informes | **F5-1…F5-7 CERRADOS** (cuenta de cobro, gráfico, informe mensual, export, WFM + worker, planillas con **formato físico F-104**, agregados de sábana) | **100%** |
+| F4 Backoffice y Novedades | Backoffice **CERRADO** (B4): `aprobar-lote`, `aprobar`, `rechazar`, `validar`, `DELETE`, novedades (B6/B7), historial y `/validaciones/` (cierre por área); **B11 cerrado** (centro de costos por (carpeta, área) desde `infraestructura_parametros`) | ~95% (código completo; validación contra datos reales → C4) |
+| F5 Liquidaciones e Informes | **F5-1…F5-7 CERRADOS** (cuenta de cobro, gráfico, informe mensual, export, WFM + worker, planillas con **formato físico F-104**, agregados de sábana) + **refinamiento F5-2** (área vacía → serie `SIN AREA`, entidades HTML deshechas) | **100%** |
 | F6 ETL histórico | Esqueleto cerrado (A3); corrida real → C3 | ~40% |
 | F7 Cutover | — | 0% |
 | F8 Estabilización | — | 0% |
 
-- 339 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos).
-- **Nada ejecutado contra MySQL real.**
+- 465 tests OK (`config.settings_test_transporte`, SQLite aislado de otros módulos), verificados el 23-oct.
+- Contra MySQL real (`default` = `db_cincosas` y `azul`): **C1 (migraciones 0001–0008) y C2 (auditorías) ejecutados el 20-oct**; falta la ETL real (C3) y la validación (C4).
 
 ---
 
@@ -32,7 +32,7 @@
 |---|---|---|---|
 | **G1** | Decisión de negocio: fuente y modelo del calendario de festivos (`common.Festivo`) | B1 (F3); **B2, B3 y B4 cerrados sin G1** con el algoritmo portado | **Desactivado en la práctica (19-oct):** `es_festivo` = algoritmo ∪ catálogo JSON editable (`apps/common/festivos/`); la tabla BD solo añadiría decretar en caliente sin redeploy |
 | **G2** | Conectividad: BD `azul` (`192.168.79.10`), BD negra Nokia y `default` | C1–C4, T6 teléfonos | **ABIERTO desde el 20-oct** (C1 migrate real y C2 auditorías ya ejecutados). **Pendiente:** alias `negra` en `DATABASES` (hoy solo hay `default`, `azul`, `logistica_cinco`) para la línea corporativa de Nokia y T6; C3 (carga real del ETL) y C4 (validación contra datos reales). ⚠️ `sql_mode` **vacío** en `default` y `azul` → sin `STRICT_TRANS_TABLES` MySQL trunca en silencio: habilitar **antes de C3** |
-| **G3** | Modelo `common.Area` (viene de otro PHP) | FK de áreas en parámetros/backoffice; B11 (área–carpeta con centro de costos) | **La FUENTE YA ESTÁ DECIDIDA** (D-A2: "reutilizar directamente `common.Area`"; B11: "Área–carpeta con centro de costos → `ParametrosService` → `Area`); lo que falta es escribir el modelo y el CRUD. **Ya no es un gate esperando decisión: es código pendiente** |
+| **G3** | Modelo `common.Area` (viene de otro PHP) | FK de áreas en parámetros/backoffice; B11 (área–carpeta con centro de costos) | **RESUELTO SIN `common.Area` (22-oct):** B11 se cerró leyendo `infraestructura_parametros` directamente (`managed=False`, solo lectura, 94,1 % exacto). Lo único que queda es **código opcional y sin gate**: modelo `common.Area` + CRUD para convertir los 4 snapshots `area` en FK (los `TODO` de `models/salida.py` y `models/liquidacion.py`). No bloquea nada. |
 | **G4** | Decisiones **D-A9** (asignar móvil vía outbox asíncrono) y **D-A10** (router BD negra) — §8 | S2 asignar móvil, T6 | Pendientes de decisión técnica |
 
 ---
@@ -198,6 +198,9 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
       y hacía `execute([2024])` — fijaba 2024 a mano e ignoraba ambos; el año
       ahora es un filtro opcional **respetado** (sin año: histórico completo).
       Estados como el legacy post-01/08/2024 (VALIDADO + APROBADO).
+      **Refinamiento (23-oct, `266341b`):** el área vacía entra como serie
+      `SIN AREA` (el PHP la omitía con `continue` y el total no cuadraba con
+      Transporte Mes) y `_area_de` deshace entidades HTML (`E&amp;N` → `E&N`).
       *Tamaño S.*
 - [x] **F5-3 · Informe mensual + filtros** — ✅ `GET /informes/mensual/?mes=&anio=&estado=&sede=&area=&carpeta=&search=`
       (§5.7 `InformeService.mensual`): salidas **no eliminadas** del mes,
@@ -265,6 +268,21 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
       legacy lo metía en `propios`) e importes en `Decimal` con 2
       decimales (el legacy los truncaba a entero con `parseInt`).
       *El "pronto pago" ya existía en A2 (`/liquidaciones/pronto-pago/`).*
+
+### Frontend — estado y pendiente (23-oct)
+
+5 pantallas operativas (Salidas, Reporte Fotográfico, Flota, Conductores,
+Informes), sin datos mock: todo pasa por `transporte.service.ts`. **~37
+endpoints del backend ya definidos en el servicio y sin consumir.**
+
+- [ ] **Informes**: 3 bloques-reserva visibles (`BloquePendiente`): Paso 5
+      "Día a Día", Paso 6 "Área y Carpeta" y Paso 7 "Nómina · Liquidación ·
+      Cuenta de Cobro"; botones sin cablear (export de "Transporte Mes",
+      Excel de "Reporte Área", refresco WFM). Endpoints backend ya listos.
+- [ ] **Pantallas sin crear** (`disponible: false` en `transporteModulos.ts`):
+      `kiosco`, `liquidaciones`, `planillas`.
+- [ ] Flota es solo consulta (sin CRUD ni ficha) y `exportarSalidas` no tiene
+      botón en la toolbar.
 
 ---
 
@@ -342,8 +360,13 @@ G3 y G4 desbloquean los últimos dos puntos sueltos (B11 y S2/T6).
 | 2026-10-19 | E1 catálogo operativo + E3 PermisoService (cierra CR-8): `/vehiculos/catalogo-operativo/` (solo activos, semáforo en servidor) y `/permisos/estado/` (grupos/permisos en vez de cédulas hardcodeadas, migración 0006) (365 tests) | `65c2709` |
 | 2026-10-19 | Calendario reutilizable (G1 parcial): `apps/common/festivos/` con el algoritmo + catálogo editable `festivos_colombia.json` (2022–2030, feriado decretado 2026-07-13 incluido); `es_festivo` = algoritmo ∪ catálogo (agregar festivo = editar JSON y `recargar_catalogo()`, sin código ni migración); transporte queda como shim sin cambio de comportamiento; corrección del JSON de origen: San Pedro y San Pablo 2027 estaba en el lunes anterior (2027-06-28) → 2027-07-05 según Emiliani; +10 tests en `apps.common` (377 tests) | `6f3e837` |
 | 2026-10-19 | P1 CERRADO: formato físico F-104 en `POST /planillas/formato/` verificado contra `planilla_salida.php` (LETTER horizontal, hoja por vehículo, QR en base64, casillas en blanco para firmas); mejora sobre el legacy: fecha real (el legacy imprimía 16/02/2022 fijo), conductor/teléfono/valor día reales (la consulta del legacy estaba comentada), consecutivo impreso (§3.6) y sin código de barras (D-A8); +12 tests (389 tests) | `7e00e26` |
-| 2026-10-20 | Refinamiento B3 #1 CERRADO: match OT-específica `validar_agenda_ot` portado del `controlador_fix` (la OT declarada debe coincidir exactamente con `actividad.ot`/`tipo_trabajo`/`descripcion`/`observacion` de una agenda no borrada del día); aplicado en `guardar()` y en `validar-agenda/`; áreas exentas y WFM/IM intactas; el #2 (ventana de días anteriores con excepción) queda pendiente de decisión de diseño | *(este commit)* |
-| 2026-10-21 | **A1 ficha de contacto del conductor** (cierra la última acción de `base_transportadores.php` que faltaba): `GET /vehiculos/{id}/contacto/` y `ContactoService`, que cruza las 3 fuentes del legacy (línea corporativa Nokia, celular de `transporte_base_conductores` y los 3 teléfonos de `cinco_base_de_personal`); cross-BD sin JOIN (D-A10) y con degradación explícita de Nokia (`nokia_disponible=false`) mientras no haya gate G2; `linea_corporativa` pasa a ser lista (el `group_concat` legacy devolvía una cadena) | *(este commit)* |
+| 2026-10-20 | Refinamiento B3 #1 CERRADO: match OT-específica `validar_agenda_ot` portado del `controlador_fix` (la OT declarada debe coincidir exactamente con `actividad.ot`/`tipo_trabajo`/`descripcion`/`observacion` de una agenda no borrada del día); aplicado en `guardar()` y en `validar-agenda/`; áreas exentas y WFM/IM intactas; el #2 (ventana de días anteriores con excepción) queda pendiente de decisión de diseño | `c61e5be` |
+| 2026-10-21 | **A1 ficha de contacto del conductor** (cierra la última acción de `base_transportadores.php` que faltaba): `GET /vehiculos/{id}/contacto/` y `ContactoService`, que cruza las 3 fuentes del legacy (línea corporativa Nokia, celular de `transporte_base_conductores` y los 3 teléfonos de `cinco_base_de_personal`); cross-BD sin JOIN (D-A10) y con degradación explícita de Nokia (`nokia_disponible=false`) mientras no haya gate G2; `linea_corporativa` pasa a ser lista (el `group_concat` legacy devolvía una cadena) | `32a2885` |
 | 2026-10-21 | **Huecos del legacy recuperados en flota**: al auditar `base_transportadores.php` contra `DICCIONARIO_DATOS.md` aparecieron 4 columnas que el legacy tenía y Django no. `cilindraje` (varchar 11, "numérico como texto") vuelve al `Vehiculo`; `licencia` (SI/NO/NO APLICA → `posee_licencia`), `estado_licencia` (ACTIVA/INACTIVA → `situacion_licencia`), `categoria` (A1..C3) y `fecha_licencia` vuelven al `Conductor` (de quien son), que era un hueco real: el docstring decía "pertenecen al conductor" pero nunca se habían añadido. **Fix de pérdida de datos:** `CategoriaLicencia` solo tenía 4 de las 8 categorías del legacy, así que la ETL convertía a NULL las licencias A1/A2/B2/B3 → catálogo ampliado a 8. La ETL_enriquece al conductor con la copia del vehículo **solo en campos vacíos** (resultado independiente del orden de carga). El semáforo `estado_licencia` (VIGENTE/POR_VENCER/VENCIDA) NO se toca: el flag manual del legacy va en `situacion_licencia` para que no choquen. Migración 0007 (3 AddField nullable + AlterField de choices), sin migración de datos. **Pendiente:** `migrate` contra la BD real (no ejecutado) | `8dfef71` |
 | 2026-10-22 | **B9 ficha del móvil** (el último endpoint de la matriz §6): `GET /personas/{cedula}/ficha-movil/` + `SalidaService.buscar_movil` (plan §5.1). Resuelve QUIÉN es un móvil, qué vehículo tiene ASIGNADO y con qué salida salió hoy. La cascada es la versión normalizada del `movil_sale` legacy (que guardaba en una sola columna valores de tres naturalezas): (1) conductor externo → `Conductor`; (2) personal de nómina → `Empleado` (BD azul); (3) línea corporativa Nokia → `nokia_base_lineas`, **no disponible** (no existe el alias `negra` en `DATABASES`, gate G4/D-A10) → se degrada con `nokia_disponible=false` en vez de dar 500. La consulta a la BD negra vive en **`services/nokia.py`** (compartida con `ContactoService`, sin duplicar SQL), así que al añadir el alias a `settings` la 3ª fuente de la cascada funciona sin tocar nada más. Cross-BD sin JOIN (D-A10): cédula → Empleado y placa → Vehiculo, dos pasos. El vehículo asignado sale de `cinco_base_de_personal.placa`, que es la **segunda fuente de verdad de la placa del móvil** (la primera es la BD negra): deja D-A9 a medias pero comprobable. La "pk" del recurso es la CÉDULA, no un id. La matriz §6 queda con 1 endpoint pendiente (S2, gated G4) y E2 parcial. +13 tests (441 tests) | `4aad3b3` |
-| 2026-10-22 | **B11 · área–carpeta con centro de costos** (G3 deja de ser gate: es código): `centro_costos` incluido en `GET /salidas/`. Fuente ÚNICA **`infraestructura_parametros`** (BD azul) — verificado que es la única tabla del legacy con `centro_costo` (`cinco_base_de_personal` no tiene ninguna columna de costo y su JSON `datos` es de RRHH: hijos, vacunación, tallas, contactos). Modelo **`managed=False`** + `save()`/`delete()` que LANZAN `NotSupportedError`: la promesa de solo lectura está **impuesta por el código**, no solo documentada (migración `0008` = estado, sin DDL). **Mejora sobre el legacy:** el PHP no sabía desambiguar las 6 carpetas con dos centros de costos y acumulaba todas en un `Set`, mostrándolas juntas y delegando la decisión a contabilidad; aquí se resuelve con **(carpeta, área)**, que sobre las **146.278 salidas vivas** resuelve **136.589 exactas** y deja **1 sola** ambigua → **94,1 % exacto, 0,0 % ambiguo**, con fallback `"Sin asignar"` literal (`transporte_salida_informes.php:4190`) para el 5,9 % restante. **Dos bugs de presentación corregidos:** el JS imprimía `[23(None)]` cuando faltaba subcentro y `[16([1])]` cuando era array → ahora `[23]` y `[16(1)]`. **1 sola query por request** (catálogo de 90 filas cacheado en el contexto del serializer): un listado de 100 salidas no hace 100. `ParametrosService.centro_costos(carpeta, area, catalogo)`. +19 tests (**462 tests**) | *(este commit)* |
+| 2026-10-22 | **B11 · área–carpeta con centro de costos** (G3 deja de ser gate: es código): `centro_costos` incluido en `GET /salidas/`. Fuente ÚNICA **`infraestructura_parametros`** (BD azul) — verificado que es la única tabla del legacy con `centro_costo` (`cinco_base_de_personal` no tiene ninguna columna de costo y su JSON `datos` es de RRHH: hijos, vacunación, tallas, contactos). Modelo **`managed=False`** + `save()`/`delete()` que LANZAN `NotSupportedError`: la promesa de solo lectura está **impuesta por el código**, no solo documentada (migración `0008` = estado, sin DDL). **Mejora sobre el legacy:** el PHP no sabía desambiguar las 6 carpetas con dos centros de costos y acumulaba todas en un `Set`, mostrándolas juntas y delegando la decisión a contabilidad; aquí se resuelve con **(carpeta, área)**, que sobre las **146.278 salidas vivas** resuelve **136.589 exactas** y deja **1 sola** ambigua → **94,1 % exacto, 0,0 % ambiguo**, con fallback `"Sin asignar"` literal (`transporte_salida_informes.php:4190`) para el 5,9 % restante. **Dos bugs de presentación corregidos:** el JS imprimía `[23(None)]` cuando faltaba subcentro y `[16([1])]` cuando era array → ahora `[23]` y `[16(1)]`. **1 sola query por request** (catálogo de 90 filas cacheado en el contexto del serializer): un listado de 100 salidas no hace 100. `ParametrosService.centro_costos(carpeta, area, catalogo)`. +19 tests (**462 tests**) | `5168f0c` |
+| 2026-10-22 | **Frontend Flota**: los KPIs vuelven, pero fuera de la barra de filtros (separar métrica de criterio de filtro evita que un KPI mutuo active un filtro contradictorio) | `8a7fec1` |
+| 2026-10-23 | **Frontend Informes (base)**: tipos y servicios de informes (`transporte.types.ts` / `transporte.service.ts`) + bloques **Día** y **Mes** de la sábana | `36f3205` |
+| 2026-10-23 | **Frontend Informes**: bloque **Reporte Área** (matriz área × carpetas) | `73cd6c2` |
+| 2026-10-23 | **Frontend Informes**: gráfico **"Pagos por Mes, por Área" (F5-2)** con amCharts 5, consumiendo `GET /informes/series-chart/` | `6d5ff4d` |
+| 2026-10-23 | **Refinamiento F5-2 CERRADO**: decisión sobre el legacy — el PHP omitía las salidas sin `area_sale` (`continue`) y el total del gráfico no cuadraba con la tabla de Transporte Mes; ahora entran como serie **`SIN AREA`**. Además `_area_de` deshace entidades HTML: `E&amp;N` (124 filas legacy) se fusiona con `E&N` (12.549), y `I&M`/`E&N` (no son entidades válidas) vuelven idénticos. Agrupado con `_area_de` (normaliza mayúsculas/espacios) en vez del área cruda del legacy. +4 tests (**465 tests**, verificados 23-oct) | `266341b` |
