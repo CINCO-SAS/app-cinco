@@ -272,17 +272,18 @@ cobro no tienen fila propia en la matriz §6: viven dentro de la sábana (I1).
 ### Frontend — estado y pendiente (23-oct)
 
 5 pantallas operativas (Salidas, Reporte Fotográfico, Flota, Conductores,
-Informes), sin datos mock: todo pasa por `transporte.service.ts`. **~33
+Informes), sin datos mock: todo pasa por `transporte.service.ts`. **~30
 endpoints del backend ya definidos en el servicio y sin consumir.**
 
-- [x] **Informes — Pasos 5 y 6 CERRADOS (23-oct):** "Día a Día" (`4560643`:
-      `/informes/mensual/` como listado paginado con filtros server-side)
-      y "Área y Carpeta" (`f6a9af4`: matriz área × meses de
-      `/informes/areas-mes/`). **Export de "Transporte Mes" cableado**
-      (`fbae935`: `GET /salidas/export/` con el rango del mes; XLSX y CSV).
-- [ ] **Informes — Paso 7:** bloque-reserva "Nómina · Liquidación · Cuenta
-      de Cobro" (endpoints ya listos: `/informes/nomina/`,
-      `/informes/liquidacion/`, `/informes/cuenta-cobro/`).
+- [x] **Informes — PASOS 2 a 7 COMPLETOS (23-oct): la sábana del Tab 2
+      está migrada al 100 %** y ya no queda ningún `BloquePendiente`.
+      Paso 5 "Día a Día" (`4560643`: `/informes/mensual/` como listado
+      paginado con filtros server-side) · Paso 6 "Área y Carpeta"
+      (`f6a9af4`: matriz área × meses) · export de "Transporte Mes"
+      (`fbae935`: `GET /salidas/export/` con el rango del mes; XLSX y CSV)
+      · Paso 7 cierre del mes (`35c5066`: nómina por (carpeta, placa),
+      liquidación por vehículo y cuenta de cobro imprimible que se abre en
+      pestaña nueva desde el HTML del servidor).
 - [ ] **Informes — botones sin cablear:** Excel de "Reporte Área" y
       refresco WFM del área I&M (⚠️ `/wfm/validar/` **escribe**
       validaciones: requiere permiso y confirmación explícita).
@@ -380,3 +381,4 @@ G3 y G4 desbloquean los últimos dos puntos sueltos (B11 y S2/T6).
 | 2026-10-23 | **Frontend Informes · Paso 5 CERRADO: bloque "Día a Día"** (`4560643`): `/informes/mensual/` (F5-3) como listado paginado con filtros server-side (estado/área/carpeta/sede/búsqueda con debounce) y las columnas de la sábana + centro de costos B11. El badge de estado se mudó a `modules/transporte/components/EstadoSalidaBadge.tsx` (ahora dos pantallas pintan las mismas filas) y el tipo `Salida` ganó `centro_costos`, que el backend llevaba dos hitos devolviendo | `4560643` |
 | 2026-10-23 | **Frontend Informes · Paso 6 CERRADO: bloque "Área y Carpeta"** (`f6a9af4`): matriz área × meses de `/informes/areas-mes/` (F5-7) como tabla —fila por área, 12 columnas, TOTAL y pie por mes—, que es la forma tabular del gráfico F5-2. Responde SOLO al año (el endpoint no admite mes ni "Solo aprobados"); celda vacía = «—», no «$ 0» | `f6a9af4` |
 | 2026-10-23 | **Frontend Informes · export de "Transporte Mes" cableado** (`fbae935`): botones Excel/CSV en la cabecera del bloque que bajan las salidas del mes vía `GET /salidas/export/` (F5-4) con el rango `desde`/`hasta`. Límite expuesto en la interfaz: el export no entiende «Solo aprobados» (el filtro B1 admite UN estado), así que trae todas las salidas del mes salvo las eliminadas. `InformeBloque` ganó el slot `acciones` | `fbae935` |
+| 2026-10-23 | **Frontend Informes · Paso 7 CERRADO — la sábana del Tab 2 queda sin bloques pendientes** (`35c5066`): cierre del mes en tres bloques — **Nómina** (`/informes/nomina/` agrupado por (carpeta, placa)), **Liquidación** (`/informes/liquidacion/`, una fila por vehículo; banco · tipo · número en una sola celda) y **Cuenta de Cobro** (selector de placa tomado de la propia liquidación + pestaña nueva con el HTML del servidor F5-1, abierta ANTES del `await` para no caer en el bloqueo de popups). Nómina y liquidación se piden en paralelo en un mismo hook (mismo mes, dos agrupaciones: no deben divergir); excluyen REPORTADO/ELIMINADO y aplican retefuente 1 %; el pagador llega de los datos bancarios vigentes en servidor (CR-13). `centro_costo` NO se pinta: el backend lo devuelve vacío hasta consumir B11 (deuda C). Se retiró `BloquePendiente` (ya no hay reservas) | `35c5066` |
