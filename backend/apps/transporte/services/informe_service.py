@@ -20,6 +20,7 @@ Fórmula (idéntica a la liquidación de la sábana, JS 4270–4336):
 """
 import calendar
 import csv
+import html
 import io
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -272,10 +273,22 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
         **Estados:** como el legacy para todo dato posterior al 01-08-2024
         (la rama anterior, que sumaba también REPORTADO/RECHAZADO, es
         histórica): VALIDADO + APROBADO.
+
+        **Área vacía — decisión frente al legacy:** el PHP hacía
+        ``continue`` cuando no venía ``area_sale``, así que esas salidas no
+        se pintaban. Aquí sí entran, como serie ``SIN AREA``: son salidas
+        pagadas (VALIDADO/APROBADO) y el resto de bloques de la misma
+        pantalla —Día, Mes y Reporte Área— sí las muestra. Ocultarlas
+        hacía que el total del gráfico no cuadrara con la tabla de
+        Transporte Mes.
+
+        El agrupado usa :meth:`_area_de` en lugar del área cruda que
+        usaba el legacy, así que deshace ``E&amp;N`` y normaliza mayúsculas
+        y espacios.
         """
         salidas = Salida.objects.filter(
             estado__in=InformeService.ESTADOS_GRAFICO
-        ).filter(area__isnull=False).exclude(area="")
+        )
         if anio:
             salidas = salidas.filter(fecha_salida__year=anio)
         salidas = salidas.select_related("novedad")
@@ -283,7 +296,7 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
         acumulado = {}
         for salida in salidas:
             clave = (
-                salida.area,
+                InformeService._area_de(salida),
                 salida.fecha_salida.year,
                 salida.fecha_salida.month,
             )
@@ -464,8 +477,17 @@ body {{ font-family: "Century Gothic", sans-serif; color: black; text-align: -we
 
     @staticmethod
     def _area_de(salida):
-        """Área normalizada: mayúsculas y 'SIN AREA' (PHP 60 del legacy)."""
-        return (salida.area or "").strip().upper() or "SIN AREA"
+        """
+        Área normalizada: mayúsculas y 'SIN AREA' (PHP 60 del legacy).
+
+        **Deshace entidades HTML** (decisión del módulo sobre el legacy):
+        la tabla legacy tiene 124 filas con ``E&amp;N`` literal, que es el
+        mismo área que ``E&N`` (12.549 filas). El legacy las contaba por
+        separado y salían dos series para un mismo área. ``html.unescape``
+        no toca ``I&M`` ni ``E&N``: no son entidades válidas y vuelven
+        idénticas.
+        """
+        return html.unescape((salida.area or "").strip()).upper() or "SIN AREA"
 
     @staticmethod
     def _carpeta_de(salida):

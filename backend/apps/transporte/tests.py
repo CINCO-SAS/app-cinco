@@ -3742,10 +3742,45 @@ class SeriesChartTests(TestCase):
         self.assertEqual(serie_im["defaultPoint"]["marker"]["type"], "circle")
         self.assertEqual(serie_im["points"], [["1/1/2026", 100000]])
 
-    def test_area_vacia_excluida(self):
+    def test_area_vacia_entra_como_sin_area(self):
+        """Decisión frente al legacy: el PHP omitía las salidas sin área.
+
+        Aquí sí se pintan, como serie 'SIN AREA', porque son salidas
+        pagadas y el resto de bloques de la misma pantalla sí las
+        muestra. Ocultarlas desincronizaba el gráfico de Transporte Mes.
+        """
         vehiculo = self._vehiculo()
         self._salida(vehiculo, date(2026, 1, 5), "", EstadoSalida.APROBADO, "100000")
-        self.assertEqual(self._por_area(), {})
+        self.assertEqual(
+            self._por_area()["SIN AREA"]["points"], [["1/1/2026", 100000]]
+        )
+
+    def test_area_null_entra_como_sin_area(self):
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, date(2026, 1, 5), None, EstadoSalida.APROBADO, "80000")
+        self.assertEqual(
+            self._por_area()["SIN AREA"]["points"], [["1/1/2026", 80000]]
+        )
+
+    def test_area_con_entidad_html_se_fusiona(self):
+        """`E&amp;N` (124 filas en la tabla legacy) es el área `E&N`.
+
+        Sin deshacer la entidad salían dos series para un mismo área.
+        """
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, date(2026, 1, 5), "E&N", EstadoSalida.APROBADO, "100000")
+        self._salida(vehiculo, date(2026, 1, 6), "E&amp;N", EstadoSalida.APROBADO, "50000")
+        areas = self._por_area()
+        self.assertEqual(list(areas), ["E&N"])
+        self.assertEqual(areas["E&N"]["points"], [["1/1/2026", 150000]])
+
+    def test_entidad_html_no_toca_los_ampersands_validos(self):
+        """`I&M` y `E&N` no son entidades: html.unescape los devuelve igual."""
+        vehiculo = self._vehiculo()
+        self._salida(vehiculo, date(2026, 1, 5), "I&M", EstadoSalida.APROBADO, "100000")
+        self._salida(vehiculo, date(2026, 1, 6), "E&N", EstadoSalida.APROBADO, "20000")
+        areas = self._por_area()
+        self.assertEqual(sorted(areas), ["E&N", "I&M"])
 
     def test_http_series_chart(self):
         vehiculo = self._vehiculo()
