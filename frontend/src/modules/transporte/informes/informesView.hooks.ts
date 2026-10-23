@@ -27,6 +27,7 @@ import type {
 import { fechaISO, ultimoDiaDelMes } from "./informesView.utils";
 import { useInformeDiaADia } from "./informeDiaADia.hooks";
 import { useInformeMatriz } from "./informeMatriz.hooks";
+import { useInformeNomina } from "./informeNomina.hooks";
 
 /**
  * Hoy en la zona horaria del backend (`America/Bogota`), como `YYYY-MM-DD`.
@@ -91,6 +92,11 @@ export const useInformesData = () => {
   // Bloque "Área y Carpeta" (Paso 6): matriz área × meses del año. Solo
   // depende del año (es la forma tabular del histórico del gráfico).
   const matriz = useInformeMatriz(anio, tick);
+
+  // Bloque "Nómina · Liquidación · Cuenta de Cobro" (Paso 7): los dos
+  // agregados de pago del mes en un solo hook, para que las dos tablas
+  // muestren siempre el mismo periodo.
+  const cierre = useInformeNomina(mes, anio, tick);
 
   // -------------------------------------------------------------------------
   // Cargas. Dependencias distintas a propósito: el bloque Día solo debe
@@ -261,6 +267,8 @@ export const useInformesData = () => {
     diaADia,
     /** Bloque "Área y Carpeta" (Paso 6): matriz área × meses del año. */
     matriz,
+    /** Bloque "Nómina · Liquidación · Cuenta de Cobro" (Paso 7). */
+    cierre,
     recargar,
   };
 };

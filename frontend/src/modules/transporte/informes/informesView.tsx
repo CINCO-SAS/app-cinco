@@ -2,11 +2,12 @@
 //
 // Pantalla de Informes (F5) — Tab 2 del legacy "TRANSPORTE / INFORMES".
 //
-// PANTALLA POR PASOS: hoy se entregan los bloques de los PASOS 2, 3, 4, 5 y 6
-// (Transporte Día, Transporte Mes, Reporte Área y Reporte Áreas, el listado
-// "Día a Día" y la matriz "Área y Carpeta"). Falta el PASO 7 — Nómina,
-// Liquidación y Cuenta de Cobro—, delimitado por `BloquePendiente` para que
-// se vea desde ya QUÉ falta, sin inventar datos ni dejar huecos en blanco.
+// PANTALLA POR PASOS: se entregan COMPLETOS los PASOS 2 a 7 — Transporte
+// Día, Transporte Mes, Reporte Área y Reporte Áreas, el listado "Día a
+// Día", la matriz "Área y Carpeta" y el cierre del mes (Nómina,
+// Liquidación y Cuenta de Cobro). Con el Paso 7 ya no queda ningún
+// `BloquePendiente` en la pantalla: el componente se retiró al no tener
+// reservas que marcar.
 //
 // PENDIENTE FUERA DE ESTOS PASOS: dentro de "Reporte Área" el legacy
 // añadía un botón de Excel y un icono de refresco WFM para el área "I&M".
@@ -27,15 +28,20 @@ import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import { useInformesData } from "./informesView.hooks";
 import { etiquetaFecha, etiquetaPeriodo } from "./informesView.utils";
 import { InformeBloque } from "./components/InformeBloque";
+import { InformeCuentaCobro } from "./components/InformeCuentaCobro";
 import { InformeDiaADia } from "./components/InformeDiaADia";
 import { InformeExportarMes } from "./components/InformeExportarMes";
 import { InformeGraficoAreas } from "./components/InformeGraficoAreas";
+import { InformeLiquidacion } from "./components/InformeLiquidacion";
 import { InformeMatrizAnual } from "./components/InformeMatrizAnual";
+import { InformeNomina } from "./components/InformeNomina";
 import { InformeReporteArea } from "./components/InformeReporteArea";
 import { InformeToolbar } from "./components/InformeToolbar";
 import type {
   AreaInforme,
   AreaMatrizInforme,
+  FilaLiquidacionInforme,
+  FilaNominaInforme,
   SerieInforme,
 } from "@/types/transporte.types";
 
@@ -49,27 +55,8 @@ import type {
 const AREAS_VACIAS: AreaInforme[] = [];
 const SERIES_VACIAS: SerieInforme[] = [];
 const AREAS_MATRIZ_VACIAS: AreaMatrizInforme[] = [];
-
-/**
- * Reserva visible de un bloque del legacy que aún no se ha migrado en este
- * paso. No es una omisión accidental: deja el hueco acotado en pantalla.
- */
-const BloquePendiente = ({
-  titulo,
-  motivo,
-}: {
-  titulo: string;
-  motivo: string;
-}) => (
-  <section className="rounded-xl border border-dashed border-gray-300 bg-gray-50/60 dark:border-gray-700 dark:bg-gray-900/40">
-    <header className="border-b border-dashed border-gray-300 px-4 py-3 dark:border-gray-700">
-      <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400">
-        {titulo}
-      </h3>
-    </header>
-    <p className="px-4 py-5 text-sm text-gray-500 dark:text-gray-400">{motivo}</p>
-  </section>
-);
+const FILAS_NOMINA_VACIAS: FilaNominaInforme[] = [];
+const FILAS_LIQUIDACION_VACIAS: FilaLiquidacionInforme[] = [];
 
 export const InformesView = () => {
   const {
@@ -97,6 +84,7 @@ export const InformesView = () => {
     errorSerie,
     diaADia,
     matriz,
+    cierre,
     recargar,
   } = useInformesData();
 
@@ -222,10 +210,62 @@ export const InformesView = () => {
           <InformeMatrizAnual areas={matriz.matriz?.areas ?? AREAS_MATRIZ_VACIAS} />
         </InformeBloque>
 
-        <BloquePendiente
-          titulo="Nómina · Liquidación · Cuenta de Cobro"
-          motivo="Paso 7 del plan."
-        />
+        {/* Paso 7: el cierre del mes en tres bloques con distinta forma de
+            lectura — nómina (por carpeta), liquidación (por vehículo) y la
+            cuenta de cobro imprimible. Los dos primeros comparten los
+            mismos criterios de pago; la cuenta de cobro es un documento,
+            no una tabla. */}
+        <InformeBloque
+          titulo="Nómina"
+          periodo={etiquetaPeriodo(mes, anio)}
+          isLoading={cierre.isLoading}
+          error={cierre.error}
+          nota={
+            "Mes agrupado por (carpeta, placa). Excluye REPORTADO y ELIMINADO: no se " +
+            "paga lo pendiente ni lo borrado. Retefuente 1 % sobre el valor base; el " +
+            "pagador sale de los datos bancarios vigentes del vehículo en el servidor " +
+            "(sin dato, el propietario). El centro de costos llegará cuando el " +
+            "backend consuma B11 (deuda C del informe F5), hoy vacío en el origen."
+          }
+        >
+          <InformeNomina filas={cierre.nomina?.filas ?? FILAS_NOMINA_VACIAS} />
+        </InformeBloque>
+
+        <InformeBloque
+          titulo="Liquidación"
+          periodo={etiquetaPeriodo(mes, anio)}
+          isLoading={cierre.isLoading}
+          error={cierre.error}
+          nota={
+            "El mismo mes, una fila por vehículo (lo que se paga por propietario). " +
+            "Mismos criterios que la nómina: excluye REPORTADO y ELIMINADO y aplica " +
+            "retefuente 1 % (a pagar = valor base − rete). La cuenta llega resuelta " +
+            "en servidor desde los datos bancarios vigentes (CR-13)."
+          }
+        >
+          <InformeLiquidacion
+            filas={cierre.liquidacion?.filas ?? FILAS_LIQUIDACION_VACIAS}
+          />
+        </InformeBloque>
+
+        <InformeBloque
+          titulo="Cuenta de Cobro"
+          periodo={etiquetaPeriodo(mes, anio)}
+          isLoading={cierre.isLoading}
+          error={cierre.error}
+          nota={
+            "Documento imprimible del alquiler del vehículo: se abre en pestaña nueva " +
+            "para imprimir a PDF. El importe, el pagador y el consecutivo se calculan " +
+            "EN SERVIDOR desde las salidas del mes (F5-1) — el legacy los leía de " +
+            "campos ocultos del formulario, manipulables desde el navegador."
+          }
+        >
+          <InformeCuentaCobro
+            mes={mes}
+            anio={anio}
+            vehiculos={cierre.liquidacion?.filas ?? FILAS_LIQUIDACION_VACIAS}
+          />
+        </InformeBloque>
       </div>
     </div>
   );
