@@ -238,6 +238,17 @@ DATABASES = {
         'OPTIONS': {
             'charset': 'utf8mb4',
         }
+    },
+    'negra': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': os.environ.get('DB_NEGRA_NAME', 'cincosas_cincosas'),
+        'USER': os.environ.get('DB_NEGRA_USER', os.environ.get('BD_USER', 'root')),
+        'PASSWORD': os.environ.get('DB_NEGRA_PASSWORD', os.environ.get('BD_PASSWORD', '')),
+        'HOST': os.environ.get('DB_NEGRA_HOST', os.environ.get('BD_HOST', '127.0.0.1')),
+        'PORT': os.environ.get('DB_NEGRA_PORT', os.environ.get('BD_PORT', '3306')),
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+        }
     }
 }
 

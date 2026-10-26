@@ -6359,3 +6359,651 @@ class CentroCostosB11Tests(TestCase):
             resp.json()["results"][0]["centro_costos"], "Sin asignar"
         )
 
+
+
+class IntegracionHttpEndpointsTests(TestCase):
+    """
+    Pruebas de integracion HTTP de punta a punta (APIClient) para cubrir
+    los endpoints de vistas que anteriormente solo se probaban a nivel de servicio.
+    Cubre: SalidaViewSet, LiquidacionViewSet, FechaLimiteCierreViewSet,
+    JefeValidadorViewSet, ConductorViewSet y VehiculoViewSet.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        _asegurar_tabla_infraestructura()
+        super().setUpClass()
+
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="admin_integ", email="admin_integ@test.com", password="x"
+        )
+        self.empleado = Empleado.objects.create(
+            cedula="88776655",
+            nombre="CARLOS",
+            apellido="JEFE",
+            codigo_sap="SAP8877",
+            cargo="JEFE OPERACIONES",
+            estado="ACTIVO",
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.hoy = timezone.localdate()
+        self.vehiculo = Vehiculo.objects.create(
+            **ReporteFotograficoTests._vehiculo_datos("INT123")
+        )
+
+    # ------------------------------------------------------------------ #
+    # 1. SalidaViewSet: HTTP Endpoints
+    # ------------------------------------------------------------------ #
+    def test_salida_aprobar_lote_http(self):
+        salida1 = Salida.objects.create(
+            vehiculo=self.vehiculo,
+            fecha_salida=self.hoy,
+            area="I&M",
+            carpeta="FTTH",
+            valor_dia=Decimal("80000"),
+            estado=EstadoSalida.REPORTADO,
+        )
+        salida2 = Salida.objects.create(
+            vehiculo=self.vehiculo,
+            fecha_salida=self.hoy,
+            area="I&M",
+            carpeta="FTTH",
+            valor_dia=Decimal("80000"),
+            estado=EstadoSalida.REPORTADO,
+        )
+        resp = self.api.post(
+            "/transporte/salidas/aprobar-lote/",
+            {"ids": [salida1.pk, salida2.pk]},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        salida1.refresh_from_db()
+        salida2.refresh_from_db()
+        self.assertEqual(salida1.estado, EstadoSalida.APROBADO)
+        self.assertEqual(salida2.estado, EstadoSalida.APROBADO)
+
+    def test_salida_aprobar_individual_y_validar_http(self):
+        salida = Salida.objects.create(
+            vehiculo=self.vehiculo,
+            fecha_salida=self.hoy,
+            area="I&M",
+            carpeta="FTTH",
+            valor_dia=Decimal("80000"),
+            estado=EstadoSalida.REPORTADO,
+        )
+        # Aprobar
+        resp_aprob = self.api.post(f"/transporte/salidas/{salida.pk}/aprobar/")
+        self.assertEqual(resp_aprob.status_code, 200, resp_aprob.content)
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.APROBADO)
+
+        # Validar
+        resp_val = self.api.post(f"/transporte/salidas/{salida.pk}/validar/")
+        self.assertEqual(resp_val.status_code, 200, resp_val.content)
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
+
+    def test_salida_rechazar_http(self):
+        salida = Salida.objects.create(
+            vehiculo=self.vehiculo,
+            fecha_salida=self.hoy,
+            area="I&M",
+            carpeta="FTTH",
+            valor_dia=Decimal("80000"),
+            estado=EstadoSalida.REPORTADO,
+        )
+        # Sin motivo falla (400)
+        resp_bad = self.api.post(
+            f"/transporte/salidas/{salida.pk}/rechazar/",
+            {},
+            format="json",
+        )
+        self.assertEqual(resp_bad.status_code, 400)
+
+        # Con motivo obligatorio pasa (200)
+        resp_ok = self.api.post(
+            f"/transporte/salidas/{salida.pk}/rechazar/",
+            {"motivo": "Movil no autorizado"},
+            format="json",
+        )
+        self.assertEqual(resp_ok.status_code, 200, resp_ok.content)
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.RECHAZADO)
+
+    def test_salida_destroy_borrado_logico_http(self):
+        salida = Salida.objects.create(
+            vehiculo=self.vehiculo,
+            fecha_salida=self.hoy,
+            area="I&M",
+            carpeta="FTTH",
+            valor_dia=Decimal("80000"),
+            estado=EstadoSalida.REPORTADO,
+        )
+        resp = self.api.delete(f"/transporte/salidas/{salida.pk}/")
+        self.assertEqual(resp.status_code, 204)
+        salida.refresh_from_db()
+        self.assertEqual(salida.estado, EstadoSalida.ELIMINADO)
+
+    def test_salida_novedades_y_historial_http(self):
+        salida = Salida.objects.create(
+            vehiculo=self.vehiculo,
+            fecha_salida=self.hoy,
+            area="I&M",
+            carpeta="FTTH",
+            valor_dia=Decimal("80000"),
+            estado=EstadoSalida.REPORTADO,
+        )
+        # Post novedad con TipoNovedad valido
+        resp_nov = self.api.post(
+            f"/transporte/salidas/{salida.pk}/novedad/",
+            {
+                "tipo": TipoNovedad.ADICIONAL,
+                "valor": "12000.00",
+                "descripcion": "Adicional en ruta regional",
+            },
+            format="json",
+        )
+        self.assertEqual(resp_nov.status_code, 200, resp_nov.content)
+        self.assertTrue(Novedad.objects.filter(salida=salida).exists())
+
+        # Historial
+        resp_hist = self.api.get(f"/transporte/salidas/{salida.pk}/historial/")
+        self.assertEqual(resp_hist.status_code, 200)
+        self.assertIn("results", resp_hist.json())
+
+        # Delete novedad
+        resp_del_nov = self.api.delete(f"/transporte/salidas/{salida.pk}/novedad/")
+        self.assertEqual(resp_del_nov.status_code, 204)
+        self.assertFalse(Novedad.objects.filter(salida=salida).exists())
+
+    # ------------------------------------------------------------------ #
+    # 2. LiquidacionViewSet: HTTP Endpoints
+    # ------------------------------------------------------------------ #
+    def test_liquidaciones_sabanas_y_aliases_http(self):
+        mes = self.hoy.month
+        anio = self.hoy.year
+        # Inscribir el vehiculo en pago mensual y pronto pago
+        PagoVehiculoMensual.objects.create(
+            vehiculo=self.vehiculo,
+            mes=mes,
+            anio=anio,
+            tipo=TipoPago.MENSUAL,
+            pagado=False,
+        )
+        PagoVehiculoMensual.objects.create(
+            vehiculo=self.vehiculo,
+            mes=mes,
+            anio=anio,
+            tipo=TipoPago.PRONTO_PAGO,
+            pagado=False,
+        )
+        # Salida aprobada para el periodo
+        Salida.objects.create(
+            vehiculo=self.vehiculo,
+            fecha_salida=self.hoy,
+            area="I&M",
+            carpeta="FTTH",
+            valor_dia=Decimal("80000"),
+            estado=EstadoSalida.APROBADO,
+        )
+        # sabana consolidada
+        resp_sabana = self.api.get(
+            f"/transporte/liquidaciones/sabana/?mes={mes}&anio={anio}&tipo=pago-mensual"
+        )
+        self.assertEqual(resp_sabana.status_code, 200, resp_sabana.content)
+        self.assertTrue(resp_sabana.json()["ok"])
+
+        # alias pago-mensual
+        resp_pago = self.api.get(
+            f"/transporte/liquidaciones/pago-mensual/?mes={mes}&anio={anio}"
+        )
+        self.assertEqual(resp_pago.status_code, 200, resp_pago.content)
+        self.assertTrue(resp_pago.json()["ok"])
+
+        # alias pronto-pago
+        resp_pronto = self.api.get(
+            f"/transporte/liquidaciones/pronto-pago/?mes={mes}&anio={anio}"
+        )
+        self.assertEqual(resp_pronto.status_code, 200, resp_pronto.content)
+        self.assertTrue(resp_pronto.json()["ok"])
+
+    def test_liquidaciones_consecutivo_y_pago_http(self):
+        mes = self.hoy.month
+        anio = self.hoy.year
+        # consecutivo
+        resp_cons = self.api.post(
+            "/transporte/liquidaciones/consecutivo/",
+            {"vehiculo": self.vehiculo.pk, "mes": mes, "anio": anio},
+            format="json",
+        )
+        self.assertIn(resp_cons.status_code, (200, 201), resp_cons.content)
+        self.assertTrue(resp_cons.json()["ok"])
+        self.assertGreaterEqual(resp_cons.json()["data"]["consecutivo"], 1000)
+
+        # pago con TipoPago valido
+        resp_pago = self.api.post(
+            "/transporte/liquidaciones/pago/",
+            {
+                "vehiculo": self.vehiculo.pk,
+                "mes": mes,
+                "anio": anio,
+                "tipo": TipoPago.MENSUAL,
+                "pagado": True,
+                "total_liquidado": "85000.00",
+            },
+            format="json",
+        )
+        self.assertIn(resp_pago.status_code, (200, 201), resp_pago.content)
+        self.assertTrue(resp_pago.json()["ok"])
+
+    # ------------------------------------------------------------------ #
+    # 3. FechaLimiteCierreViewSet: HTTP CRUD
+    # ------------------------------------------------------------------ #
+    def test_cierres_crud_http(self):
+        # Create
+        resp_create = self.api.post(
+            "/transporte/parametros/cierres/",
+            {
+                "mes": 11,
+                "anio": 2029,
+                "fecha_limite": "2029-11-20",
+            },
+            format="json",
+        )
+        self.assertEqual(resp_create.status_code, 201, resp_create.content)
+        cierre_id = resp_create.json()["id"]
+
+        # Retrieve
+        resp_get = self.api.get(f"/transporte/parametros/cierres/{cierre_id}/")
+        self.assertEqual(resp_get.status_code, 200)
+        self.assertEqual(resp_get.json()["mes"], 11)
+
+        # Partial update
+        resp_patch = self.api.patch(
+            f"/transporte/parametros/cierres/{cierre_id}/",
+            {"fecha_limite": "2029-11-25"},
+            format="json",
+        )
+        self.assertEqual(resp_patch.status_code, 200)
+        self.assertEqual(resp_patch.json()["fecha_limite"], "2029-11-25")
+
+        # Destroy
+        resp_del = self.api.delete(f"/transporte/parametros/cierres/{cierre_id}/")
+        self.assertEqual(resp_del.status_code, 204)
+        self.assertFalse(FechaLimiteCierre.objects.filter(pk=cierre_id).exists())
+
+    # ------------------------------------------------------------------ #
+    # 4. JefeValidadorViewSet: HTTP CRUD e Inactivar
+    # ------------------------------------------------------------------ #
+    def test_jefes_crud_e_inactivar_http(self):
+        # Create
+        resp_create = self.api.post(
+            "/transporte/parametros/jefes/",
+            {
+                "empleado": self.empleado.pk,
+                "areas": ["WOM"],
+                "carpetas_por_area": {"WOM": ["WOM"]},
+                "activo": True,
+            },
+            format="json",
+        )
+        self.assertEqual(resp_create.status_code, 201, resp_create.content)
+        jefe_id = resp_create.json()["id"]
+
+        # Retrieve
+        resp_get = self.api.get(f"/transporte/parametros/jefes/{jefe_id}/")
+        self.assertEqual(resp_get.status_code, 200)
+        self.assertEqual(resp_get.json()["empleado_cedula"], "88776655")
+
+        # Partial update
+        resp_patch = self.api.patch(
+            f"/transporte/parametros/jefes/{jefe_id}/",
+            {"areas": ["WOM", "I&M"]},
+            format="json",
+        )
+        self.assertEqual(resp_patch.status_code, 200)
+        self.assertEqual(resp_patch.json()["areas"], ["WOM", "I&M"])
+
+        # Inactivar
+        resp_inac = self.api.post(
+            f"/transporte/parametros/jefes/{jefe_id}/inactivar/"
+        )
+        self.assertEqual(resp_inac.status_code, 200)
+        self.assertFalse(resp_inac.json()["activo"])
+
+    # ------------------------------------------------------------------ #
+    # 5. ConductorViewSet: HTTP CRUD e Inactivar
+    # ------------------------------------------------------------------ #
+    def test_conductores_crud_e_inactivar_http(self):
+        # Create
+        payload = {
+            "cedula": "9911223344",
+            "nombre_completo": "CONDUCTOR HTTP PRUEBA",
+            "celular": "3009988776",
+            "fecha_ingreso": "2026-01-15",
+            "fecha_nacimiento": "1992-04-20",
+            "tipo_vinculacion": "EXTERNO",
+            "licencia_categoria": "C1",
+            "licencia_vencimiento": "2027-12-31",
+        }
+        resp_create = self.api.post(
+            "/transporte/conductores/", payload, format="json"
+        )
+        self.assertEqual(resp_create.status_code, 201, resp_create.content)
+        cond_id = resp_create.json()["id"]
+
+        # Retrieve
+        resp_get = self.api.get(f"/transporte/conductores/{cond_id}/")
+        self.assertEqual(resp_get.status_code, 200)
+        self.assertEqual(resp_get.json()["cedula"], "9911223344")
+
+        # Update / Patch
+        resp_patch = self.api.patch(
+            f"/transporte/conductores/{cond_id}/",
+            {"celular": "3154443322"},
+            format="json",
+        )
+        self.assertEqual(resp_patch.status_code, 200)
+        self.assertEqual(resp_patch.json()["celular"], "3154443322")
+
+        # Inactivar (requiere fecha_egreso)
+        resp_inac = self.api.post(
+            f"/transporte/conductores/{cond_id}/inactivar/",
+            {"fecha_egreso": "2026-10-23"},
+            format="json",
+        )
+        self.assertEqual(resp_inac.status_code, 200)
+        self.assertFalse(resp_inac.json()["activo"])
+
+    # ------------------------------------------------------------------ #
+    # 6. VehiculoViewSet: HTTP CRUD, Resumen y QR
+    # ------------------------------------------------------------------ #
+    def test_vehiculos_crud_resumen_y_qr_http(self):
+        # Create
+        payload = {
+            "placa": "HTT999",
+            "tipo_vehiculo": "CAMIONETA",
+            "marca": "TOYOTA",
+            "referencia": "HILUX",
+            "modelo_anio": 2024,
+            "tipo_contrato": "PROPIO",
+            "nombre_propietario": "CINCO SAS",
+            "cedula_propietario": "900111222",
+            "valor_dia_base": "95000.00",
+        }
+        resp_create = self.api.post(
+            "/transporte/vehiculos/", payload, format="json"
+        )
+        self.assertEqual(resp_create.status_code, 201, resp_create.content)
+        veh_id = resp_create.json()["id"]
+
+        # Retrieve
+        resp_get = self.api.get(f"/transporte/vehiculos/{veh_id}/")
+        self.assertEqual(resp_get.status_code, 200)
+        self.assertEqual(resp_get.json()["placa"], "HTT999")
+
+        # Patch
+        resp_patch = self.api.patch(
+            f"/transporte/vehiculos/{veh_id}/",
+            {"color": "BLANCO"},
+            format="json",
+        )
+        self.assertEqual(resp_patch.status_code, 200)
+        self.assertEqual(resp_patch.json()["color"], "BLANCO")
+
+        # Resumen (ficha con semaforo)
+        resp_resumen = self.api.get(f"/transporte/vehiculos/{veh_id}/resumen/")
+        self.assertEqual(resp_resumen.status_code, 200)
+        self.assertIn("semaforo", resp_resumen.json())
+
+        # QR (con slash final segun DefaultRouter)
+        resp_qr = self.api.get(f"/transporte/vehiculos/{veh_id}/qr.png/")
+        self.assertEqual(resp_qr.status_code, 200)
+        self.assertEqual(resp_qr["content-type"], "image/png")
+
+    # ------------------------------------------------------------------ #
+    # 7. Alta S6 por HTTP + ventana CR-9 (B2/S6)
+    # ------------------------------------------------------------------ #
+    def test_salida_alta_s6_http(self):
+        """POST /salidas/ (S6): alta valida 201; fecha fuera de la ventana
+        CR-9 (15 dias) traducida a 400 por la vista."""
+        # El personal que sale DEBE existir en Empleado con area y carpeta
+        # (regla legacy del alta S6).
+        Empleado.objects.create(
+            cedula="55443322",
+            nombre="MOVIL",
+            apellido="PRUEBA",
+            codigo_sap="SAP5544",
+            cargo="TECNICO",
+            estado="ACTIVO",
+            area="OPERACIONES",
+            carpeta="LOGISTICA",
+        )
+        # Operador SIN bypass de programacion: si no, CR-9 no aplica.
+        operador = User.objects.create_user(username="op_s6", password="x")
+        operador.user_permissions.add(
+            Permission.objects.get(codename="add_salida")
+        )
+        operador = User.objects.get(pk=operador.pk)
+        api_op = APIClient()
+        api_op.force_authenticate(user=operador)
+        resp = api_op.post(
+            "/transporte/salidas/",
+            {
+                "fecha_salida": self.hoy.isoformat(),
+                "vehiculo": self.vehiculo.pk,
+                "movil_sale": "55443322",
+                "cc_asignada": "88776655",
+                "area": "I&M",
+                "carpeta": "FTTH",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        salida = Salida.objects.get(pk=resp.json()["id"])
+        self.assertEqual(salida.estado, EstadoSalida.REPORTADO)
+        self.assertEqual(salida.vehiculo, self.vehiculo)
+
+        resp_vieja = api_op.post(
+            "/transporte/salidas/",
+            {
+                "fecha_salida": (self.hoy - timedelta(days=15)).isoformat(),
+                "vehiculo": self.vehiculo.pk,
+                "movil_sale": "55443322",
+            },
+            format="json",
+        )
+        self.assertEqual(resp_vieja.status_code, 400, resp_vieja.content)
+
+    # ------------------------------------------------------------------ #
+    # 8. Ramas de error de SalidaViewSet (400/404 traducidos)
+    # ------------------------------------------------------------------ #
+    def test_salida_errores_backoffice_http(self):
+        # aprobar-lote con id inexistente → 400 (todo-o-nada)
+        resp_lote = self.api.post(
+            "/transporte/salidas/aprobar-lote/", {"ids": [999999]}, format="json"
+        )
+        self.assertEqual(resp_lote.status_code, 400, resp_lote.content)
+
+        # rechazar inexistente → 404
+        resp_rech = self.api.post(
+            "/transporte/salidas/999999/rechazar/", {"motivo": "x"}, format="json"
+        )
+        self.assertEqual(resp_rech.status_code, 404)
+
+        # detalle e historial inexistentes → 404
+        self.assertEqual(self.api.get("/transporte/salidas/999999/").status_code, 404)
+        self.assertEqual(
+            self.api.get("/transporte/salidas/999999/historial/").status_code, 404
+        )
+
+        # novedad sobre salida inexistente → 404 (POST y DELETE)
+        resp_nov = self.api.post(
+            "/transporte/salidas/999999/novedad/",
+            {"tipo": TipoNovedad.ADICIONAL, "valor": "1000", "descripcion": "x"},
+            format="json",
+        )
+        self.assertEqual(resp_nov.status_code, 404)
+        self.assertEqual(
+            self.api.delete("/transporte/salidas/999999/novedad/").status_code, 404
+        )
+
+        # export con formato no soportado → 400; xlsx valido → 200 (B4/§5.7)
+        resp_pdf = self.api.get("/transporte/salidas/export/?formato=pdf")
+        self.assertEqual(resp_pdf.status_code, 400)
+        resp_xlsx = self.api.get("/transporte/salidas/export/?formato=xlsx")
+        self.assertEqual(resp_xlsx.status_code, 200)
+        self.assertIn(
+            "attachment", resp_xlsx["Content-Disposition"]
+        )
+
+    # ------------------------------------------------------------------ #
+    # 9. Documentos del vehiculo y datos bancarios (B8/CR-13)
+    # ------------------------------------------------------------------ #
+    def test_vehiculo_documentos_http(self):
+        """POST /vehiculos/{id}/documentos/: alta y upsert del SOAT."""
+        # Los archivos de test van a un temporal, nunca al arbol del repo.
+        override = override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="tmedia_"))
+        override.enable()
+        self.addCleanup(override.disable)
+        archivo = SimpleUploadedFile("soat.jpg", b"img", content_type="image/jpeg")
+        resp = self.api.post(
+            f"/transporte/vehiculos/{self.vehiculo.pk}/documentos/",
+            {"tipo": "SOAT", "archivo": archivo, "fecha_vencimiento": "2027-12-31"},
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        doc_id = resp.json()["id"]
+
+        # upsert: reemplaza el mismo registro, no crea otro
+        archivo2 = SimpleUploadedFile("soat2.jpg", b"img2", content_type="image/jpeg")
+        resp2 = self.api.post(
+            f"/transporte/vehiculos/{self.vehiculo.pk}/documentos/",
+            {"tipo": "SOAT", "archivo": archivo2, "fecha_vencimiento": "2028-06-30"},
+        )
+        self.assertEqual(resp2.status_code, 200, resp2.content)
+        self.assertEqual(resp2.json()["id"], doc_id)
+        self.assertEqual(resp2.json()["fecha_vencimiento"], "2028-06-30")
+
+    def test_vehiculo_importar_bancarios_http(self):
+        """POST /vehiculos/importar-bancarios/: CSV multipart (CR-13) y
+        400 cuando falta el archivo."""
+        contenido = (
+            "placa;cedula_banco;nombre;tipo_cuenta;banco;cuenta\n"
+            "INT123;12345;JUAN;AHORRO;LOJA;001"
+        )
+        archivo = SimpleUploadedFile(
+            "bancos.csv", contenido.encode("utf-8"), content_type="text/csv"
+        )
+        resp = self.api.post(
+            "/transporte/vehiculos/importar-bancarios/", {"archivo": archivo}
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json()["insertados"], 1)
+
+        resp_sin = self.api.post("/transporte/vehiculos/importar-bancarios/", {})
+        self.assertEqual(resp_sin.status_code, 400)
+
+    def test_vehiculo_errores_http(self):
+        """Ramas 404/400 de VehiculoViewSet (detalle, resumen, QR, PATCH y
+        placa duplicada)."""
+        self.assertEqual(self.api.get("/transporte/vehiculos/999999/").status_code, 404)
+        self.assertEqual(
+            self.api.get("/transporte/vehiculos/999999/resumen/").status_code, 404
+        )
+        self.assertEqual(
+            self.api.get("/transporte/vehiculos/999999/qr.png/").status_code, 404
+        )
+        resp_patch = self.api.patch(
+            "/transporte/vehiculos/999999/", {"color": "ROJO"}, format="json"
+        )
+        self.assertEqual(resp_patch.status_code, 404)
+
+        resp_dup = self.api.post(
+            "/transporte/vehiculos/",
+            {
+                "placa": "INT123",
+                "tipo_vehiculo": "CAMIONETA",
+                "marca": "TOYOTA",
+                "referencia": "HILUX",
+                "modelo_anio": 2024,
+                "tipo_contrato": "PROPIO",
+                "nombre_propietario": "CINCO SAS",
+                "cedula_propietario": "900111222",
+                "valor_dia_base": "95000.00",
+            },
+            format="json",
+        )
+        self.assertEqual(resp_dup.status_code, 400, resp_dup.content)
+
+    # ------------------------------------------------------------------ #
+    # 10. PATCH a id inexistente → 404 (regresion del bug 500)
+    # ------------------------------------------------------------------ #
+    def test_conductor_jefe_cierre_errores_404_http(self):
+        """PATCH/DELETE a ids inexistentes deben responder 404, no 500:
+        `obtener()` estaba fuera del try en los cuatro ViewSets."""
+        resp_c = self.api.get("/transporte/conductores/999999/")
+        self.assertEqual(resp_c.status_code, 404)
+        resp_cp = self.api.patch(
+            "/transporte/conductores/999999/", {"celular": "1"}, format="json"
+        )
+        self.assertEqual(resp_cp.status_code, 404)
+
+        resp_j = self.api.get("/transporte/parametros/jefes/999999/")
+        self.assertEqual(resp_j.status_code, 404)
+        resp_jp = self.api.patch(
+            "/transporte/parametros/jefes/999999/", {"areas": ["X"]}, format="json"
+        )
+        self.assertEqual(resp_jp.status_code, 404)
+
+        resp_del_cierre = self.api.delete("/transporte/parametros/cierres/999999/")
+        self.assertEqual(resp_del_cierre.status_code, 404)
+        resp_patch_cierre = self.api.patch(
+            "/transporte/parametros/cierres/999999/",
+            {"fecha_limite": "2030-01-15"},
+            format="json",
+        )
+        self.assertEqual(resp_patch_cierre.status_code, 404)
+
+    # ------------------------------------------------------------------ #
+    # 11. Gate de cierre mensual (§5.9/B3)
+    # ------------------------------------------------------------------ #
+    def test_liquidacion_periodo_cerrado_http(self):
+        """Perímetro vencido: 403 sin `editar_tras_cierre`, permite con él."""
+        FechaLimiteCierre.objects.create(
+            mes=self.hoy.month,
+            anio=self.hoy.year,
+            fecha_limite=self.hoy - timedelta(days=1),
+        )
+        payload = {
+            "vehiculo": self.vehiculo.pk,
+            "mes": self.hoy.month,
+            "anio": self.hoy.year,
+            "tipo": TipoPago.MENSUAL,
+            "pagado": True,
+            "total_liquidado": "50000.00",
+        }
+
+        # superuser: tiene el permiso → el gate deja pasar (201)
+        resp_con = self.api.post("/transporte/liquidaciones/pago/", payload, format="json")
+        self.assertEqual(resp_con.status_code, 201, resp_con.content)
+
+        # con permiso de modelo pero SIN editar_tras_cierre → 403 del gate.
+        # Se usa PRONTO_PAGO para no chocar con la unicidad del pago ya
+        # registrado arriba (vehiculo+mes+anio+tipo).
+        sin_permiso = User.objects.create_user(username="sin_cierre", password="x")
+        sin_permiso.user_permissions.add(
+            Permission.objects.get(codename="add_pagovehiculomensual")
+        )
+        sin_permiso = User.objects.get(pk=sin_permiso.pk)
+        api2 = APIClient()
+        api2.force_authenticate(user=sin_permiso)
+        resp_sin = api2.post(
+            "/transporte/liquidaciones/pago/",
+            {**payload, "tipo": TipoPago.PRONTO_PAGO},
+            format="json",
+        )
+        self.assertEqual(resp_sin.status_code, 403, resp_sin.content)
+        self.assertIn("cerrado", resp_sin.json()["error"])

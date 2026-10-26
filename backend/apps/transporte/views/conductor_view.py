@@ -72,9 +72,15 @@ class ConductorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
 
     @extend_schema(request=conductor_serializer.ConductorSerializer)
     def update(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
         parche = kwargs.pop("partial", False)
+        # obtener() fuera del try devolvía 500 (ValueError sin traducir) en
+        # PATCH/PUT a un id inexistente; ahora responde 404 como retrieve.
+        try:
+            instance = ConductorService.obtener(kwargs["pk"])
+        except ValueError as exc:
+            return self._error(exc)
+        serializer = self.get_serializer(instance, data=request.data, partial=parche)
+        serializer.is_valid(raise_exception=True)
         try:
             conductor = ConductorService.actualizar(
                 kwargs["pk"],

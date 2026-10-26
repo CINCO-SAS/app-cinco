@@ -24,7 +24,7 @@ from django.conf import settings
 ALIAS_NOKIA = "negra"
 
 # Tabla y columnas (del SQL del legacy).
-TABLA_NOKIA_LINEAS = "cincosas_cincosas.nokia_base_lineas"
+TABLA_NOKIA_LINEAS = "nokia_base_lineas"
 COLUMNA_NOKIA_NUMERO = "numero"
 COLUMNA_NOKIA_ASIGNADO = "asignado"
 

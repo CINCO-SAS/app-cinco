@@ -81,9 +81,20 @@ class VehiculoViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
 
     @extend_schema(request=vehiculo_serializer.VehiculoSerializer)
     def update(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
         parche = kwargs.pop("partial", False)
+        # obtener() fuera del try devolvía 500 (ValueError sin traducir) en
+        # PATCH/PUT a un id inexistente; ahora responde 404 como retrieve.
+        try:
+            instance = FlotaService.obtener(kwargs["pk"])
+        except ValueError as exc:
+            codigo = (
+                status.HTTP_404_NOT_FOUND
+                if "No existe" in str(exc)
+                else status.HTTP_400_BAD_REQUEST
+            )
+            return Response({"detail": str(exc)}, status=codigo)
+        serializer = self.get_serializer(instance, data=request.data, partial=parche)
+        serializer.is_valid(raise_exception=True)
         try:
             vehiculo = FlotaService.actualizar(
                 kwargs["pk"],
@@ -151,8 +162,14 @@ class VehiculoViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
     )
     @action(detail=True, methods=["post"], url_path="documentos")
     def documentos(self, request, pk=None):
+        # {**request.data} sobre un QueryDict (multipart) extrae el dict
+        # interno de MultiValueDict: los valores llegan como LISTAS y el
+        # serializer rechazaba SIEMPRE el upload (400 en todos los campos).
+        # `.dict()` colapsa a los últimos valores (strings + archivos).
+        base = request.data
+        datos = base.dict() if hasattr(base, "dict") else dict(base)
         serializer = vehiculo_serializer.DocumentoVehiculoSerializer(
-            data={**request.data, "vehiculo": pk}
+            data={**datos, "vehiculo": pk}
         )
         serializer.is_valid(raise_exception=True)
         datos = serializer.validated_data

@@ -76,9 +76,20 @@ class FechaLimiteCierreViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSe
 
     @extend_schema(request=cierre_serializer.FechaLimiteCierreSerializer)
     def update(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        partial = kwargs.pop("partial", False)
+        # obtener_cierre() fuera del try devolvía 500 (ValueError sin traducir)
+        # en PATCH/PUT a un id inexistente; ahora responde 404 como retrieve.
+        try:
+            instance = ParametrosService.obtener_cierre(kwargs["pk"])
+        except ValueError as exc:
+            codigo = (
+                status.HTTP_404_NOT_FOUND
+                if "No existe" in str(exc)
+                else status.HTTP_400_BAD_REQUEST
+            )
+            return Response({"detail": str(exc)}, status=codigo)
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
-        kwargs.pop("partial", None)
         try:
             cierre = ParametrosService.actualizar_cierre(
                 kwargs["pk"],

@@ -22,6 +22,8 @@ class MultiDBRouter:
         return self.APP_DB_MAP.get(model._meta.app_label)
 
     def allow_migrate(self, db, app_label, model_name=None, **hints):
+        if db in ("negra", "logistica_cinco"):
+            return False
         target_db = self.APP_DB_MAP.get(app_label)
         if target_db is None:
             return None

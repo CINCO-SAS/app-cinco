@@ -189,3 +189,8 @@ class DocumentoVehiculoSerializer(serializers.ModelSerializer):
     class Meta:
         model = DocumentoVehiculo
         fields = ["id", "vehiculo", "tipo", "archivo", "fecha_vencimiento"]
+        # El upsert por (vehiculo, tipo) lo resuelve FlotaService (§5.3);
+        # el UniqueTogetherValidator automatico validaba contra BD ANTES
+        # del servicio y hacia fallar con 400 la SEGUNDA subida del mismo
+        # tipo. La restriccion sigue viva en la BD.
+        validators = []
