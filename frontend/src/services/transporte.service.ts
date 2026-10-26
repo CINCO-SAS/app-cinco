@@ -183,6 +183,19 @@ export const transporteService = {
   /** T5: URL del PNG del código QR (codifica la placa, D-A8). */
   urlQrVehiculo: (id: number): string => `${BASE}/vehiculos/${id}/qr.png/`,
 
+  /**
+   * T5: PNG del QR como blob autenticado. Para pintarlo en un `<img>` hay
+   * que traerlo por aquí (la URL sola no envía el JWT) y crear un
+   * objectURL; el backend cachea el PNG en disco, así que reiterar la
+   * lectura no regenera ni reescribe nada.
+   */
+  obtenerQrVehiculo: async (id: number): Promise<Blob> => {
+    const res = await api.get(`${BASE}/vehiculos/${id}/qr.png/`, {
+      responseType: "blob",
+    });
+    return res.data as Blob;
+  },
+
   // ==========================================================================
   // Salidas (F3/B2 + F4/B4) — transporte_registro_salida
   // ==========================================================================

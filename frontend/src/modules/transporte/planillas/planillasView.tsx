@@ -6,11 +6,12 @@
 
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import Alert from "@/components/ui/alert/Alert";
 import Button from "@/components/ui/button/Button";
+import { transporteService } from "@/services/transporte.service";
 
 import { usePlanillasState } from "./planillasView.hooks";
 import type { AlcancePlanilla, VehiculoPlanilla } from "@/types/transporte.types";
@@ -27,6 +28,60 @@ const CONTRATO_BADGE: Record<string, string> = {
   EXTERNO: "bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400",
   RENTING: "bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-400",
 };
+
+/**
+ * Miniatura del QR de la placa en la tabla en pantalla. El endpoint exige
+ * autenticación, así que el PNG se trae como blob y se pinta con un
+ * objectURL (es el mismo código que el formato F-104 imprime en base64
+ * desde el backend). Si la lectura falla, degrada a la placa en texto sin
+ * bloquear el resto de la planilla.
+ */
+function QrPlanilla({
+  vehiculoId,
+  placa,
+}: {
+  vehiculoId: number;
+  placa: string;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let viva = true;
+    let creada: string | null = null;
+
+    transporteService
+      .obtenerQrVehiculo(vehiculoId)
+      .then((blob) => {
+        if (!viva) return;
+        creada = URL.createObjectURL(blob);
+        setUrl(creada);
+      })
+      .catch(() => {
+        // Degradado: se muestra la placa en lugar del QR.
+      });
+
+    return () => {
+      viva = false;
+      if (creada) URL.revokeObjectURL(creada);
+    };
+  }, [vehiculoId]);
+
+  if (!url) {
+    return (
+      <span className="inline-flex h-14 w-14 items-center justify-center rounded border border-dashed border-gray-200 px-1 text-center font-mono text-[10px] leading-tight text-gray-400 dark:border-gray-700">
+        {placa}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt={`Código QR de la placa ${placa}`}
+      className="h-14 w-14 rounded border border-gray-200 bg-white p-0.5 dark:border-gray-700"
+    />
+  );
+}
 
 export default function PlanillasView() {
   const {
@@ -298,6 +353,9 @@ export default function PlanillasView() {
                     Vehículo / Placa
                   </th>
                   <th scope="col" className="px-5 py-3 font-semibold">
+                    QR Placa
+                  </th>
+                  <th scope="col" className="px-5 py-3 font-semibold">
                     Tipo / Contrato
                   </th>
                   <th scope="col" className="px-5 py-3 font-semibold">
@@ -318,7 +376,7 @@ export default function PlanillasView() {
                 {vehiculos.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-5 py-8 text-center text-gray-500 dark:text-gray-400"
                     >
                       No se encontraron vehículos activos para el alcance seleccionado.
@@ -352,6 +410,11 @@ export default function PlanillasView() {
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                           {v.marca} {v.referencia ?? ""} ({v.modelo_anio})
                         </p>
+                      </td>
+
+                      {/* QR de la placa (mismo código que imprime la F-104) */}
+                      <td className="px-5 py-3.5">
+                        <QrPlanilla vehiculoId={v.vehiculo_id} placa={v.placa} />
                       </td>
 
                       {/* Tipo y Contrato */}
