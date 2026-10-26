@@ -12,11 +12,12 @@ Lo que el legacy guardaba en `cinco_base_de_personal.placa` y en
 de la placa de un móvil; de ahí que D-A9 siga abierta: falta decidir cuál
 manda.
 
-GATE G4 / D-A10: el alias `negra` **no está** en `DATABASES` (hoy solo hay
-`default`, `azul` y `logistica_cinco`). Mientras no se añada, esta función
-DEGRADA: devuelve lista vacía y `disponible=False`, de modo que el resto del
-flujo siga funcionando sin un 500. Cuando se añada el alias, la consulta ya
-está escrita aquí y no hay que tocar nada más.
+GATE G4 / D-A10: el alias `negra` SÍ está en `DATABASES` desde el commit
+`e90dd84` (con las variables `DB_NEGRA_*`). La función sigue DEGRADANDO
+mientras la BD negra no responda (devuelve lista vacía y
+`disponible=False`, sin un 500): el cierre operativo del gate es
+apuntar las variables al servidor real en producción y verificar la
+conectividad (C4).
 """
 from django.conf import settings
 
