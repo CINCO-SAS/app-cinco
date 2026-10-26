@@ -49,6 +49,8 @@ export const MODULOS_TRANSPORTE: ModuloTransporte[] = [
       // F3/B2: alta S6 + consulta B1 + Ítem L (acciones de fila: aprobar,
       // rechazar, novedad, historial). El corazón del uso diario.
       { segmento: "salidas", etiqueta: "Registro de Salidas", disponible: true },
+      // F3/S1-S4: kiosco de despacho vehicular.
+      { segmento: "kiosco", etiqueta: "Kiosco de Despacho", disponible: true },
       // F3/B3: reporte fotográfico diario (ventana 10:00–16:00 + agenda).
       {
         segmento: "reporte-fotografico",
@@ -76,15 +78,15 @@ export const MODULOS_TRANSPORTE: ModuloTransporte[] = [
     pantallaInicial: "gestion",
     pantallas: [
       // F4/B4: backoffice (Tab 1 del legacy).
-      { segmento: "gestion", etiqueta: "Gestión de Salidas", disponible: false },
+      { segmento: "gestion", etiqueta: "Gestión de Salidas", disponible: true },
       // F5: sábana de informes y nómina (Tab 2). Pasos 2 completos
       // (Transporte Día y Transporte Mes); el resto de bloques avanzan
       // por pasos y quedan marcados dentro de la vista.
       { segmento: "informes", etiqueta: "Informes", disponible: true },
       // F5: liquidaciones financieras (Tab 3).
-      { segmento: "liquidaciones", etiqueta: "Liquidaciones", disponible: false },
+      { segmento: "liquidaciones", etiqueta: "Liquidaciones", disponible: true },
       // F5-6: planilla oficial de salida F-104.
-      { segmento: "planillas", etiqueta: "Planilla F-104", disponible: false },
+      { segmento: "planillas", etiqueta: "Planilla F-104", disponible: true },
     ],
   },
 ];
@@ -118,3 +120,4 @@ export const navItemsDeTransporte = (): {
     ),
   },
 ];
+

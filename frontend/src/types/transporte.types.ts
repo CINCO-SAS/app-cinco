@@ -686,3 +686,180 @@ export interface ResultadoValidacionSalida {
   detalle?: string;
   [clave: string]: unknown;
 }
+
+// ---------------------------------------------------------------------------
+// Kiosco (S1-S6) — respuestas tipadas de /kiosco/
+// ---------------------------------------------------------------------------
+
+/** Respuesta del backend (contrato { ok, data | error }) para el kiosco. */
+export interface KioscoRespuesta<T = unknown> {
+  ok: boolean;
+  data?: T;
+  error?: string;
+}
+
+/** Data dentro de POST /kiosco/identificar/ y GET /kiosco/vehiculo/{placa}/ */
+export interface KioscoDatoVehiculo {
+  vehiculo: Vehiculo;
+  salida: Salida | null;
+}
+
+/** Resultado del pre-chequeo POST /kiosco/validar/ (S3) */
+export interface KioscoResultadoValidacion {
+  validable: boolean;
+  duplicado_vehiculo: boolean;
+  duplicado_movil: boolean;
+  puede_registrar: boolean;
+  mensaje: string;
+  registro: Salida | null;
+  salida: Salida | null;
+}
+
+// ---------------------------------------------------------------------------
+// Planilla Oficial de Salida F-104 (F5-6 / S5 / CR-11)
+// ---------------------------------------------------------------------------
+
+export type AlcancePlanilla =
+  | "PLACA"
+  | "TODAS"
+  | "PROPIO"
+  | "EXTERNO"
+  | "RENTING";
+
+export interface SalidaDiaPlanilla {
+  id: number;
+  estado: string;
+  conductor_cedula: string | null;
+  tecnico_cedula: string | null;
+  area: string | null;
+  carpeta: string | null;
+  observacion: string;
+}
+
+export interface ConductorPlanilla {
+  cedula: string;
+  nombre: string;
+  celular: string;
+  licencia_categoria: string | null;
+  licencia_vencimiento: string | null;
+}
+
+export interface VehiculoPlanilla {
+  vehiculo_id: number;
+  placa: string;
+  tipo_vehiculo: string;
+  tipo_contrato: string;
+  marca: string;
+  referencia: string | null;
+  modelo_anio: number;
+  color: string | null;
+  nombre_propietario: string;
+  cedula_propietario: string;
+  valor_dia_base: string | number;
+  conductor: ConductorPlanilla | null;
+  consecutivo: number;
+  consecutivo_creado: boolean;
+  mes: number;
+  anio: number;
+  ruta_qr: string | null;
+  salidas_del_dia: SalidaDiaPlanilla[];
+}
+
+export interface PlanillaData {
+  fecha: string;
+  alcance: AlcancePlanilla;
+  vehiculos: VehiculoPlanilla[];
+}
+
+export interface GenerarPlanillaPayload {
+  fecha: string;
+  alcance: AlcancePlanilla;
+  placa?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Cierres de Validación Mensual por Área (F4 / B4 / ValidacionSalida)
+// ---------------------------------------------------------------------------
+
+export interface ValidacionSalida {
+  id: number;
+  area: string;
+  mes: number;
+  anio: number;
+  datos?: Record<string, unknown>;
+  creado_en: string;
+  modificado_en: string;
+}
+
+export interface CerrarAreaPayload {
+  area: string;
+  mes: number;
+  anio: number;
+  datos?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Liquidaciones Financieras (A2 / D3 / D4 / CR-10)
+// ---------------------------------------------------------------------------
+
+export interface SabanaFila {
+  vehiculo: number;
+  placa: string;
+  tipo_contrato: TipoContrato | string;
+  conductor_cedula: string | null;
+  valor_dia: string | number;
+  dias: number;
+  total: string | number;
+  pagado: boolean;
+  fecha_pago: string | null;
+  total_liquidado: string | number;
+}
+
+export interface SabanaTotales {
+  dias: number;
+  total: string | number;
+}
+
+export interface SabanaLiquidacion {
+  mes: number;
+  anio: number;
+  mes_aplicado: number;
+  anio_aplicado: number;
+  retroactivo: boolean;
+  filas: SabanaFila[];
+  totales: SabanaTotales;
+}
+
+export interface PagoVehiculoRegistro {
+  id: number;
+  vehiculo: number;
+  placa: string;
+  mes: number;
+  anio: number;
+  tipo: TipoPago | string;
+  pagado: boolean;
+  fecha_pago: string | null;
+  total_liquidado: string | number;
+  modificado_en: string;
+}
+
+export interface RegistrarPagoPayload {
+  vehiculo: number;
+  mes: number;
+  anio: number;
+  tipo?: TipoPago | string;
+  pagado?: boolean;
+  fecha_pago?: string;
+  total_liquidado?: number | string;
+}
+
+export interface ConsecutivoLiquidacion {
+  vehiculo: number;
+  mes: number;
+  anio: number;
+  consecutivo: number;
+  creado: boolean;
+}
+
+
+

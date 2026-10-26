@@ -13,13 +13,16 @@ import {
   type RespuestaPaginada,
 } from "@/lib/paginas";
 import type {
+  CerrarAreaPayload,
   Conductor,
   ConductorListado,
+  ConsecutivoLiquidacion,
   CuentaCobroParams,
   DatosBancariosVehiculo,
   DocumentoVehiculo,
   FiltrosInformeArea,
   FiltrosInformeMensual,
+  GenerarPlanillaPayload,
   InformeArea,
   InformeAreasMes,
   InformeAreasPeriodo,
@@ -29,15 +32,20 @@ import type {
   InformeSeriesChart,
   Mantenimiento,
   Novedad,
+  PagoVehiculoRegistro,
   PeriodoInforme,
+  PlanillaData,
+  RegistrarPagoPayload,
   RegistrarSalidaPayload,
   ReporteFotografico,
   RespuestaAccion,
   ResultadoAgendaReporte,
   ResultadoValidacionSalida,
+  SabanaLiquidacion,
   Salida,
   SalidaHistorial,
   SerieChartParams,
+  ValidacionSalida,
   Vehiculo,
   VehiculoListado,
   VehiculoPayload,
@@ -483,42 +491,51 @@ export const transporteService = {
   // Liquidaciones / sábanas (A2)
   // ==========================================================================
 
-  getLiquidaciones: async (params?: ParamsBusqueda): Promise<unknown[]> => {
+  getLiquidaciones: async (
+    params?: ParamsBusqueda,
+  ): Promise<PagoVehiculoRegistro[]> => {
     const res = await api.get(`${BASE}/liquidaciones/`, { params });
-    return normalizarPagina<unknown>(res.data).results;
+    return normalizarPagina<PagoVehiculoRegistro>(res.data).results;
   },
 
-  getSabana: async (params: ParamsBusqueda): Promise<unknown> => {
+  getSabana: async (params: {
+    mes: number;
+    anio: number;
+    tipo?: "pago-mensual" | "pronto-pago";
+    placa?: string;
+    vehiculo?: number;
+    conductor?: string;
+  }): Promise<SabanaLiquidacion> => {
     const res = await api.get(`${BASE}/liquidaciones/sabana/`, { params });
-    return res.data;
+    return (res.data?.data ?? res.data) as SabanaLiquidacion;
   },
 
-  getPagoMensual: async (params: ParamsBusqueda): Promise<unknown> => {
+  getPagoMensual: async (params: ParamsBusqueda): Promise<SabanaLiquidacion> => {
     const res = await api.get(`${BASE}/liquidaciones/pago-mensual/`, { params });
-    return res.data;
+    return (res.data?.data ?? res.data) as SabanaLiquidacion;
   },
 
-  getProntoPago: async (params: ParamsBusqueda): Promise<unknown> => {
+  getProntoPago: async (params: ParamsBusqueda): Promise<SabanaLiquidacion> => {
     const res = await api.get(`${BASE}/liquidaciones/pronto-pago/`, { params });
-    return res.data;
+    return (res.data?.data ?? res.data) as SabanaLiquidacion;
   },
 
-  /** D3: genera el consecutivo del período (atómico en servidor). */
+  /** D3: genera o consulta el consecutivo del período (atómico en servidor). */
   generarConsecutivo: async (payload: {
+    vehiculo: number;
     mes: number;
     anio: number;
-  }): Promise<RespuestaAccion> => {
+  }): Promise<ConsecutivoLiquidacion> => {
     const res = await api.post(`${BASE}/liquidaciones/consecutivo/`, payload);
-    return res.data;
+    return (res.data?.data ?? res.data) as ConsecutivoLiquidacion;
   },
 
-  /** D3: registra el pago del período (queda cerrado). */
-  registrarPago: async (payload: {
-    mes: number;
-    anio: number;
-  }): Promise<RespuestaAccion> => {
+  /** D3: registra o actualiza el pago del vehículo en el período. */
+  registrarPago: async (
+    payload: RegistrarPagoPayload,
+  ): Promise<PagoVehiculoRegistro> => {
     const res = await api.post(`${BASE}/liquidaciones/pago/`, payload);
-    return res.data;
+    return (res.data?.data ?? res.data) as PagoVehiculoRegistro;
   },
 
   // ==========================================================================
@@ -529,19 +546,17 @@ export const transporteService = {
    * S5/CR-11: genera la planilla con consecutivo atómico y QR en disco.
    * `alcance`: PLACA | PROPIO | EXTERNO | RENTING | TODAS.
    */
-  generarPlanilla: async (payload: {
-    fecha: string;
-    alcance: string;
-  }): Promise<RespuestaAccion> => {
+  generarPlanilla: async (
+    payload: GenerarPlanillaPayload,
+  ): Promise<PlanillaData> => {
     const res = await api.post(`${BASE}/planillas/generar/`, payload);
-    return res.data;
+    return (res.data?.data ?? res.data) as PlanillaData;
   },
 
   /** P1: HTML imprimible de la hoja de vehículo (F-104). */
-  getFormatoPlanilla: async (payload: {
-    fecha: string;
-    alcance?: string;
-  }): Promise<string> => {
+  getFormatoPlanilla: async (
+    payload: GenerarPlanillaPayload,
+  ): Promise<string> => {
     const res = await api.post(`${BASE}/planillas/formato/`, payload);
     return typeof res.data === "string" ? res.data : (res.data?.html ?? "");
   },
@@ -564,9 +579,17 @@ export const transporteService = {
   // Validaciones de cierre mensual (F4)
   // ==========================================================================
 
-  getValidaciones: async (params?: ParamsBusqueda): Promise<unknown[]> => {
+  getValidaciones: async (
+    params?: ParamsBusqueda,
+  ): Promise<ValidacionSalida[]> => {
     const res = await api.get(`${BASE}/validaciones/`, { params });
-    return normalizarPagina<unknown>(res.data).results;
+    return normalizarPagina<ValidacionSalida>(res.data).results;
+  },
+
+  /** F4: Cierre mensual de validación de salidas de un área (jefe o admin). */
+  cerrarArea: async (payload: CerrarAreaPayload): Promise<ValidacionSalida> => {
+    const res = await api.post(`${BASE}/validaciones/`, payload);
+    return res.data;
   },
 
   // ==========================================================================
