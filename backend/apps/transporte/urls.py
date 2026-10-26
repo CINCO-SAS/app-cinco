@@ -21,6 +21,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     ConductorViewSet,
+    DuenoViewSet,
     FechaLimiteCierreViewSet,
     InformeViewSet,
     JefeValidadorViewSet,
@@ -71,5 +72,9 @@ router.register(r"validaciones", ValidacionViewSet, basename="validaciones")
 router.register(r"wfm", WfmViewSet, basename="wfm")
 # E3/CR-8: estado de permisos del usuario (reemplaza cédulas hardcodeadas).
 router.register(r"permisos", PermisoViewSet, basename="permisos")
+# Módulo «Dueños» (2026-10-26): 1 dueño → N vehículos + sus cuentas.
+# GET/POST /duenos/, ficha /duenos/{id}/, /duenos/{id}/vehiculos/ (asignar),
+# DELETE /duenos/{id}/vehiculos/{vehiculo_id}/ y /duenos/{id}/bancarios/.
+router.register(r"duenos", DuenoViewSet, basename="duenos")
 
 urlpatterns = router.urls

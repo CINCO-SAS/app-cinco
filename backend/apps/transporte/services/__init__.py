@@ -6,6 +6,7 @@ Ningún ViewSet ni Serializer contiene lógica de negocio.
 """
 from .conductor_service import ConductorService
 from .contacto_service import ContactoService
+from .dueno_service import DuenoService
 from .flota_service import FlotaService
 from .informe_service import InformeService
 from .liquidacion_service import LiquidacionService
@@ -20,6 +21,7 @@ from .wfm_service import WfmService
 __all__ = [
     "ConductorService",
     "ContactoService",
+    "DuenoService",
     "FlotaService",
     "InformeService",
     "LiquidacionService",

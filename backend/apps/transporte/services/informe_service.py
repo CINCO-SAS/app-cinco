@@ -30,6 +30,7 @@ from openpyxl import Workbook
 
 from ..models import (
     ConsecutivoMensual,
+    DatosBancariosDueno,
     DatosBancariosVehiculo,
     Salida,
     Vehiculo,
@@ -140,9 +141,27 @@ class InformeService:
     @staticmethod
     def _pagador(vehiculo):
         """
-        Pagador: el dato bancario vigente del vehículo (CR-13); sin dato
-        bancario, el propietario del vehículo (fallback del legacy).
+        Pagador (orden ampliado 2026-10-26 con el módulo «Dueños»):
+        1) cuenta vigente del DUEÑO del vehículo (fuente de verdad nueva),
+        2) cuenta vigente del vehículo (CR-13, compatibilidad),
+        3) propietario del vehículo (fallback del legacy).
         """
+        if vehiculo.dueno_id is not None:
+            del_dueno = (
+                DatosBancariosDueno.objects.filter(
+                    dueno_id=vehiculo.dueno_id, activo=True
+                )
+                .order_by("-id")
+                .first()
+            )
+            if del_dueno is not None:
+                return {
+                    "cedula_pago": del_dueno.cedula_titular,
+                    "nombre_pago": del_dueno.nombre_titular,
+                    "tipo_cuenta": del_dueno.tipo_cuenta,
+                    "banco": del_dueno.banco,
+                    "cuenta_pago": del_dueno.numero_cuenta,
+                }
         bancario = (
             DatosBancariosVehiculo.objects.filter(vehiculo=vehiculo, activo=True)
             .order_by("-id")

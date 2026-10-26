@@ -9,6 +9,7 @@ Decisiones clave:
 - Area/Festivo: pospuestos (vienen de otro archivo PHP); los campos que
   dependen de ellos quedan como CharField snapshot con TODO.
 """
+from .auditoria import AuditoriaLog
 from .base import AuditoriaModel
 from .choices import (
     CategoriaLicencia,
@@ -24,14 +25,8 @@ from .choices import (
     TipoVehiculo,
     TipoVinculacion,
 )
-from .vehiculo import (
-    Conductor,
-    DatosBancariosVehiculo,
-    DocumentoVehiculo,
-    Mantenimiento,
-    Vehiculo,
-)
-from .salida import Novedad, Salida, SalidaHistorial
+from .dueno import DatosBancariosDueno, DuenoVehiculo
+from .infraestructura_parametro import InfraestructuraParametro
 from .liquidacion import (
     ConsecutivoMensual,
     FechaLimiteCierre,
@@ -40,17 +35,43 @@ from .liquidacion import (
     ValidacionSalida,
 )
 from .reporte_fotografico import ReporteFotograficoVehiculo, ReporteFotoImagen
-from .auditoria import AuditoriaLog
-from .infraestructura_parametro import InfraestructuraParametro
+from .salida import Novedad, Salida, SalidaHistorial
+from .vehiculo import (
+    Conductor,
+    DatosBancariosVehiculo,
+    DocumentoVehiculo,
+    Mantenimiento,
+    Vehiculo,
+)
 from .wfm import AgendaLogistica, EstadoWfmJob, ResidencialWfm, WfmJob
 
 __all__ = [
+    "AgendaLogistica",
+    "AuditoriaLog",
     "AuditoriaModel",
     "CategoriaLicencia",
     "CiudadOperacion",
+    "Conductor",
+    "ConsecutivoMensual",
+    "DatosBancariosDueno",
+    "DatosBancariosVehiculo",
+    "DocumentoVehiculo",
+    "DuenoVehiculo",
     "EstadoLicencia",
     "EstadoSalida",
+    "EstadoWfmJob",
+    "FechaLimiteCierre",
+    "InfraestructuraParametro",
+    "JefeValidador",
+    "Mantenimiento",
+    "Novedad",
+    "PagoVehiculoMensual",
     "PoseeLicencia",
+    "ReporteFotoImagen",
+    "ReporteFotograficoVehiculo",
+    "ResidencialWfm",
+    "Salida",
+    "SalidaHistorial",
     "TipoContrato",
     "TipoDocumentoVehiculo",
     "TipoMantenimiento",
@@ -58,25 +79,7 @@ __all__ = [
     "TipoPago",
     "TipoVehiculo",
     "TipoVinculacion",
-    "Conductor",
-    "Vehiculo",
-    "DocumentoVehiculo",
-    "Mantenimiento",
-    "DatosBancariosVehiculo",
-    "Salida",
-    "SalidaHistorial",
-    "Novedad",
-    "FechaLimiteCierre",
-    "ConsecutivoMensual",
-    "PagoVehiculoMensual",
-    "JefeValidador",
     "ValidacionSalida",
-    "ReporteFotograficoVehiculo",
-    "ReporteFotoImagen",
-    "AuditoriaLog",
-    "EstadoWfmJob",
+    "Vehiculo",
     "WfmJob",
-    "ResidencialWfm",
-    "AgendaLogistica",
-    "InfraestructuraParametro",
 ]

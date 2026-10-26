@@ -4,8 +4,9 @@ ViewSets del módulo Transporte.
 Contrato ADMCINCO (D-A3): ViewSet → Service → Serializer.
 Las vistas solo enrutan; toda regla de negocio vive en services/.
 """
-from .conductor_view import ConductorViewSet
 from .cierre_view import FechaLimiteCierreViewSet
+from .conductor_view import ConductorViewSet
+from .dueno_view import DuenoViewSet
 from .informe_view import InformeViewSet
 from .jefe_view import JefeValidadorViewSet
 from .kiosco_view import KioscoViewSet
@@ -21,6 +22,7 @@ from .wfm_view import WfmViewSet
 
 __all__ = [
     "ConductorViewSet",
+    "DuenoViewSet",
     "FechaLimiteCierreViewSet",
     "InformeViewSet",
     "JefeValidadorViewSet",

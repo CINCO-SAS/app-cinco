@@ -128,6 +128,18 @@ class Vehiculo(AuditoriaModel):
     nombre_propietario = models.CharField(max_length=150)
     cedula_propietario = models.CharField(max_length=20)
     celular_propietario = models.CharField(max_length=30, null=True, blank=True)
+    # Módulo «Dueños» (2026-10-26): el dueño es ahora entidad propia
+    # (1 dueño → N vehículos). Los campos *_propietario de ARRIBA se
+    # MANTIENEN como compatibilidad (ETL, informes y tests); este FK es la
+    # fuente de verdad del nuevo módulo. SET_NULL: borrar un dueño nunca
+    # destruye vehículos (el service además lo rechaza mientras tenga vehículos).
+    dueno = models.ForeignKey(
+        "DuenoVehiculo",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehiculos",
+    )
     fecha_ingreso = models.DateField(null=True, blank=True)
     fecha_egreso = models.DateField(null=True, blank=True)  # '0000-00-00' → NULL
     fecha_soat = models.DateField(null=True, blank=True)
