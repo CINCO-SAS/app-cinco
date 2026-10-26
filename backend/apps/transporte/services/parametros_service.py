@@ -62,8 +62,8 @@ class ParametrosService:
     def crear_cierre(datos, actor):
         """Alta de fecha límite; unicidad natural (mes, anio) — uq_cierre_mes_anio.
 
-        El gate de permiso legacy ($permi_editar) se evalúa en la vista con
-        DjangoModelPermissions (transporte.add/change_fecha_limitecierre).
+        El gate de acceso se evalúa en la vista con
+        `PuedeVerModuloTransporte` (menú, desde 2026-10-26).
         """
         mes, anio, fecha_limite = ParametrosService._validar_cierre(datos)
 

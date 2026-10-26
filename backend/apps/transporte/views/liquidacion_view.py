@@ -13,12 +13,15 @@ Rutas consolidadas:
 - GET  /liquidaciones/pronto-pago/          → alias retrocompatible.
 - POST /liquidaciones/consecutivo/          → genera o consulta consecutivo atómico mensual.
 - POST /liquidaciones/pago/                 → upsert de marca de pago mensual.
+
+Permisos (2026-10-26): gate `PuedeVerModuloTransporte` (quien ve el
+módulo en su menú puede operarlo); el gate de cierre mensual sigue
+en el servicio.
 """
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin
-from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
@@ -28,15 +31,17 @@ from ..models import PagoVehiculoMensual
 from ..serializers import liquidacion_serializer
 from ..services import LiquidacionService
 from .paginacion import PaginacionTransporte
+from .permisos import PuedeVerModuloTransporte
 
 
 class LiquidacionViewSet(ListModelMixin, GenericViewSet):
-    """Lectura a autenticados; escritura con permiso de modelo + gate de cierre."""
+    """Abierta a quien puede ver el módulo en su menú (gate 2026-10-26);
+    conserva el gate de cierre mensual en el servicio."""
 
     queryset = PagoVehiculoMensual.objects.all()
     pagination_class = PaginacionTransporte
     serializer_class = liquidacion_serializer.PagoSerializer
-    permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
+    permission_classes = [IsAuthenticatedOrAPIKey, PuedeVerModuloTransporte]
 
     # ------------------------------------------------------------------ #
     # Consulta (D3)

@@ -4,15 +4,14 @@ FechaLimiteCierreViewSet — fechas límite de cierre (matriz B2 y D2).
 Contrato ADMCINCO (D-A3): delega en ParametrosService y traduce sus
 ValueError a HTTP 400/404.
 
-Permisos: el gate legacy `$permi_editar` (guardar_permi_editar_fecha, línea
-198) se mapea aquí a DjangoModelPermissions → Django crea automáticamente
-`transporte.add/change/delete_fecha_limitecierre` al migrar. El permiso
-granular `transporte.editar_tras_cierre` (§5.9) llega con PermisoService (E3).
+Permisos (2026-10-26): el gate `DjangoModelPermissions` se sustituyó por
+`PuedeVerModuloTransporte` — quien puede VER el módulo en su menú puede
+operarlo. El gate de negocio `editar_tras_cierre` (§5.9) sigue activo en
+el servicio.
 """
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
-from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
@@ -22,15 +21,16 @@ from ..models import FechaLimiteCierre
 from ..serializers import cierre_serializer
 from ..services import ParametrosService
 from .paginacion import PaginacionTransporte
+from .permisos import PuedeVerModuloTransporte
 
 
 class FechaLimiteCierreViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
-    """Lectura abierta a autenticados; escritura requiere permiso de modelo."""
+    """Abierto a quien puede ver el módulo en su menú (gate 2026-10-26)."""
 
     queryset = FechaLimiteCierre.objects.all()
     serializer_class = cierre_serializer.FechaLimiteCierreSerializer
     pagination_class = PaginacionTransporte
-    permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
+    permission_classes = [IsAuthenticatedOrAPIKey, PuedeVerModuloTransporte]
 
     # ------------------------------------------------------------------ #
     # Consulta

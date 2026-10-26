@@ -16,7 +16,6 @@ from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
@@ -25,21 +24,22 @@ from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 from ..models import ConsecutivoMensual
 from ..serializers import planilla_serializer
 from ..services import PlanillaService
+from .permisos import PuedeVerModuloTransporte
 
 
 class PlanillaViewSet(GenericViewSet):
     """Genera la Planilla Oficial de Salida para uno o varios vehículos.
 
-    Generar una planilla ESCRIBE: crea el ``ConsecutivoMensual`` que la
-    respalda, así que el POST exige ``add_consecutivomensual`` (Django lo
-    crea al migrar), igual que el resto del módulo exige permiso de modelo
-    para escribir (WFM → ``change_salida``; cierres/jefes → sus modelos).
-    Sin este gate cualquier usuario autenticado podía generar consecutivos.
+    Generar una planilla ESCRIBE (crea el ``ConsecutivoMensual`` que la
+    respalda). Gate 2026-10-26: el ``DjangoModelPermissions`` se sustituyó
+    por ``PuedeVerModuloTransporte`` — quien puede VER el módulo en su
+    menú puede operarlo. Los controles de negocio del servicio
+    (exclusión de motocicletas, ventana mensual, consecutivo atómico)
+    siguen intactos.
     """
 
-    # DjangoModelPermissions lo exige para resolver el modelo.
     queryset = ConsecutivoMensual.objects.all()
-    permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
+    permission_classes = [IsAuthenticatedOrAPIKey, PuedeVerModuloTransporte]
 
     @extend_schema(
         request=planilla_serializer.PlanillaInputSerializer,

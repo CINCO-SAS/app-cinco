@@ -17,17 +17,15 @@ Endpoints:
 - `POST|DELETE /salidas/{id}/novedad/` (B6/B7): UNA novedad por salida.
 - `GET /salidas/{id}/historial/` (B4): filas de SalidaHistorial.
 
-Permisos: lectura a autenticados; la alta exige `transporte.add_salida`
-(DjangoModelPermissions); las acciones de backoffice exigen
-`transporte.change_salida` (`_PermisosGestionSalida`), y el borrado
-`transporte.delete_salida`. El control por FILA (jefe del área/carpeta,
-CR-9) lo hace el servicio y se expone en el serializer (B15).
+Permisos (2026-10-26): gate `PuedeVerModuloTransporte` — quien puede
+VER el módulo en su menú puede operarlo (antes: `DjangoModelPermissions`
+add/change/delete sobre `Salida`). El control por FILA (jefe del
+área/carpeta, CR-9) lo hace el servicio y se expone en el serializer (B15).
 """
 from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
@@ -38,43 +36,19 @@ from ..models import Salida
 from ..serializers import salida_serializer
 from ..services import InformeService, SalidaService
 from .paginacion import PaginacionTransporte
-
-
-class _PermisosGestionSalida(DjangoModelPermissions):
-    """
-    Acciones de backoffice (aprobar-lote, rechazar, validar, novedad):
-    no son un alta, sino la gestión de filas existentes ⇒ `change_salida`.
-    DRF expone el mapa como `perms_map` (atributo público de la clase).
-    """
-
-    perms_map = {
-        **DjangoModelPermissions.perms_map,
-        "POST": ["%(app_label)s.change_%(model_name)s"],
-    }
+from .permisos import PuedeVerModuloTransporte
 
 
 class SalidaViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
-    """Lectura a autenticados; escritura con permisos de modelo (E3
-    refinará a permisos granulares por funcionalidad)."""
+    """Abierta a quien puede ver el módulo en su menú (gate 2026-10-26);
+    los gates de negocio (CR-9, jefe de área) viven en el servicio."""
 
     queryset = Salida.objects.all()
     serializer_class = salida_serializer.SalidaSerializer
-    permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
+    permission_classes = [IsAuthenticatedOrAPIKey, PuedeVerModuloTransporte]
     # Sin paginación declarada `get_paginated_response` daba 500 (ver
     # views/paginacion.py); ahora /salidas/ pagina de verdad.
     pagination_class = PaginacionTransporte
-
-    def get_permissions(self):
-        if self.action in (
-            "aprobar_lote", "aprobar", "rechazar", "validar", "novedad"
-        ):
-            # Mantiene la autenticación (IsAuthenticatedOrAPIKey) y solo
-            # sustituye el permiso de modelo por el de gestión (change).
-            return [
-                perm() for perm in self.permission_classes
-                if perm is not DjangoModelPermissions
-            ] + [_PermisosGestionSalida()]
-        return super().get_permissions()
 
     def list(self, request, *args, **kwargs):
         try:

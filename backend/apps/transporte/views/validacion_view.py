@@ -11,10 +11,13 @@ Endpoints:
 - `POST /validaciones/`: upert del cierre del área; exige jefe
   validador del área (A1) o programación/admin — el control de rol lo
   hace el servicio (B15).
+
+Permisos (2026-10-26): gate `PuedeVerModuloTransporte` (quien ve el
+módulo en su menú puede operarlo); el rol de jefe del área lo valida
+el servicio.
 """
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
-from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 from rest_framework.mixins import ListModelMixin
@@ -25,17 +28,17 @@ from ..models import ValidacionSalida
 from ..serializers import validacion_serializer
 from ..services import ValidacionService
 from .paginacion import PaginacionTransporte
+from .permisos import PuedeVerModuloTransporte
 
 
 class ValidacionViewSet(ListModelMixin, GenericViewSet):
-    """Lectura a autenticados; escritura con permiso de modelo (E3
-    refinará a permisos granulares); el rol de jefe del área lo valida
-    el servicio."""
+    """Abierta a quien puede ver el módulo en su menú (gate 2026-10-26);
+    el rol de jefe del área lo valida el servicio."""
 
     queryset = ValidacionSalida.objects.all()
     pagination_class = PaginacionTransporte
     serializer_class = validacion_serializer.ValidacionSalidaSerializer
-    permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
+    permission_classes = [IsAuthenticatedOrAPIKey, PuedeVerModuloTransporte]
 
     def list(self, request, *args, **kwargs):
         try:

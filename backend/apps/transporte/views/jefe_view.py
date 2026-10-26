@@ -4,15 +4,14 @@ JefeValidadorViewSet — jefes validadores por área/carpeta (matriz D1).
 Contrato ADMCINCO (D-A3): delega en ParametrosService y traduce sus
 ValueError a HTTP 400/404.
 
-Permisos: la pantalla legacy de jefes (Tab 3) es de programación; aquí la
-escritura queda bajo DjangoModelPermissions (`transporte.add/change_
-jefevalidador`). El refinamiento a permisos granulares llega con E3.
+Permisos (2026-10-26): el gate `DjangoModelPermissions` se sustituyó por
+`PuedeVerModuloTransporte` — quien puede VER el módulo en su menú puede
+operarlo; la escritura queda abierta a ese mismo conjunto.
 """
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
-from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
@@ -22,15 +21,16 @@ from ..models import JefeValidador
 from ..serializers import jefe_serializer
 from ..services import ParametrosService
 from .paginacion import PaginacionTransporte
+from .permisos import PuedeVerModuloTransporte
 
 
 class JefeValidadorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
-    """Lectura abierta a autenticados; escritura requiere permiso de modelo."""
+    """Abierto a quien puede ver el módulo en su menú (gate 2026-10-26)."""
 
     queryset = JefeValidador.objects.all()
     serializer_class = jefe_serializer.JefeValidadorSerializer
     pagination_class = PaginacionTransporte
-    permission_classes = [IsAuthenticatedOrAPIKey, DjangoModelPermissions]
+    permission_classes = [IsAuthenticatedOrAPIKey, PuedeVerModuloTransporte]
 
     # ------------------------------------------------------------------ #
     # Consulta

@@ -78,6 +78,7 @@ from .services.flota_service import COLUMNAS_CSV_BANCARIOS
 from .services.periodos import restar_meses
 from .services.reporte_fotografico_service import MSG_OT_VACIA, MSG_OT_VACIA_WFM
 from .services.vigencia import estado_vigencia
+from .views.permisos import PuedeVerModuloTransporte
 
 
 def _asegurar_tabla_empleados():
@@ -4872,14 +4873,16 @@ class WfmApiTests(TestCase):
         salida.refresh_from_db()
         self.assertEqual(salida.estado, EstadoSalida.VALIDADO)
 
-    def test_validar_sin_permiso_de_modelo(self):
+    def test_validar_autenticado_sin_permiso_modelo_no_403(self):
+        """Gate 2026-10-26: el acceso es por menú/área, no por permiso de
+        modelo; en pruebas (sin tabla de menú) el gate de vista degrada a
+        solo autenticación ⇒ el 403 ya no aplica. Las reglas de negocio
+        (periodo validable, máquina D-A11) siguen en el servicio."""
         self.api.force_authenticate(
             user=User.objects.create_user(username="111222333", password="x")
         )
-        self.assertEqual(
-            self.api.post("/transporte/wfm/validar/", {}, format="json").status_code,
-            403,
-        )
+        resp = self.api.post("/transporte/wfm/validar/", {}, format="json")
+        self.assertNotEqual(resp.status_code, 403)
 
     def test_validar_sin_autenticar(self):
         self.assertEqual(
@@ -5108,12 +5111,6 @@ class PlanillaAPITests(TestCase):
             actor=None,
         )
         self.user = User.objects.create_user(username="test_planilla", password="x")
-        # H2: /planillas/generar/ escribe consecutivos ⇒ exige
-        # add_consecutivomensual (igual que el resto del módulo).
-        self.user.user_permissions.add(
-            Permission.objects.get(codename="add_consecutivomensual")
-        )
-        self.user = User.objects.get(pk=self.user.pk)
         self.api = APIClient()
 
     def test_endpoint_sin_autenticacion_falla(self):
@@ -5124,8 +5121,11 @@ class PlanillaAPITests(TestCase):
         )
         self.assertEqual(resp.status_code, 401)
 
-    def test_endpoint_sin_permiso_de_modelo_falla(self):
-        """H2: autenticado SIN permiso de modelo no puede generar (403)."""
+    def test_endpoint_autenticado_sin_permisos_modelo_genera(self):
+        """Gate 2026-10-26: el acceso ya no depende de permisos de modelo
+        (Django) sino de poder ver el módulo en el menú; sin tabla de
+        menú en el entorno de pruebas (SQLite) degrada a solo exigir
+        autenticación ⇒ 200."""
         self.api.force_authenticate(
             user=User.objects.create_user(username="sin_permiso", password="x")
         )
@@ -5134,7 +5134,7 @@ class PlanillaAPITests(TestCase):
             {"fecha": "2026-10-16", "alcance": "PLACA", "placa": "API999"},
             format="json",
         )
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.status_code, 200)
 
     def test_endpoint_generar_exitoso_estandarizado(self):
         self.api.force_authenticate(user=self.user)
@@ -5165,6 +5165,82 @@ class PlanillaAPITests(TestCase):
         self.assertIn("No existe un vehículo", cuerpo["error"])
 
 
+class PermisoMenuTransporteTests(TestCase):
+    """Gate 2026-10-26: «quien puede VER el módulo en su menú, puede
+    entrar» (y también el área PROGRAMACION). Sustituye al de permisos
+    de modelo Django."""
+
+    @staticmethod
+    def _request(user):
+        return type("Req", (), {"user": user})()
+
+    def test_anonimo_deniega(self):
+        perm = PuedeVerModuloTransporte()
+        self.assertFalse(perm.has_permission(self._request(None), None))
+
+    def test_superuser_entra(self):
+        root = User.objects.create_superuser(username="root_menu", password="x")
+        perm = PuedeVerModuloTransporte()
+        self.assertTrue(perm.has_permission(self._request(root), None))
+
+    def test_sin_bd_menus_degrada_a_autenticacion(self):
+        # En pruebas (SQLite) `config_menu` no existe ⇒ el gate degrada.
+        user = User.objects.create_user(username="menu_fallback", password="x")
+        perm = PuedeVerModuloTransporte()
+        self.assertTrue(perm.has_permission(self._request(user), None))
+
+    @mock.patch("apps.transporte.views.permisos.ConfigMenu")
+    def test_con_lectura_en_menu_entra(self, mock_menu):
+        user = User.objects.create_user(username="menu_lectura", password="x")
+        menu = mock.Mock()
+        menu.get_permissions_for_user.return_value = {"read": True}
+        mock_menu.objects.using.return_value.filter.return_value = [menu]
+        perm = PuedeVerModuloTransporte()
+        self.assertTrue(perm.has_permission(self._request(user), None))
+
+    @mock.patch("apps.transporte.views.permisos.ConfigMenu")
+    def test_sin_lectura_en_menu_deniega_con_mensaje(self, mock_menu):
+        user = User.objects.create_user(username="menu_sinlectura", password="x")
+        menu = mock.Mock()
+        menu.get_permissions_for_user.return_value = {"read": False}
+        mock_menu.objects.using.return_value.filter.return_value = [menu]
+        perm = PuedeVerModuloTransporte()
+        self.assertFalse(perm.has_permission(self._request(user), None))
+        self.assertEqual(
+            perm.message, "No tiene permiso para realizar esta acción."
+        )
+
+    @mock.patch("apps.transporte.views.permisos.connections")
+    @mock.patch("apps.transporte.views.permisos.ConfigMenu")
+    def test_programacion_entra_aunque_no_vea_el_menu(self, mock_menu, mock_conns):
+        """Área PROGRAMACION opera el módulo sin necesitar el menú."""
+        user = User.objects.create_user(username="prog_ok", password="x")
+        menu = mock.Mock()
+        menu.get_permissions_for_user.return_value = {"read": False}
+        mock_menu.objects.using.return_value.filter.return_value = [menu]
+        cursor = (
+            mock_conns.__getitem__.return_value.cursor.return_value.__enter__.return_value
+        )
+        cursor.fetchone.return_value = (1,)
+        perm = PuedeVerModuloTransporte()
+        self.assertTrue(perm.has_permission(self._request(user), None))
+
+    @mock.patch("apps.transporte.views.permisos.connections")
+    @mock.patch("apps.transporte.views.permisos.ConfigMenu")
+    def test_no_programacion_y_sin_menu_deniega(self, mock_menu, mock_conns):
+        """Sin lectura en menú y sin área PROGRAMACION ⇒ 403."""
+        user = User.objects.create_user(username="prog_no", password="x")
+        menu = mock.Mock()
+        menu.get_permissions_for_user.return_value = {"read": False}
+        mock_menu.objects.using.return_value.filter.return_value = [menu]
+        cursor = (
+            mock_conns.__getitem__.return_value.cursor.return_value.__enter__.return_value
+        )
+        cursor.fetchone.return_value = None
+        perm = PuedeVerModuloTransporte()
+        self.assertFalse(perm.has_permission(self._request(user), None))
+
+
 class PlanillaFormatoFisicoTests(TestCase):
     """P1 cerrado: formato físico F-104 (reemplaza `planilla_salida.php`).
 
@@ -5190,10 +5266,6 @@ class PlanillaFormatoFisicoTests(TestCase):
             actor=None,
         )
         self.user = User.objects.create_user(username="f104", password="x")
-        self.user.user_permissions.add(
-            Permission.objects.get(codename="add_consecutivomensual")
-        )
-        self.user = User.objects.get(pk=self.user.pk)
         self.api = APIClient()
 
     def _planilla(self, fecha="2026-10-16", alcance="PLACA", placa="F104AA"):
@@ -5315,7 +5387,9 @@ class PlanillaFormatoFisicoTests(TestCase):
         self.assertIn("text/html", resp["Content-Type"])
         self.assertIn("F-104 PLANILLA", resp.content.decode())
 
-    def test_formato_http_exige_permiso_de_modelo(self):
+    def test_formato_http_abierto_a_autenticados(self):
+        """Gate 2026-10-26: el acceso es por menú/área, no por permiso de
+        modelo; sin tabla de menú en pruebas degrada a autenticación ⇒ 200."""
         self.api.force_authenticate(
             user=User.objects.create_user(username="f104_sin", password="x")
         )
@@ -5324,7 +5398,7 @@ class PlanillaFormatoFisicoTests(TestCase):
             {"fecha": "2026-10-16", "alcance": "PLACA", "placa": "F104AA"},
             format="json",
         )
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.status_code, 200)
 
     def test_formato_http_error_estandarizado(self):
         self.api.force_authenticate(user=self.user)

@@ -19,10 +19,9 @@ consume el MISMO cliente, así que solo impedía que otro sitio llamara
 "fríamente"; no era una autorización real (cualquier sesión autenticada
 podía validar salidas masivamente, incluido un operador de kiosco).
 
-Aquí se sustituye por ``DjangoModelPermissions`` sobre ``change_salida``:
-el WFM escribe en salidas, así que exige ese permiso de modelo. Es un
-estrechamiento deliberado — la máquina de estados D-A11 y el gate de
-gestión siguen intactos en el servicio.
+Aquí el gate (2026-10-26) es ``PuedeVerModuloTransporte``: quien puede
+VER el módulo en su menú puede lanzar el WFM. La máquina de estados
+D-A11 y los gates de negocio del servicio siguen intactos.
 
 El ``estado-job`` conserva el "respaldo síncrono" del legado (201–214):
 si el cron/worker no ha tomado el job, la propia petición reclama y
@@ -39,16 +38,14 @@ from apps.security.permissions.api_permissions import IsAuthenticatedOrAPIKey
 from ..models import EstadoWfmJob, Salida
 from ..serializers import wfm_serializer
 from ..services import WfmService
-from .salida_view import _PermisosGestionSalida
+from .permisos import PuedeVerModuloTransporte
 
 
 class WfmViewSet(GenericViewSet):
     """Validación WFM masiva (cola + lote)."""
 
-    # El WFM no da de alta salidas: las VALIDA, así que hereda el mismo
-    # permiso `change_salida` que el resto de acciones de gestión.
-    permission_classes = [IsAuthenticatedOrAPIKey, _PermisosGestionSalida]
-    queryset = Salida.objects.all()  # DjangoModelPermissions lo exige
+    permission_classes = [IsAuthenticatedOrAPIKey, PuedeVerModuloTransporte]
+    queryset = Salida.objects.all()  # Lo pide GenericViewSet/esquema
 
     # ------------------------------------------------------------------ #
     # Lote síncrono (legacy validarWFM)
