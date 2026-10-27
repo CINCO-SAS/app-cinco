@@ -37,6 +37,10 @@ interface SalidasToolbarProps {
   seleccionCantidad: number;
   onAprobarLote: () => void;
   onLimpiarSeleccion: () => void;
+  /** F5-4: exportar salidas filtradas (XLSX o CSV). */
+  onExportar?: (formato: "xlsx" | "csv") => void;
+  /** True mientras se está generando el archivo. */
+  exportando?: "xlsx" | "csv" | null;
 }
 
 const CLASES =
@@ -60,6 +64,8 @@ export const SalidasToolbar = ({
   seleccionCantidad,
   onAprobarLote,
   onLimpiarSeleccion,
+  onExportar,
+  exportando = null,
 }: SalidasToolbarProps) => {
   const hoy = hoyISO();
 
@@ -183,6 +189,44 @@ export const SalidasToolbar = ({
       <span className="ml-auto text-sm text-gray-500 dark:text-gray-400">
         {total} salida{total === 1 ? "" : "s"}
       </span>
+
+      {/* F5-4: export de las salidas del filtro activo (sin las eliminadas). */}
+      {onExportar && (
+        <>
+          <button
+            id="btn-export-salidas-xlsx"
+            type="button"
+            onClick={() => onExportar("xlsx")}
+            disabled={exportando !== null}
+            title="Descargar las salidas del filtro activo en Excel (sin eliminadas)."
+            className={
+              "h-8 rounded-lg border border-gray-300 bg-white px-2.5 text-xs font-medium " +
+              "text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed " +
+              "disabled:opacity-60 focus:border-brand-500 focus:outline-none focus:ring-2 " +
+              "focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 " +
+              "dark:text-white/90 dark:hover:bg-gray-800"
+            }
+          >
+            {exportando === "xlsx" ? "Generando…" : "↓ Excel"}
+          </button>
+          <button
+            id="btn-export-salidas-csv"
+            type="button"
+            onClick={() => onExportar("csv")}
+            disabled={exportando !== null}
+            title="Descargar las salidas del filtro activo en CSV (sep. ';', UTF-8 con BOM)."
+            className={
+              "h-8 rounded-lg border border-gray-300 bg-white px-2.5 text-xs font-medium " +
+              "text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed " +
+              "disabled:opacity-60 focus:border-brand-500 focus:outline-none focus:ring-2 " +
+              "focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 " +
+              "dark:text-white/90 dark:hover:bg-gray-800"
+            }
+          >
+            {exportando === "csv" ? "Generando…" : "↓ CSV"}
+          </button>
+        </>
+      )}
 
       <Button size="sm" variant="primary" onClick={onNuevo}>
         Nueva salida

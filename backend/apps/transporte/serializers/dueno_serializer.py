@@ -61,6 +61,11 @@ class DuenoResumenSerializer(serializers.ModelSerializer):
 class DuenoSerializer(serializers.ModelSerializer):
     """Ficha del dueño: datos de contacto + vehículos + cuentas bancarias."""
 
+    celular = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        error_messages={"blank": "El teléfono o celular es obligatorio."},
+    )
     vehiculos = VehiculoDelDuenoSerializer(many=True, read_only=True)
     datos_bancarios = DatosBancariosDuenoSerializer(many=True, read_only=True)
 
@@ -89,6 +94,24 @@ class AsignarVehiculoSerializer(serializers.Serializer):
         return attrs
 
 
+class CuentaBancariaInputSerializer(serializers.Serializer):
+    """Input de una cuenta bancaria del dueño.
+
+    `id` es opcional: si viene, la cuenta se actualiza; si no, se crea.
+    Hace falta un serializer aparte (y no el `ModelSerializer`) porque el
+    `id` de un ModelSerializer es de solo lectura y se perdería en la
+    validación, haciendo que cada guardado recrease las cuentas.
+    """
+
+    id = serializers.IntegerField(required=False)
+    cedula_titular = serializers.CharField(max_length=20)
+    nombre_titular = serializers.CharField(max_length=150)
+    banco = serializers.CharField(max_length=80)
+    tipo_cuenta = serializers.CharField(max_length=30)
+    numero_cuenta = serializers.CharField(max_length=30)
+    activo = serializers.BooleanField(required=False, default=True)
+
+
 class GuardarBancariosSerializer(serializers.Serializer):
     """Input de `PUT /duenos/{id}/bancarios/`: lista completa de cuentas.
 
@@ -96,7 +119,7 @@ class GuardarBancariosSerializer(serializers.Serializer):
     vienen); el serializer solo valida la forma.
     """
 
-    cuentas = DatosBancariosDuenoSerializer(many=True)
+    cuentas = CuentaBancariaInputSerializer(many=True)
 
     def validate_cuentas(self, cuentas):
         for i, cuenta in enumerate(cuentas):

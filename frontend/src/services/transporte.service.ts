@@ -13,13 +13,18 @@ import {
   type RespuestaPaginada,
 } from "@/lib/paginas";
 import type {
+  AsignarVehiculoPayload,
   CerrarAreaPayload,
   Conductor,
   ConductorListado,
   ConsecutivoLiquidacion,
   CuentaCobroParams,
+  DatosBancariosDueno,
   DatosBancariosVehiculo,
   DocumentoVehiculo,
+  DuenoDetalle,
+  DuenoPayload,
+  DuenoResumen,
   FiltrosInformeArea,
   FiltrosInformeMensual,
   GenerarPlanillaPayload,
@@ -47,6 +52,7 @@ import type {
   SerieChartParams,
   ValidacionSalida,
   Vehiculo,
+  VehiculoDelDueno,
   VehiculoListado,
   VehiculoPayload,
   VehiculoResuelto,
@@ -634,6 +640,60 @@ export const transporteService = {
    */
   getEstadoPermisos: async (): Promise<EstadoPermisos> => {
     const res = await api.get(`${BASE}/permisos/estado/`);
+    return res.data;
+  },
+
+  // ==========================================================================
+  // Dueños de Vehículos — /transporte/duenos/
+  // ==========================================================================
+
+  getDuenos: async (params?: ParamsBusqueda): Promise<DuenoResumen[]> =>
+    obtenerTodasLasPaginas<DuenoResumen>(`${BASE}/duenos/`, params),
+
+  getDueno: async (id: number): Promise<DuenoDetalle> => {
+    const res = await api.get(`${BASE}/duenos/${id}/`);
+    return res.data;
+  },
+
+  crearDueno: async (payload: DuenoPayload): Promise<DuenoDetalle> => {
+    const res = await api.post(`${BASE}/duenos/`, payload);
+    return res.data;
+  },
+
+  actualizarDueno: async (
+    id: number,
+    payload: Partial<DuenoPayload>,
+  ): Promise<DuenoDetalle> => {
+    const res = await api.put(`${BASE}/duenos/${id}/`, payload);
+    return res.data;
+  },
+
+  eliminarDueno: async (id: number): Promise<void> => {
+    await api.delete(`${BASE}/duenos/${id}/`);
+  },
+
+  asignarVehiculoADueno: async (
+    duenoId: number,
+    payload: AsignarVehiculoPayload,
+  ): Promise<VehiculoDelDueno> => {
+    const res = await api.post(`${BASE}/duenos/${duenoId}/vehiculos/`, payload);
+    return res.data;
+  },
+
+  quitarVehiculoDeDueno: async (
+    duenoId: number,
+    vehiculoId: number,
+  ): Promise<void> => {
+    await api.delete(`${BASE}/duenos/${duenoId}/vehiculos/${vehiculoId}/`);
+  },
+
+  guardarBancariosDueno: async (
+    duenoId: number,
+    cuentas: Partial<DatosBancariosDueno>[],
+  ): Promise<DatosBancariosDueno[]> => {
+    const res = await api.put(`${BASE}/duenos/${duenoId}/bancarios/`, {
+      cuentas,
+    });
     return res.data;
   },
 };

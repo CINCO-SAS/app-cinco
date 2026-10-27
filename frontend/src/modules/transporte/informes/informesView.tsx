@@ -11,8 +11,10 @@
 //
 // PENDIENTE FUERA DE ESTOS PASOS: dentro de "Reporte Área" el legacy
 // añadía un botón de Excel y un icono de refresco WFM para el área "I&M".
-// No están cableados todavía (decisión de alcance: el export de
-// "Transporte Mes" sí, en este paso).
+// El botón Excel (↓ Excel) YA ESTÁ CABLEADO via `InformeExportarReporteArea`
+// (exporta el resumen de estados por área como CSV con BOM UTF-8).
+// Pendiente: el refresco WFM (`POST /wfm/validar/`) — escribe validaciones,
+// requiere permiso explícito y confirmación del usuario.
 //
 // Los KPIs van FUERA de la barra de filtros. Aquí cada bloque enseña su
 // total en el pie de tabla (fila TOTALES), así que no se duplican en
@@ -31,6 +33,7 @@ import { InformeBloque } from "./components/InformeBloque";
 import { InformeCuentaCobro } from "./components/InformeCuentaCobro";
 import { InformeDiaADia } from "./components/InformeDiaADia";
 import { InformeExportarMes } from "./components/InformeExportarMes";
+import { InformeExportarReporteArea } from "./components/InformeExportarReporteArea";
 import { InformeGraficoAreas } from "./components/InformeGraficoAreas";
 import { InformeLiquidacion } from "./components/InformeLiquidacion";
 import { InformeMatrizAnual } from "./components/InformeMatrizAnual";
@@ -151,12 +154,23 @@ export const InformesView = () => {
           <InformeBloque
             titulo="Reporte Área"
             periodo={etiquetaPeriodo(mes, anio)}
+            acciones={
+              <InformeExportarReporteArea
+                areas={informeArea?.areas ?? AREAS_VACIAS}
+                mes={mes}
+                anio={anio}
+                periodo={etiquetaPeriodo(mes, anio)}
+              />
+            }
             isLoading={cargandoArea}
             nota="No responde al interruptor «Solo aprobados»: los estados se cuentan sobre todas las salidas del mes."
           >
             <InformeReporteArea
               areas={informeArea?.areas ?? AREAS_VACIAS}
               isLoading={cargandoArea}
+              mes={mes}
+              anio={anio}
+              onWfmValidado={recargar}
             />
           </InformeBloque>
         )}

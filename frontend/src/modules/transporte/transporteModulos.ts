@@ -69,6 +69,8 @@ export const MODULOS_TRANSPORTE: ModuloTransporte[] = [
       { segmento: "flota", etiqueta: "Flota Vehicular", disponible: true },
       // F2: transportadores externos (no están en nómina). Front construido.
       { segmento: "conductores", etiqueta: "Conductores", disponible: true },
+      // F2/Duenos: propietarios de vehículos (1 dueño → N vehículos + datos bancarios)
+      { segmento: "duenos", etiqueta: "Dueños de Vehículos", disponible: true },
     ],
   },
   {

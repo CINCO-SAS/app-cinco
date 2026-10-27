@@ -32,7 +32,11 @@ class DuenoService:
         params = query_params or {}
         queryset = DuenoVehiculo.objects.annotate(
             total_vehiculos=Count("vehiculos", distinct=True),
-            total_cuentas=Count("datos_bancarios", distinct=True),
+            total_cuentas=Count(
+                "datos_bancarios",
+                filter=Q(datos_bancarios__activo=True),
+                distinct=True,
+            ),
         )
         busqueda = str(params.get("q") or "").strip()
         if busqueda:
@@ -45,9 +49,14 @@ class DuenoService:
 
     @staticmethod
     def obtener(dueno_id):
+        from django.db.models import Prefetch
         try:
             return DuenoVehiculo.objects.prefetch_related(
-                "vehiculos", "datos_bancarios"
+                "vehiculos",
+                Prefetch(
+                    "datos_bancarios",
+                    queryset=DatosBancariosDueno.objects.filter(activo=True),
+                ),
             ).get(pk=dueno_id)
         except DuenoVehiculo.DoesNotExist:
             raise ValueError(f"No existe un dueño con id {dueno_id}.")
@@ -60,10 +69,13 @@ class DuenoService:
         """Alta de dueño; unicidad natural (cédula)."""
         cedula = str(datos.get("cedula") or "").strip()
         nombre = str(datos.get("nombre") or "").strip()
+        celular = str(datos.get("celular") or "").strip()
         if not cedula:
             raise ValueError("La cédula del dueño es obligatoria.")
         if not nombre:
             raise ValueError("El nombre del dueño es obligatorio.")
+        if not celular:
+            raise ValueError("El teléfono o celular del dueño es obligatorio.")
         if DuenoVehiculo.objects.filter(cedula=cedula).exists():
             raise ValueError(f"Ya existe un dueño con la cédula {cedula}.")
 
@@ -72,7 +84,7 @@ class DuenoService:
                 return DuenoVehiculo.objects.create(
                     cedula=cedula,
                     nombre=nombre,
-                    celular=str(datos.get("celular") or "").strip() or None,
+                    celular=celular,
                     activo=bool(datos.get("activo", True)),
                     creado_por=actor,
                 )
@@ -98,7 +110,10 @@ class DuenoService:
                 raise ValueError("El nombre del dueño es obligatorio.")
             dueno.nombre = nombre
         if "celular" in datos:
-            dueno.celular = str(datos["celular"] or "").strip() or None
+            celular = str(datos["celular"] or "").strip()
+            if not celular:
+                raise ValueError("El teléfono o celular del dueño es obligatorio.")
+            dueno.celular = celular
         if "activo" in datos:
             dueno.activo = bool(datos["activo"])
 
@@ -219,8 +234,13 @@ class DuenoService:
                     fila.save(update_fields=["activo", "modificado_por",
                                              "modificado_en"])
 
+        # Se devuelven solo las cuentas activas: las dadas de baja se
+        # conservan en la base (trazabilidad de pagos ya girados) pero no
+        # se muestran ni pueden volver a activarse desde la ficha.
         return list(
-            DatosBancariosDueno.objects.filter(dueno=dueno).order_by("id")
+            DatosBancariosDueno.objects.filter(
+                dueno=dueno, activo=True
+            ).order_by("id")
         )
 
     # ------------------------------------------------------------------ #

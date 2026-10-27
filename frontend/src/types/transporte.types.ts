@@ -861,5 +861,65 @@ export interface ConsecutivoLiquidacion {
   creado: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Dueños de Vehículos (models/dueno.py · DuenoVehiculo)
+// ---------------------------------------------------------------------------
+
+export interface VehiculoDelDueno {
+  id: number;
+  placa: string;
+  tipo_vehiculo: TipoVehiculo;
+  marca: string;
+  referencia: string | null;
+  modelo_anio: number;
+  activo: boolean;
+}
+
+export interface DatosBancariosDueno {
+  id: number;
+  cedula_titular: string;
+  nombre_titular: string;
+  banco: string;
+  tipo_cuenta: string;
+  numero_cuenta: string;
+  activo: boolean;
+}
+
+export interface DuenoResumen {
+  id: number;
+  cedula: string;
+  nombre: string;
+  celular: string | null;
+  activo: boolean;
+  total_vehiculos: number;
+  total_cuentas: number;
+}
+
+export interface DuenoDetalle {
+  id: number;
+  cedula: string;
+  nombre: string;
+  celular: string | null;
+  activo: boolean;
+  vehiculos: VehiculoDelDueno[];
+  datos_bancarios: DatosBancariosDueno[];
+}
+
+export interface DuenoPayload {
+  cedula: string;
+  nombre: string;
+  celular?: string | null;
+  activo?: boolean;
+}
+
+export interface AsignarVehiculoPayload {
+  vehiculo_id?: number;
+  placa?: string;
+}
+
+export interface GuardarBancariosPayload {
+  cuentas: Partial<DatosBancariosDueno>[];
+}
+
 
 

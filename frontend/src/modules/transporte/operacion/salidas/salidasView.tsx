@@ -17,6 +17,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import Alert from "@/components/ui/alert/Alert";
+import { ApiError } from "@/lib/errorHandler";
+import { logDevelopmentError } from "@/lib/environment";
+import { transporteService } from "@/services/transporte.service";
 import { useSalidasData } from "./salidasView.hooks";
 import { useSalidasAcciones } from "./salidasView.acciones";
 import { getSalidasColumns } from "./salidasView.utils";
@@ -55,6 +58,38 @@ const SalidasView = () => {
 
   const [formularioAbierto, setFormularioAbierto] = useState(false);
   const cerrarFormulario = useCallback(() => setFormularioAbierto(false), []);
+
+  // F5-4: exportar las salidas del filtro activo.
+  const [exportando, setExportando] = useState<"xlsx" | "csv" | null>(null);
+
+  const exportar = useCallback(
+    async (formato: "xlsx" | "csv") => {
+      setExportando(formato);
+      try {
+        const params: Record<string, string> = { formato };
+        if (filtros.desde) params.desde = filtros.desde;
+        if (filtros.hasta) params.hasta = filtros.hasta;
+        if (filtros.estado) params.estado = filtros.estado;
+        if (globalFilter) params.search = globalFilter;
+        const blob = await transporteService.exportarSalidas(params);
+        const url = URL.createObjectURL(blob);
+        const enlace = document.createElement("a");
+        enlace.href = url;
+        enlace.download = `salidas.${formato}`;
+        document.body.appendChild(enlace);
+        enlace.click();
+        enlace.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (err) {
+        logDevelopmentError("Error exportando salidas:", err);
+        const apiError = err as ApiError;
+        alert(apiError?.message ?? "No fue posible generar el archivo.");
+      } finally {
+        setExportando(null);
+      }
+    },
+    [filtros, globalFilter],
+  );
 
   // Cambiar de página cambia las filas en pantalla: la selección vieja quedaría
   // invisible pero activa y el usuario aprobaría filas que no ve.
@@ -123,6 +158,8 @@ const SalidasView = () => {
             seleccionCantidad={acciones.seleccionCantidad}
             onAprobarLote={acciones.abrirLote}
             onLimpiarSeleccion={acciones.limpiarSeleccion}
+            onExportar={(fmt) => void exportar(fmt)}
+            exportando={exportando}
           />
         }
       />

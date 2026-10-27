@@ -39,7 +39,9 @@ from .models import (
     AuditoriaLog,
     Conductor,
     ConsecutivoMensual,
+    DatosBancariosDueno,
     DatosBancariosVehiculo,
+    DuenoVehiculo,
     EstadoSalida,
     EstadoWfmJob,
     FechaLimiteCierre,
@@ -63,6 +65,7 @@ from .services import calendario
 from .services import (
     ConductorService,
     ContactoService,
+    DuenoService,
     FlotaService,
     InformeService,
     LiquidacionService,
@@ -7081,3 +7084,304 @@ class IntegracionHttpEndpointsTests(TestCase):
         )
         self.assertEqual(resp_sin.status_code, 403, resp_sin.content)
         self.assertIn("cerrado", resp_sin.json()["error"])
+
+
+class DuenoBancariosTests(TestCase):
+    """
+    Cuentas bancarias del dueño (F2 · 2026-10-27).
+
+    Regresión del bug reportado: al pulsar "Eliminar" en la ficha del
+    propietario, la cuenta se quitaba solo de la pantalla y volvía al
+    recargar. Aquí se fija el contrato del backend:
+
+    - guardar una lista con `id` ACTUALIZA la cuenta (no la recrea),
+    - guardar una lista a la que le falta una cuenta la da de baja
+      (`activo=False`), sin borrarla de la base,
+    - la respuesta solo trae las cuentas activas,
+    - la ficha del dueño (`GET`) tampoco lista las dadas de baja.
+    """
+
+    def setUp(self):
+        self.dueno = DuenoService.crear(
+            {"cedula": "900111333", "nombre": "PROPIETARIO TEST",
+             "celular": "3001234567"},
+            actor=None,
+        )
+
+    @staticmethod
+    def _cuenta(numero="001", banco="BANCOLOMBIA", activo=True, cid=None):
+        cuenta = {
+            "cedula_titular": "900111333",
+            "nombre_titular": "PROPIETARIO TEST",
+            "banco": banco,
+            "tipo_cuenta": "AHORROS",
+            "numero_cuenta": numero,
+            "activo": activo,
+        }
+        if cid is not None:
+            cuenta["id"] = cid
+        return cuenta
+
+    def test_guardar_cuenta_nueva_asigna_id(self):
+        """La primera cuenta se crea y devuelve su id."""
+        guardadas = DuenoService.guardar_bancarios(
+            self.dueno.id, [self._cuenta()]
+        )
+        self.assertEqual(len(guardadas), 1)
+        self.assertIsNotNone(guardadas[0].id)
+        self.assertTrue(guardadas[0].activo)
+
+    def test_guardar_con_id_actualiza_no_recrea(self):
+        """El `id` viaja en el payload: la cuenta se actualiza, no se duplica.
+
+        Si el serializer se comiera el `id` (es de solo lectura en un
+        ModelSerializer), cada guardado crearía una cuenta nueva y dejaría
+        la anterior dada de baja.
+        """
+        creada = DuenoService.guardar_bancarios(
+            self.dueno.id, [self._cuenta()]
+        )[0]
+
+        guardadas = DuenoService.guardar_bancarios(
+            self.dueno.id,
+            [self._cuenta(numero="002", banco="DAVIVIENDA", cid=creada.id)],
+        )
+
+        self.assertEqual(len(guardadas), 1)
+        self.assertEqual(guardadas[0].id, creada.id)
+        self.assertEqual(guardadas[0].numero_cuenta, "002")
+        self.assertEqual(guardadas[0].banco, "DAVIVIENDA")
+        # No hay filas huérfanas: sigue habiendo una sola en la base.
+        self.assertEqual(
+            DatosBancariosDueno.objects.filter(dueno=self.dueno).count(), 1
+        )
+
+    def test_eliminar_cuenta_la_da_de_baja(self):
+        """La cuenta que no viene en la lista queda inactiva (no se borra)."""
+        primera = DuenoService.guardar_bancarios(
+            self.dueno.id, [self._cuenta(numero="001")]
+        )[0]
+        guardadas = DuenoService.guardar_bancarios(
+            self.dueno.id,
+            [self._cuenta(numero="001", cid=primera.id), self._cuenta(numero="002")],
+        )
+        self.assertEqual(len(guardadas), 2)
+        segunda = guardadas[1]
+
+        # Se guarda la lista SIN la segunda cuenta → se da de baja.
+        guardadas = DuenoService.guardar_bancarios(
+            self.dueno.id, [self._cuenta(numero="001", cid=primera.id)]
+        )
+
+        self.assertEqual(len(guardadas), 1)
+        self.assertEqual(guardadas[0].id, primera.id)
+
+        # Sigue en la base (trazabilidad) pero inactiva.
+        self.assertEqual(
+            DatosBancariosDueno.objects.filter(dueno=self.dueno).count(), 2
+        )
+        dada_de_baja = DatosBancariosDueno.objects.get(pk=segunda.id)
+        self.assertFalse(dada_de_baja.activo)
+
+    def test_guardar_lista_vacia_da_de_baja_todas(self):
+        """Enviar la lista vacía deja al dueño sin cuentas activas."""
+        creada = DuenoService.guardar_bancarios(
+            self.dueno.id, [self._cuenta()]
+        )[0]
+
+        guardadas = DuenoService.guardar_bancarios(self.dueno.id, [])
+
+        self.assertEqual(guardadas, [])
+        self.assertFalse(
+            DatosBancariosDueno.objects.get(pk=creada.id).activo
+        )
+
+    def test_ficha_no_lista_cuentas_dadas_de_baja(self):
+        """`GET /duenos/{id}/` no expone las cuentas dadas de baja."""
+        creada = DuenoService.guardar_bancarios(
+            self.dueno.id, [self._cuenta()]
+        )[0]
+        DuenoService.guardar_bancarios(self.dueno.id, [])
+
+        detalle = DuenoService.obtener(self.dueno.id)
+        self.assertEqual(list(detalle.datos_bancarios.all()), [])
+        self.assertFalse(
+            DatosBancariosDueno.objects.get(pk=creada.id).activo
+        )
+
+    def test_cuenta_de_otro_dueno_se_rechaza(self):
+        """Una cuenta ajena al dueño no se puede salvar en su ficha."""
+        otro = DuenoService.crear(
+            {"cedula": "900999888", "nombre": "OTRO PROPIETARIO",
+             "celular": "3009999999"},
+            actor=None,
+        )
+        ajena = DuenoService.guardar_bancarios(
+            otro.id, [self._cuenta(numero="777")]
+        )[0]
+
+        with self.assertRaises(ValueError):
+            DuenoService.guardar_bancarios(
+                self.dueno.id, [self._cuenta(numero="001", cid=ajena.id)]
+            )
+
+
+class DuenoBancariosApiTests(TestCase):
+    """
+    `PUT /transporte/duenos/{id}/bancarios/` (F2 · 2026-10-27).
+
+    El serializer es la frontera donde se perdía el `id` de cada cuenta:
+    como `id` es de solo lectura en un ModelSerializer, el payload llegaba
+    al service sin id y cada guardado RECREABA la cuenta en vez de
+    actualizarla. Estas pruebas fijan el contrato por HTTP, que es el
+    camino que usa la pantalla.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _asegurar_tabla_empleados()
+        super().setUpClass()
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="1000555", password="x")
+        self.dueno = DuenoService.crear(
+            {"cedula": "900555444", "nombre": "API PROPIETARIO",
+             "celular": "3012223333"},
+            actor=None,
+        )
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    def _payload(self, *cuentas):
+        return {"cuentas": list(cuentas)}
+
+    @staticmethod
+    def _cuenta(numero="001", banco="BANCOLOMBIA", cid=None):
+        cuenta = {
+            "cedula_titular": "900555444",
+            "nombre_titular": "API PROPIETARIO",
+            "banco": banco,
+            "tipo_cuenta": "AHORROS",
+            "numero_cuenta": numero,
+            "activo": True,
+        }
+        if cid is not None:
+            cuenta["id"] = cid
+        return cuenta
+
+    def test_put_guardar_crea_y_devuelve_id(self):
+        """La primera cuenta se crea y la respuesta trae su id."""
+        resp = self.api.put(
+            f"/transporte/duenos/{self.dueno.id}/bancarios/",
+            self._payload(self._cuenta()),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        datos = resp.json()
+        self.assertEqual(len(datos), 1)
+        self.assertIsNotNone(datos[0]["id"])
+
+    def test_put_con_id_actualiza_no_duplica(self):
+        """Regresión: con `id` la cuenta se actualiza, no se recrea."""
+        resp = self.api.put(
+            f"/transporte/duenos/{self.dueno.id}/bancarios/",
+            self._payload(self._cuenta()),
+            format="json",
+        )
+        cuenta_id = resp.json()[0]["id"]
+
+        resp2 = self.api.put(
+            f"/transporte/duenos/{self.dueno.id}/bancarios/",
+            self._payload(
+                self._cuenta(numero="002", banco="DAVIVIENDA", cid=cuenta_id)
+            ),
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, 200, resp2.content)
+        datos = resp2.json()
+        self.assertEqual(len(datos), 1)
+        self.assertEqual(datos[0]["id"], cuenta_id)
+        self.assertEqual(datos[0]["numero_cuenta"], "002")
+        # Una sola fila en la base: no hay duplicado por recrear.
+        self.assertEqual(
+            DatosBancariosDueno.objects.filter(dueno=self.dueno).count(), 1
+        )
+
+    def test_put_elimina_cuenta_al_no_incluirla(self):
+        """Regresión: quitar la cuenta del listado la da de baja en el servidor."""
+        resp = self.api.put(
+            f"/transporte/duenos/{self.dueno.id}/bancarios/",
+            self._payload(self._cuenta(numero="001"), self._cuenta(numero="002")),
+            format="json",
+        )
+        cuentas = resp.json()
+        self.assertEqual(len(cuentas), 2)
+        primera, segunda = cuentas[0], cuentas[1]
+
+        # Se reenvía solo la primera: la segunda queda dada de baja.
+        resp2 = self.api.put(
+            f"/transporte/duenos/{self.dueno.id}/bancarios/",
+            self._payload(self._cuenta(numero="001", cid=primera["id"])),
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, 200, resp2.content)
+        self.assertEqual(len(resp2.json()), 1)
+        self.assertEqual(resp2.json()[0]["id"], primera["id"])
+
+        # La segunda sigue en la base pero inactiva.
+        self.assertEqual(
+            DatosBancariosDueno.objects.filter(dueno=self.dueno).count(), 2
+        )
+        self.assertFalse(
+            DatosBancariosDueno.objects.get(pk=segunda["id"]).activo
+        )
+
+    def test_put_lista_vacia_deja_sin_cuentas(self):
+        """Enviar la lista vacía deja al dueño sin cuentas activas."""
+        self.api.put(
+            f"/transporte/duenos/{self.dueno.id}/bancarios/",
+            self._payload(self._cuenta()),
+            format="json",
+        )
+
+        resp = self.api.put(
+            f"/transporte/duenos/{self.dueno.id}/bancarios/",
+            self._payload(),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json(), [])
+        self.assertEqual(
+            DatosBancariosDueno.objects.filter(
+                dueno=self.dueno, activo=True
+            ).count(),
+            0,
+        )
+
+    def test_put_cuenta_incompleta_devuelve_400(self):
+        """Una cuenta sin número de cuenta se rechaza con 400."""
+        incompleta = self._cuenta()
+        incompleta["numero_cuenta"] = ""
+        resp = self.api.put(
+            f"/transporte/duenos/{self.dueno.id}/bancarios/",
+            self._payload(incompleta),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.content)
+
+    def test_get_ficha_no_lista_cuentas_dadas_de_baja(self):
+        """La ficha del dueño solo muestra las cuentas activas."""
+        self.api.put(
+            f"/transporte/duenos/{self.dueno.id}/bancarios/",
+            self._payload(self._cuenta()),
+            format="json",
+        )
+        self.api.put(
+            f"/transporte/duenos/{self.dueno.id}/bancarios/",
+            self._payload(),
+            format="json",
+        )
+
+        resp = self.api.get(f"/transporte/duenos/{self.dueno.id}/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json()["datos_bancarios"], [])

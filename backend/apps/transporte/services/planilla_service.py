@@ -34,9 +34,11 @@ from html import escape
 
 from ..models import Salida, Vehiculo
 from ..models.choices import EstadoSalida, TipoContrato
+from .contacto_service import ContactoService
 from .flota_service import FlotaService
 from .informe_service import EMPRESA, NIT
 from .liquidacion_service import LiquidacionService
+from .logo_b64 import LOGO_CINCO_B64
 
 
 # Rótulos del formato F-104 (meses en mayúsculas, como el legacy).
@@ -195,10 +197,22 @@ class PlanillaService:
         conductor = vehiculo.conductor_habitual
         conductor_datos = None
         if conductor:
+            celular_mostrar = conductor.celular
+            try:
+                contacto = ContactoService.contacto_conductor(conductor.pk)
+                celular_mostrar = (
+                    contacto.get("celular_personal")
+                    or contacto.get("celular_alterno")
+                    or conductor.celular
+                    or ""
+                )
+            except Exception:
+                pass
+
             conductor_datos = {
                 "cedula": conductor.cedula,
                 "nombre": conductor.nombre_completo,
-                "celular": conductor.celular,
+                "celular": celular_mostrar,
                 "licencia_categoria": conductor.licencia_categoria,
                 "licencia_vencimiento": conductor.licencia_vencimiento,
             }
@@ -279,36 +293,27 @@ class PlanillaService:
         return alcance
 
     # ------------------------------------------------------------------ #
-    # Formato físico F-104 (P1 — legacy `planilla_salida.php`)
+    # Formato físico F-104 (Idéntico al legacy `planilla_salida.php`)
     # ------------------------------------------------------------------ #
     @staticmethod
     def html_formato(planilla):
-        """HTML imprimible del formato F-104: una hoja por vehículo.
+        """HTML imprimible del formato F-104: réplica visual idéntica al legacy.
 
-        Reemplaza `planilla_salida.php`: el navegador abre el documento y
-        lo imprime en **LETTER horizontal**, con salto de página por
-        vehículo (una planilla por hoja, como el legacy).
-
-        Mejoras registradas sobre el legacy (no se replican sus rarezas):
-        - **FECHA real** de impresión; el legacy imprimía "16/02/2022" fijo.
-        - **CONDUCTOR y TELÉFONO reales**: la consulta del legacy a
-          `nokia_base_infraestructura` estaba *comentada*, así que esas dos
-          casillas salían vacías.
-        - **VALOR DÍA real**: el legacy lo consultaba y ni lo imprimía.
-        - **CONSECUTIVO mensual impreso** (PLAN_TECNICO §3.6 lo exige; el
-          formato legacy no lo mostraba).
-        - **Sin código de barras**: D-A8 lo eliminó como artefacto
-          regenerable; el QR es el único código de verificación y la casilla
-          de la placa imprime la placa en grande.
-        - **Autocontenido**: QR embebido en base64 y sin CDNs externos, así
-          imprime igual con la red caída (el legacy dependía de Bootstrap y
-          FontAwesome remotos y de un PNG en disco).
-        - **Todo valor escapado** con `html.escape` (el legacy imprimía
-          entrada del usuario sin escapar).
-
-        TOTAL DÍAS / DESCUENTOS / ADICIONALES / VALOR TOTAL quedan EN BLANCO:
-        se diligencian a mano durante el mes (el importe se liquida en la
-        sábana, no en el despacho), igual que en el formato original.
+        Diseño y estructura exactos a `planilla_salida.php`:
+        - Logotipo oficial de Cinco S.A.S en esquina superior izquierda.
+        - Título central F-104 PLANILLA CONTROL DE VEHÍCULOS CINCO S.A.S MENSUAL.
+        - Cuadro de VERSIÓN: 01 y FECHA.
+        - Período mensual destacado.
+        - Texto de advertencia/recomendación a porteros.
+        - Rejilla superior de datos del vehículo:
+          * Columna 1 (6/12): CONDUCTOR, PROPIETARIO, TELÉFONO/CELULAR.
+          * Columna 2 (3/12): PLACA, VALOR DÍA, TOTAL DÍAS.
+          * Columna 3 (3/12): DESCUENTOS, ADICIONALES, VALOR TOTAL.
+          * Columna indicación inferior de diligenciar en letra legible.
+        - Código QR a la derecha ocupando toda la altura de la sección.
+        - Tabla de firmas de 31 días dividida exactamente en dos bloques (1..16 y 17..último)
+          con encabezados DÍA, HORA SALIDA, FIRMA SALIDA, MÓVILES TRANSPORTADAS,
+          HORA LLEGADA, FIRMA RETORNO, OBSERVACIÓN.
         """
         fecha = planilla["fecha"]
         mes_nombre = MESES_F104[fecha.month]
@@ -322,43 +327,117 @@ class PlanillaService:
 <html lang="es">
 <head>
 <meta charset="utf-8" />
-<title>F-104 Planilla de Salida</title>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+<title>Planilla Salida</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" />
 <style>
-@page {{ size: LETTER landscape; margin: 6mm; }}
-* {{ box-sizing: border-box; }}
-body {{ margin: 0; font-family: Arial, Helvetica, sans-serif; color: #000; }}
-.hoja {{ page-break-after: always; }}
-.hoja:last-child {{ page-break-after: auto; }}
-.fila {{ display: flex; border: 1px solid #000; margin: 1px; }}
-.celda {{ border: 1px solid #000; padding: 4px; text-align: center;
-          font-size: 11px; display: flex; align-items: center;
-          justify-content: center; }}
-.papel {{ width: 25%; flex-direction: column; }}
-.titulo {{ width: 50%; font-weight: bold; }}
-.meta {{ width: 25%; flex-direction: column; padding: 0; }}
-.meta div {{ flex: 1; width: 100%; display: flex; align-items: center;
-             justify-content: center; border-bottom: 1px solid #000; }}
-.meta div:last-child {{ border-bottom: 0; }}
-.bloque {{ border: 1px solid #000; margin: 1px; margin-top: -1px;
-           text-align: center; padding: 3px; }}
-.periodo {{ font-size: 14px; font-weight: bold; }}
-.nota {{ font-size: 11px; }}
-.cuerpo {{ display: flex; border: 1px solid #000; margin: 1px; margin-top: -1px; }}
-.campos {{ width: 75%; display: grid; grid-template-columns: repeat(3, 1fr); }}
-.campo {{ border-right: 1px solid #000; border-bottom: 1px solid #000;
-          padding: 3px 6px; min-height: 34px; font-size: 11px; text-align: left; }}
-.campos .campo:nth-child(3n) {{ border-right: 0; }}
-.campo .valor {{ display: block; font-weight: bold; font-size: 13px;
-                 text-align: center; }}
-.campo .valor.placa {{ font-size: 18px; letter-spacing: 3px; }}
-.qr {{ width: 25%; padding: 4px; }}
-.qr img {{ width: 185px; height: 185px; }}
-table.registro {{ width: 100%; border-collapse: collapse; margin-top: -1px; }}
-table.registro th, table.registro td {{ border: 1px solid #000; font-size: 11px;
-                                        padding: 5px; text-align: center;
-                                        height: 28px; }}
-.nowrap {{ white-space: nowrap; }}
-.vacio {{ border: 0 !important; }}
+  @page {{
+    size: LETTER landscape;
+    margin: 4mm 6mm;
+  }}
+  * {{
+    box-sizing: border-box;
+  }}
+  body {{
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: #000;
+    font-family: Arial, Helvetica, sans-serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }}
+  p:not(.info-text) {{
+    font-size: 11px;
+    margin: 0;
+  }}
+  .info-text {{
+    font-size: 13px !important;
+  }}
+  .row-content {{
+    margin: 1px;
+    border: 1px solid #000;
+  }}
+  .logo {{
+    height: 48px;
+    max-width: 100%;
+    object-fit: contain;
+  }}
+  .periodo {{
+    margin: 2px 0 !important;
+    font-size: 15px;
+    font-weight: bold;
+  }}
+  .info {{
+    height: 34px;
+    position: relative;
+    padding: 2px 6px;
+    text-align: left;
+  }}
+  .info p.rotulo {{
+    font-size: 10px;
+    font-weight: 500;
+    margin: 0;
+  }}
+  .info .info-text {{
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 12px;
+    width: 90%;
+    text-align: center;
+    font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }}
+  .info .info-text.placa-text {{
+    font-size: 16px !important;
+    letter-spacing: 2px;
+  }}
+  .qr-container {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    padding: 2px;
+  }}
+  .qr {{
+    width: 175px;
+    height: 175px;
+    object-fit: contain;
+  }}
+  table.table-planilla {{
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0;
+  }}
+  table.table-planilla th,
+  table.table-planilla td {{
+    border: 1px solid #000 !important;
+    font-size: 10px;
+    padding: 3.5px 2px !important;
+    text-align: center;
+    vertical-align: middle;
+    height: 25px;
+  }}
+  table.table-planilla th {{
+    font-weight: bold;
+  }}
+  .border-0-custom {{
+    border: 0 !important;
+  }}
+  @media print {{
+    .container-fluid {{
+      page-break-after: always;
+      break-after: page;
+    }}
+    .container-fluid:last-child {{
+      page-break-after: auto;
+      break-after: auto;
+    }}
+  }}
 </style>
 </head>
 <body>
@@ -368,70 +447,167 @@ table.registro th, table.registro td {{ border: 1px solid #000; font-size: 11px;
 
     @staticmethod
     def _hoja_vehiculo(fila, fecha, mes_nombre, ultimo):
-        """Una hoja del formato F-104 (encabezado + tabla de firmas)."""
+        """Una hoja del formato F-104 idéntica a la estructura de `planilla_salida.php`."""
         conductor = fila.get("conductor") or {}
         qr_png = FlotaService.generar_qr(fila["vehiculo_id"])
         qr_b64 = base64.b64encode(qr_png).decode("ascii")
 
-        # Tabla de 2 bloques de 7 columnas (16 filas): los días 1..16 a la
-        # izquierda y 17..último a la derecha; como en el legacy, las celdas
-        # de un día inexistente se imprimen sin borde.
-        encabezado = (
-            "<th>DÍA</th><th>HORA SALIDA</th><th class=\"nowrap\">FIRMA SALIDA</th>"
-            "<th>MÓVILES TRANSPORTADAS</th><th>HORA LLEGADA</th>"
-            "<th class=\"nowrap\">FIRMA RETORNO</th><th>OBSERVACIÓN</th>"
-        ) * 2
-
-        filas = []
+        # Filas de la tabla de 1 a 16 (izquierda) y 17 a 31/32 (derecha)
+        rows_html = []
         for dia in range(1, 17):
-            dia_derecha = dia + 16
-            if dia_derecha <= ultimo:
-                derecha = (
-                    f"<td>{dia_derecha}</td>"
-                    + "<td></td>" * 6
+            dia_der = dia + 16
+            if dia_der <= ultimo:
+                der_cells = (
+                    f"<td>{dia_der}</td>"
+                    "<td></td><td></td><td></td><td></td><td></td><td></td>"
                 )
             else:
-                derecha = "<td class=\"vacio\"></td>" * 7
-            filas.append(
-                f"<tr><td>{dia}</td>" + "<td></td>" * 6 + derecha + "</tr>"
+                der_cells = (
+                    '<td class="border-0-custom"></td>' * 7
+                )
+            rows_html.append(
+                f"<tr>"
+                f"<td>{dia}</td>"
+                f"<td></td><td></td><td></td><td></td><td></td><td></td>"
+                f"{der_cells}"
+                f"</tr>"
             )
 
-        return f"""<section class="hoja">
-<div class="fila">
-<div class="celda papel">{_esc(EMPRESA)}<br /><small>NIT {_esc(NIT)}</small></div>
-<div class="celda titulo">F-104 PLANILLA CONTROL DE VEHÍCULOS CINCO S.A.S MENSUAL</div>
-<div class="celda meta">
-<div>VERSIÓN: 01</div>
-<div>FECHA: {_esc(fecha.strftime("%d/%m/%Y"))}</div>
-<div>CONSECUTIVO: {_esc(fila["consecutivo"])}</div>
-</div>
-</div>
-<div class="bloque periodo">DEL 01 DE {mes_nombre} AL {ultimo} DE {mes_nombre} DE {_esc(fecha.year)}</div>
-<div class="bloque nota">{_TEXTO_RECOMENDACION}</div>
-<div class="cuerpo">
-<div class="campos">
-{_campo("CONDUCTOR:", _esc(conductor.get("nombre")))}
-{_campo("PROPIETARIO:", _esc(fila["nombre_propietario"]))}
-{_campo("TELÉFONO/CELULAR:", _esc(conductor.get("celular")))}
-{_campo("PLACA:", _esc(fila["placa"]), clase="placa")}
-{_campo("VALOR DÍA:", PlanillaService._dinero(fila["valor_dia_base"]))}
-{_campo("TOTAL DÍAS:")}
-{_campo("DESCUENTOS:")}
-{_campo("ADICIONALES:")}
-{_campo("VALOR TOTAL:")}
-</div>
-<div class="celda qr"><img alt="QR {_esc(fila["placa"])}" src="data:image/png;base64,{qr_b64}" /></div>
-</div>
-<div class="bloque nota">POR FAVOR DILIGENCIAR LA SIGUIENTE PLANILLA CON LETRA LEGIBLE</div>
-<table class="registro">
-<thead><tr>{encabezado}</tr></thead>
-<tbody>
-{"".join(filas)}
-</tbody>
-</table>
-</section>"""
+        nombre_conductor = _esc(conductor.get("nombre"))
+        nombre_propietario = _esc(fila.get("nombre_propietario"))
+        celular = _esc(conductor.get("celular"))
+        placa = _esc(fila.get("placa"))
+        valor_dia = PlanillaService._dinero(fila["valor_dia_base"]) if fila.get("valor_dia_base") else ""
+
+        return f"""<div class="container-fluid p-0">
+  <div class="row row-content m-1 border border-dark">
+    <!-- LOGO -->
+    <div class="col-3 border-end border-dark p-1 text-center d-flex align-items-center justify-content-center">
+      <img class="img-fluid logo" src="{LOGO_CINCO_B64}" alt="Cinco S.A.S" />
+    </div>
+
+    <!-- TÍTULO -->
+    <div class="col-6 border-end border-dark d-flex align-items-center justify-content-center p-0">
+      <p class="m-0 text-center fw-bold fs-6">F-104 PLANILLA CONTROL DE VEHÍCULOS CINCO S.A.S MENSUAL</p>
+    </div>
+
+    <!-- VERSIÓN - FECHA - CONSECUTIVO -->
+    <div class="col-3 p-0">
+      <div class="col-12 border-bottom border-dark d-flex align-items-center justify-content-center" style="height: 18px;">
+        <p class="m-0 text-center fw-semibold" style="font-size: 10px;">VERSIÓN: 01</p>
+      </div>
+      <div class="col-12 border-bottom border-dark d-flex align-items-center justify-content-center" style="height: 18px;">
+        <p class="m-0 text-center fw-semibold" style="font-size: 10px;">FECHA: {_esc(fecha.strftime("%d/%m/%Y"))}</p>
+      </div>
+      <div class="col-12 d-flex align-items-center justify-content-center" style="height: 18px;">
+        <p class="m-0 text-center fw-semibold" style="font-size: 10px;">CONSECUTIVO: {_esc(fila.get("consecutivo", ""))}</p>
+      </div>
+    </div>
+
+    <!-- RECOMENDACIONES - INFO -->
+    <div class="col-9 border-top border-end border-dark p-0">
+      <!-- PERÍODO -->
+      <div class="col-12 border-bottom border-dark p-0">
+        <h5 class="m-0 text-center periodo py-1">DEL 01 DE {mes_nombre} AL {ultimo} DE {mes_nombre} DE {_esc(fecha.year)}</h5>
+      </div>
+      <div class="col-12 border-bottom border-dark d-flex align-items-center justify-content-center px-2 py-1" style="min-height: 28px;">
+        <p class="m-0 text-center" style="font-size: 10px; line-height: 1.2;">
+          {_TEXTO_RECOMENDACION}
+        </p>
+      </div>
+
+      <!-- CAMPOS DEL VEHÍCULO Y CONDUCTOR -->
+      <div class="col-12 d-flex flex-wrap p-0">
+        <div class="col-6 border-end border-dark d-grid p-0">
+          <div class="col-12 info">
+            <p class="rotulo">CONDUCTOR:</p>
+            <p class="fw-bold info-text">{nombre_conductor}</p>
+          </div>
+          <div class="col-12 border-top border-dark info">
+            <p class="rotulo">PROPIETARIO:</p>
+            <p class="fw-bold info-text">{nombre_propietario}</p>
+          </div>
+          <div class="col-12 border-top border-dark info">
+            <p class="rotulo">TELÉFONO/CELULAR:</p>
+            <p class="fw-bold info-text">{celular}</p>
+          </div>
+        </div>
+
+        <div class="col-3 border-end border-dark d-grid p-0">
+          <div class="col-12 info">
+            <p class="rotulo">PLACA:</p>
+            <p class="fw-bold info-text placa-text">{placa}</p>
+          </div>
+          <div class="col-12 border-top border-dark info">
+            <p class="rotulo">VALOR DÍA:</p>
+            <p class="fw-bold info-text">{valor_dia}</p>
+          </div>
+          <div class="col-12 border-top border-dark info">
+            <p class="rotulo">TOTAL DÍAS:</p>
+            <p class="fw-bold info-text"></p>
+          </div>
+        </div>
+
+        <div class="col-3 d-grid p-0">
+          <div class="col-12 info">
+            <p class="rotulo">DESCUENTOS:</p>
+            <p class="fw-bold info-text"></p>
+          </div>
+          <div class="col-12 border-top border-dark info">
+            <p class="rotulo">ADICIONALES:</p>
+            <p class="fw-bold info-text"></p>
+          </div>
+          <div class="col-12 border-top border-dark info">
+            <p class="rotulo">VALOR TOTAL:</p>
+            <p class="fw-bold info-text"></p>
+          </div>
+        </div>
+
+        <!-- INDICACIONES -->
+        <div class="col-12 border-top border-dark d-flex align-items-center justify-content-center py-1">
+          <p class="m-0 text-center fw-semibold" style="font-size: 10px;">
+            POR FAVOR DILIGENCIAR LA SIGUIENTE PLANILLA CON LETRA LEGIBLE
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- QR CONTAINER -->
+    <div class="col-3 border-top border-dark p-0 text-center qr-container" id="qr-container">
+      <img src="data:image/png;base64,{qr_b64}" class="img-fluid qr" alt="QR {placa}" />
+    </div>
+
+    <!-- TABLA DE FIRMAS (DÍAS 1 AL 31) -->
+    <div class="col-12 p-0 border-top border-dark">
+      <table class="table-planilla">
+        <thead>
+          <tr>
+            <th style="width: 4%;">DÍA</th>
+            <th style="width: 7%;">HORA SALIDA</th>
+            <th style="width: 8%;" class="text-nowrap">FIRMA SALIDA</th>
+            <th style="width: 11%;">MÓVILES TRANSPORTADAS</th>
+            <th style="width: 7%;">HORA LLEGADA</th>
+            <th style="width: 8%;" class="text-nowrap">FIRMA RETORNO</th>
+            <th style="width: 5%;">OBSERVACIÓN</th>
+            <th style="width: 4%;">DÍA</th>
+            <th style="width: 7%;">HORA SALIDA</th>
+            <th style="width: 8%;" class="text-nowrap">FIRMA SALIDA</th>
+            <th style="width: 11%;">MÓVILES TRANSPORTADAS</th>
+            <th style="width: 7%;">HORA LLEGADA</th>
+            <th style="width: 8%;" class="text-nowrap">FIRMA RETORNO</th>
+            <th style="width: 5%;">OBSERVACIÓN</th>
+          </tr>
+        </thead>
+        <tbody>
+          {"".join(rows_html)}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>"""
 
     @staticmethod
     def _dinero(valor):
         """'$ 85.000' — importe con separador de miles para el formato."""
         return f"$ {int(valor):,}".replace(",", ".")
+

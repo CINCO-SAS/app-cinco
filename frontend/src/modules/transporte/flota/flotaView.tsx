@@ -5,7 +5,7 @@
 
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import Alert from "@/components/ui/alert/Alert";
@@ -14,6 +14,9 @@ import { getFlotaColumns } from "./flotaView.utils";
 import { FlotaKpis } from "./components/FlotaKpis";
 import { FlotaTable } from "./components/FlotaTable";
 import { FlotaToolbar } from "./components/FlotaToolbar";
+import { VehiculoFormModal } from "./components/VehiculoFormModal";
+import { VehiculoInactivarModal } from "./components/VehiculoInactivarModal";
+import type { VehiculoListado } from "@/types/transporte.types";
 
 const FlotaView = () => {
   const {
@@ -21,6 +24,7 @@ const FlotaView = () => {
     resumen,
     isLoading,
     loadError,
+    recargar,
     filtros,
     actualizarFiltro,
     limpiarFiltros,
@@ -39,12 +43,28 @@ const FlotaView = () => {
 
   const columns = useMemo(() => getFlotaColumns(), []);
 
+  // `null` → modal cerrado; `number` → id del vehículo a editar; `0` → alta.
+  const [vehiculoEnEdicion, setVehiculoEnEdicion] = useState<number | null>(null);
+  const [vehiculoAInactivar, setVehiculoAInactivar] =
+    useState<VehiculoListado | null>(null);
+
+  const cerrarFormulario = useCallback(() => setVehiculoEnEdicion(null), []);
+  const onNuevo = useCallback(() => setVehiculoEnEdicion(0), []);
+  const onEditar = useCallback((vehiculo: VehiculoListado) => {
+    setVehiculoEnEdicion(vehiculo.id);
+  }, []);
+  const onInactivar = useCallback((vehiculo: VehiculoListado) => {
+    setVehiculoAInactivar(vehiculo);
+  }, []);
+
   const toolbarActions = (
     <FlotaToolbar
+      total={vehiculos.length}
       filtros={filtros}
       actualizarFiltro={actualizarFiltro}
       limpiarFiltros={limpiarFiltros}
       hayFiltrosActivos={hayFiltrosActivos}
+      onNuevo={onNuevo}
     />
   );
 
@@ -79,6 +99,21 @@ const FlotaView = () => {
         visibleRows={visibleRows}
         setVisibleRows={setVisibleRows}
         toolbarActions={toolbarActions}
+        onEditar={onEditar}
+        onInactivar={onInactivar}
+      />
+
+      <VehiculoFormModal
+        isOpen={vehiculoEnEdicion !== null}
+        vehiculoId={vehiculoEnEdicion === 0 ? null : vehiculoEnEdicion}
+        onClose={cerrarFormulario}
+        onGuardado={recargar}
+      />
+
+      <VehiculoInactivarModal
+        vehiculo={vehiculoAInactivar}
+        onClose={() => setVehiculoAInactivar(null)}
+        onInactivado={recargar}
       />
     </div>
   );

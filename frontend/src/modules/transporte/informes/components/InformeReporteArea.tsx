@@ -26,10 +26,11 @@
 // de mayor a menor — lo que queda pendiente primero. `Array.sort` es
 // estable, así que los empates conservan el orden alfabético de llegada.
 //
-// FALTA: el legacy ponía botón de Excel (`extend: 'excelHtml5'`) y, si el
-// área era "I&M", un icono de refresco que lanzaba un job de validación
-// WFM. Ninguno de los dos está cableado aquí todavía (ver comentario en
-// informesView.tsx).
+// PENDIENTE: si el área era "I&M", el legacy mostraba un icono de refresco
+// que lanzaba un job de validación WFM (`POST /wfm/validar/`). Ese botón
+// escribe validaciones y requiere permiso + confirmación explícita, así que
+// se diferió. El botón Excel (↓ Excel) ya está cableado en `informesView.tsx`
+// vía `InformeExportarReporteArea` (acciones del bloque `InformeBloque`).
 
 import { useMemo } from "react";
 
@@ -45,6 +46,7 @@ import type {
   ContadorEstadoInforme,
 } from "@/types/transporte.types";
 import { formatoCOP } from "../informesView.utils";
+import { InformeWfmRefresh } from "./InformeWfmRefresh";
 
 /** Fila de este bloque: el resumen de estados de UN área. */
 interface ResumenArea {
@@ -127,6 +129,9 @@ const Cabecera = () => (
       <TableCell isHeader className={`${ENCABEZADO_CLASE} text-center`}>
         Pendiente
       </TableCell>
+      <TableCell isHeader className={`${ENCABEZADO_CLASE} text-center`}>
+        Acción
+      </TableCell>
     </TableRow>
   </TableHeader>
 );
@@ -136,10 +141,16 @@ const FilaEstado = ({
   area,
   resumen,
   esTotal = false,
+  mes,
+  anio,
+  onWfmValidado,
 }: {
   area: string;
   resumen: ResumenArea;
   esTotal?: boolean;
+  mes?: number;
+  anio?: number;
+  onWfmValidado?: () => void;
 }) => (
   <TableRow
     className={
@@ -162,6 +173,16 @@ const FilaEstado = ({
     <CeldaEstado dato={resumen.validado} tono={TONOS.positivo} />
     <CeldaEstado dato={resumen.rechazado} tono={TONOS.negativo} />
     <CeldaEstado dato={resumen.pendiente} tono={TONOS.pendiente} />
+    <td className="px-2 py-1.5 text-center align-middle">
+      {!esTotal && mes !== undefined && anio !== undefined && (
+        <InformeWfmRefresh
+          area={area}
+          mes={mes}
+          anio={anio}
+          onValidado={onWfmValidado}
+        />
+      )}
+    </td>
   </TableRow>
 );
 
@@ -169,12 +190,18 @@ interface InformeReporteAreaProps {
   areas: AreaInforme[];
   isLoading?: boolean;
   vacio?: string;
+  mes: number;
+  anio: number;
+  onWfmValidado?: () => void;
 }
 
 export const InformeReporteArea = ({
   areas,
   isLoading = false,
   vacio = "No hay salidas registradas en este período.",
+  mes,
+  anio,
+  onWfmValidado,
 }: InformeReporteAreaProps) => {
   // Pendiente primero (orden `[[5, 'DESC']]` del legacy). `sort` es
   // estable, así que los empates quedan en orden alfabético.
@@ -239,6 +266,9 @@ export const InformeReporteArea = ({
                 key={resumen.area}
                 area={resumen.area}
                 resumen={resumen}
+                mes={mes}
+                anio={anio}
+                onWfmValidado={onWfmValidado}
               />
             ))
           )}

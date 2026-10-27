@@ -5,14 +5,17 @@
 // filtros dentro de la tarjeta de la tabla; están en `FlotaKpis`, justo
 // encima de la tabla.
 
+import Button from "@/components/ui/button/Button";
 import type { FiltrosFlota } from "../flotaView.hooks";
 import { ETIQUETAS_TIPO_CONTRATO } from "../flotaView.utils";
 
 interface FlotaToolbarProps {
+  total: number;
   filtros: FiltrosFlota;
   actualizarFiltro: (clave: keyof FiltrosFlota, valor: string) => void;
   limpiarFiltros: () => void;
   hayFiltrosActivos: boolean;
+  onNuevo: () => void;
 }
 
 const SELECT_CLASES =
@@ -21,10 +24,12 @@ const SELECT_CLASES =
   "dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
 
 export const FlotaToolbar = ({
+  total,
   filtros,
   actualizarFiltro,
   limpiarFiltros,
   hayFiltrosActivos,
+  onNuevo,
 }: FlotaToolbarProps) => (
   <div className="flex flex-wrap items-center gap-2">
     <select
@@ -74,5 +79,13 @@ export const FlotaToolbar = ({
         Limpiar
       </button>
     )}
+
+    <span className="ml-auto text-sm text-gray-500 dark:text-gray-400">
+      {total} vehículo{total === 1 ? "" : "s"}
+    </span>
+
+    <Button size="sm" variant="primary" onClick={onNuevo}>
+      Nuevo vehículo
+    </Button>
   </div>
 );
