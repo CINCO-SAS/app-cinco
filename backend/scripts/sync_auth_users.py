@@ -30,7 +30,12 @@ def is_active_from_estado(estado: str) -> bool:
 
 
 def is_identity_conflict(error, vendor: str) -> bool:
-    """Identifica si el error de integridad corresponde exclusivamente a colisión de ID o username."""
+    """Recognize duplicate identity errors from supported database drivers.
+
+    For MySQL, match error 1062 on a PRIMARY or username key; for SQLite,
+    match the auth_user ID or username uniqueness messages. Inspect the
+    underlying cause and return False for other vendors or unrecognized errors.
+    """
     cause = error.__cause__
     if vendor == "mysql" and cause and len(cause.args) >= 2 and cause.args[0] == 1062:
         match = re.search(r"for key ['`]([^'`]+)['`]$", str(cause.args[1]))
@@ -97,7 +102,19 @@ def fetch_source_rows(batch_size: int):
 
 
 def main() -> int:
-    """Ejecuta el flujo principal de sincronización de usuarios hacia auth_user."""
+    """Import source personnel as new auth users using command-line options.
+
+    Skip empty usernames, existing IDs or usernames, and recognized identity
+    conflicts during insertion; existing users are not updated. Dry runs do not
+    write users but still produce the CSV when an output path is supplied.
+    The CSV is overwritten and contains usernames, temporary passwords (the
+    username, or DRY_RUN in a dry run), and email addresses for created or
+    simulated users.
+
+    Return 0 on completion. Argument parsing can raise SystemExit for help or
+    invalid options. Unrecognized insertion integrity errors, other database
+    errors, and file errors propagate to the caller.
+    """
     parser = build_parser()
     args = parser.parse_args()
 

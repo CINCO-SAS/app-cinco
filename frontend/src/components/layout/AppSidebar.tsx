@@ -77,6 +77,11 @@ const defaultNavItems: NavItem[] = [
   },
 ];
 
+/**
+ * Render navigation permitted for the current user within a SidebarProvider.
+ * On mount and when the route or available menu changes, collapse the sidebar
+ * and select the submenu matching the current route.
+ */
 const AppSidebar: React.FC = () => {
   const {
     isExpanded,
