@@ -7,6 +7,7 @@ import { ActividadFormFields } from "./ActividadFormFields";
 
 const ActividadForm = ({
   defaultValues,
+  actividad,
   onSubmit,
   isLoading,
   backendErrors,
@@ -19,8 +20,12 @@ const ActividadForm = ({
     handleInvalidSubmit,
     selectedEmployee,
     handleEmployeeChange,
+    isIdentityResolved,
+    employeeError,
+    retryLoadEmployee,
   } = useActividadFormLogic({
     defaultValues,
+    actividad,
     backendErrors,
     mode,
   });
@@ -37,6 +42,9 @@ const ActividadForm = ({
         mode={mode}
         selectedEmployee={selectedEmployee}
         onEmployeeChange={handleEmployeeChange}
+        isResponsableDisabled={mode === "edit" || isIdentityResolved}
+        employeeError={employeeError}
+        onRetryLoadEmployee={retryLoadEmployee}
       />
 
       <div className="mt-6 flex justify-end gap-3">

@@ -260,7 +260,19 @@ class AgendaService:
     def save_agenda(data: Dict[str, Any], user: Optional[Any] = None) -> Dict[str, Any]:
         """
         Crea o actualiza un agendamiento en la tabla `operaciones_agenda`.
-        Soporta el formato limpio relacional y el formato data_form de retrocompatibilidad.
+
+        Soporta el formato relacional y retrocompatibilidad con `data_form`.
+        Preserva los datos macro de la actividad (no sobreescribe responsable ni fechas de OTs).
+
+        Args:
+            data: Diccionario con la información del agendamiento y técnico asignado.
+            user: Usuario autenticado que realiza la operación.
+
+        Returns:
+            Dict[str, Any]: Diccionario con el resultado de la operación y el registro persistido.
+
+        Raises:
+            ValueError: Si los datos son inválidos, las fechas son incorrectas o no existe la actividad.
         """
         if not data or not isinstance(data, dict):
             raise ValueError("No se recibieron datos válidos para agendar.")
@@ -286,27 +298,39 @@ class AgendaService:
             raise ValueError(f"No se encontró la actividad con ID {actividad_id}.")
 
         # 2. Resolver Responsable (auth_user)
-        responsable_id = (
+        # En la UI, el líder interactúa con un componente buscador asistido (EmployeeSearchInput)
+        # que permite coincidencias multi-criterio: nombres (uno o ambos), apellidos (uno o ambos),
+        # cédula o móvil. Al seleccionar al colaborador de la lista enriquecida, el frontend vincula
+        # la cédula verificada en `cc_agen_tecnico_search` y el identificador en `responsable_id`.
+        raw_responsable = (
             data.get("responsable_id")
             or data_form.get("responsable_id")
             or data_form.get("empleado_id")
             or data_form.get("iduser")
         )
+        cc_search = data_form.get("cc_agen_tecnico_search") if isinstance(data_form, dict) else None
+        responsable = None
 
-        if not responsable_id and data_form.get("cc_agen_tecnico_search"):
-            ced = str(data_form.get("cc_agen_tecnico_search")).strip()
-            user_found = User.objects.filter(Q(username=ced) | Q(id=ced if ced.isdigit() else 0)).first()
-            if user_found:
-                responsable_id = user_found.id
-            else:
-                responsable_id = actividad.responsable_id
+        if cc_search and str(cc_search).strip():
+            ced = str(cc_search).strip()
+            responsable = User.objects.filter(username=ced, is_active=True).first()
+            if not responsable:
+                raise ValueError(f"El técnico con cédula '{ced}' no existe o no se encuentra activo en el sistema.")
+        elif raw_responsable:
+            raw_str = str(raw_responsable).strip()
+            responsable = User.objects.filter(
+                Q(id=int(raw_str) if raw_str.isdigit() else 0) | Q(username=raw_str),
+                is_active=True,
+            ).first()
+            if not responsable:
+                raise ValueError(f"El técnico con identificador '{raw_str}' no existe o no se encuentra activo en el sistema.")
+        else:
+            # Fallback a actividad.responsable únicamente cuando el cliente no envió ningún responsable
+            if actividad.responsable_id:
+                responsable = User.objects.filter(id=actividad.responsable_id, is_active=True).first()
 
-        if not responsable_id:
-            responsable_id = actividad.responsable_id
-
-        responsable = User.objects.filter(id=responsable_id, is_active=True).first()
-        if not responsable:
-            raise ValueError(f"El técnico con ID {responsable_id} no existe en los usuarios del sistema.")
+            if not responsable:
+                raise ValueError("No se pudo determinar un técnico responsable activo para el agendamiento.")
 
         # 3. Fechas
         f_ini_str = str(data.get("fecha_inicio") or data_form.get("fec_agen_ini") or data_form.get("fecha_inicio") or "").strip()
@@ -363,33 +387,29 @@ class AgendaService:
                 )
                 msg = "Agendamiento creado correctamente."
 
-            # 1. Sincronizar Actividad principal (operaciones_actividades)
-            act_updates = []
+            # 1. Sincronizar estado en Actividad principal (si se especifica)
+            # NOTA DE DOMINIO: El responsable de la actividad es el jefe creador de la OT y una actividad
+            # puede vincularse a múltiples técnicos en la agenda. No se debe sobreescribir responsable_id
+            # ni las fechas macro de la actividad en cada agendamiento individual.
+            ESTADOS_VALIDOS_ACTIVIDAD = {
+                "pendiente",
+                "en_progreso",
+                "completada",
+                "cancelada",
+                "pausada",
+                "reprogramada",
+                "agendado",
+                "agendada",
+            }
             nuevo_estado = data.get("estado") or (data_form.get("estado") if isinstance(data_form, dict) else None)
             if nuevo_estado and str(nuevo_estado).strip():
-                actividad.estado = str(nuevo_estado).strip().upper()
-                act_updates.append("estado")
-
-            if actividad.responsable_id != responsable.id:
-                actividad.responsable_id = responsable.id
-                act_updates.append("responsable_id")
-
-            if actividad.fecha_inicio != f_ini:
-                actividad.fecha_inicio = f_ini
-                act_updates.append("fecha_inicio")
-
-            if actividad.fecha_fin_estimado != f_fin:
-                actividad.fecha_fin_estimado = f_fin
-                act_updates.append("fecha_fin_estimado")
-
-            if act_updates:
-                actividad.save(update_fields=act_updates)
-
-            # Sincronizar fechas en las relaciones de OTs vinculadas
-            actividad.ot_relaciones.filter(is_active=True).update(
-                fecha_inicio=f_ini,
-                fecha_fin=f_fin
-            )
+                estado_clean = str(nuevo_estado).strip().lower()
+                if estado_clean in ESTADOS_VALIDOS_ACTIVIDAD:
+                    if estado_clean == "agendada":
+                        estado_clean = "agendado"
+                    if actividad.estado != estado_clean:
+                        actividad.estado = estado_clean
+                        actividad.save(update_fields=["estado"])
 
             # 2. Sincronizar Detalle (operaciones_actividaddetalle)
             tipo_trabajo = data.get("tipo_trabajo") or (data_form.get("nombre_param") if isinstance(data_form, dict) else None)
@@ -540,18 +560,23 @@ class AgendaService:
 
                 # 2. Resolver el técnico / responsable
                 responsable_id = None
-                if responsable_id_raw and str(responsable_id_raw).isdigit():
-                    responsable_id = int(responsable_id_raw)
-                elif cedula:
+                tiene_identificador = bool(responsable_id_raw or cedula)
+
+                if cedula:
                     u_obj = User.objects.filter(username=cedula, is_active=True).first()
                     if u_obj:
                         responsable_id = u_obj.id
+                    else:
+                        raise ValueError(f"El técnico con cédula '{cedula}' no existe o no se encuentra activo en el sistema.")
+                elif responsable_id_raw and str(responsable_id_raw).isdigit():
+                    responsable_id = int(responsable_id_raw)
 
-                if not responsable_id:
+                # Fallback al responsable de la OT únicamente si la fila no traía cédula ni responsable_id
+                if not tiene_identificador:
                     responsable_id = act_info.get("responsable_id")
 
                 if not responsable_id:
-                    raise ValueError(f"No se pudo determinar el técnico responsable para la cédula '{cedula}'.")
+                    raise ValueError(f"No se pudo determinar un técnico responsable activo para la fila {idx}.")
 
                 # 3. Guardar con transacción individual por fila
                 with transaction.atomic():
@@ -569,7 +594,7 @@ class AgendaService:
                             "rad_sede_agen": sede,
                             "area_agen": act_info.get("responsable_area", ""),
                             "carp_agen": act_info.get("responsable_carpeta", ""),
-                            "cc_agen_tecnico_search": cedula or str(responsable_id),
+                            "cc_agen_tecnico_search": cedula or "",
                             "actividad_param": ot.upper(),
                             "nombre_param": (nombre_act or act_info.get("tipo_trabajo", ot)).upper(),
                             "fec_agen_ini": f_ini,

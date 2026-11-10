@@ -5,6 +5,7 @@ import { ActividadFormData } from "@/schemas/actividades.schema";
 export const actividadCreateDefaultValues: ActividadFormData = {
   ots: [{ ot: "", fecha_inicio: new Date().toISOString().split("T")[0], fecha_fin: "" }], // El primer elemento (ots.0) representa a la OT Padre en creación
   responsable_id: 0,
+  estado: "pendiente",
   fecha_inicio: new Date().toISOString().split("T")[0],
   fecha_fin_estimado: "",
   fecha_fin_real: null,
@@ -21,6 +22,15 @@ export const actividadCreateDefaultValues: ActividadFormData = {
   },
 };
 
+/**
+ * Transforma un registro de actividad existente en los valores por defecto requeridos por el formulario de edición.
+ *
+ * Mapea la lista de OTs vinculadas asegurando que la OT principal encabece la lista,
+ * normaliza el campo estado a minúsculas y estructura las secciones de detalle y ubicación.
+ *
+ * @param actividad Registro de la actividad obtenido del backend o caché.
+ * @returns Estructura de datos compatible con `ActividadFormData`.
+ */
 export const actividadEditDefaultValues = (
   actividad: any,
 ): ActividadFormData => {
@@ -61,8 +71,8 @@ export const actividadEditDefaultValues = (
   return {
     id: actividad.id,
     ots: otsMapped,
-    estado: actividad.estado,
-    responsable_id: actividad.responsable_id,
+    estado: actividad.estado ? String(actividad.estado).trim().toLowerCase() : "pendiente",
+    responsable_id: actividad.responsable_snapshot?.empleado_id || actividad.responsable_id,
     responsable_snapshot: actividad.responsable_snapshot,
     fecha_inicio: actividad.fecha_inicio,
     fecha_fin_estimado: actividad.fecha_fin_estimado,

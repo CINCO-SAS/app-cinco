@@ -38,6 +38,41 @@ const formatOts = (ots?: any[]) => {
     .join(", ");
 };
 
+/**
+ * Determina el color semántico del badge de estado según el valor normalizado.
+ *
+ * @param est Nombre normalizado del estado de la actividad en minúsculas.
+ * @returns Identificador de color de badge ('success' | 'warning' | 'info' | 'error').
+ */
+export const getActividadBadgeColor = (
+  est: string,
+): "success" | "warning" | "info" | "error" => {
+  switch (est) {
+    case "completada":
+      return "success";
+    case "pendiente":
+      return "warning";
+    case "en_progreso":
+      return "info";
+    case "pausada":
+      return "warning";
+    case "reprogramada":
+      return "info";
+    case "cancelada":
+      return "error";
+    default:
+      return "warning";
+  }
+};
+
+/**
+ * Genera la configuración de columnas de la tabla de actividades para TanStack Table.
+ *
+ * Incluye formateadores de fecha, visualización normalizada de estado mediante badges
+ * y componentes interactivos para edición y detalle de registros.
+ *
+ * @returns Lista de definiciones de columna tipadas para `ActividadRecord`.
+ */
 export const getActividadesColumns = (): ColumnDef<ActividadRecord>[] => [
   {
     id: "acciones",
@@ -84,19 +119,12 @@ export const getActividadesColumns = (): ColumnDef<ActividadRecord>[] => [
     header: "ESTADO",
     accessorKey: "estado",
     cell: ({ row }) => {
-      const estado = row.original.estado || "Sin estado";
+      const rawEstado = row.original.estado || "Sin estado";
+      const estadoNorm = rawEstado.trim().toLowerCase();
+
       return (
-        <Badge
-          size="sm"
-          color={
-            estado == "completada"
-              ? "success"
-              : estado == "pendiente"
-                ? "warning"
-                : "error"
-          }
-        >
-          {estado}
+        <Badge size="sm" color={getActividadBadgeColor(estadoNorm)}>
+          {estadoNorm}
         </Badge>
       );
     },
@@ -171,9 +199,8 @@ export const handleExportToCsvHelper = (visibleRows: ActividadRecord[]) => {
 
 export const GESTION_ACTIVIDADES_CONFIG = {
   breadcrumbTitles: ["Operaciones", "Gestión de Actividades"],
-  title: "Modulo de Gestión de Actividades",
-  description:
-    "Aquí podrás gestionar todas las actividades relacionadas con las operaciones de CINCO SAS.",
+  title: "",
+  description: "",
   alertDuration: 5000,
   pageSizeOptions: [5, 10, 25, 50, 100],
 } as const;

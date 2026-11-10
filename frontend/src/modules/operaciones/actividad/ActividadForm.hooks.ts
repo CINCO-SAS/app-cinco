@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { isAxiosError } from "axios";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FieldErrors, useForm, useWatch } from "react-hook-form";
 import {
@@ -19,9 +20,15 @@ import {
   logDevelopmentWarning,
 } from "@/lib/environment";
 import { toast } from "sonner";
+import { Actividad } from "./types";
+import {
+  actividadCreateDefaultValues,
+  actividadEditDefaultValues,
+} from "./actividad.defaults";
 
 interface UseActividadFormLogicParams {
-  defaultValues: ActividadFormData;
+  defaultValues?: ActividadFormData;
+  actividad?: Actividad;
   backendErrors?: Record<string, any> | null;
   mode?: "create" | "edit";
 }
@@ -58,14 +65,52 @@ const getFirstFieldErrorMessage = (
   return visit(errors);
 };
 
+/**
+ * Determina si un error corresponde a un fallo de red o del servidor (5xx o sin respuesta),
+ * diferenciándolo de errores de recursos no encontrados (404) o validaciones de negocio.
+ *
+ * @param error Error capturado durante la consulta HTTP o resolución del empleado.
+ * @returns true si el fallo se debió a problemas de conexión o errores 5xx del servidor.
+ */
+export const isNetworkOrServerError = (error: unknown): boolean => {
+  if (isAxiosError(error)) {
+    if (!error.response) {
+      return true;
+    }
+    return error.response.status >= 500;
+  }
+
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    if (message.includes("no encontrado") || message.includes("not found")) {
+      return false;
+    }
+  }
+
+  return false;
+};
+
 export const useActividadFormLogic = ({
   defaultValues,
+  actividad,
   backendErrors,
   mode = "create",
 }: UseActividadFormLogicParams) => {
+  const memoizedDefaultValues = useMemo(() => {
+    if (mode === "edit" && actividad) {
+      return actividadEditDefaultValues(actividad);
+    }
+    return defaultValues || actividadCreateDefaultValues;
+  }, [mode, actividad, defaultValues]);
+
   const [selectedEmployee, setSelectedEmployee] = useState<Empleado | null>(
     null,
   );
+  const [isIdentityResolved, setIsIdentityResolved] = useState<boolean>(
+    mode === "edit",
+  );
+  const [employeeError, setEmployeeError] = useState<string | null>(null);
+  const [retryTrigger, setRetryTrigger] = useState<number>(0);
 
   const {
     control,
@@ -77,7 +122,7 @@ export const useActividadFormLogic = ({
     formState: { errors },
   } = useForm<ActividadFormData>({
     resolver: zodResolver(ActividadSchema) as any,
-    defaultValues,
+    defaultValues: memoizedDefaultValues,
   });
 
   const watchOts = useWatch({
@@ -169,44 +214,103 @@ export const useActividadFormLogic = ({
     watchFechaInicioPadre,
   ]);
 
+  // Restablecer valores por defecto del formulario de manera independiente y sincronizada con los valores memoizados
+  useEffect(() => {
+    reset(memoizedDefaultValues);
+  }, [memoizedDefaultValues, reset]);
+
+  // Cargar perfil del empleado responsable según el modo
   useEffect(() => {
     let isActive = true;
 
-    reset(defaultValues);
-
     const loadEmployee = async () => {
-      // Si estamos en modo creación y no hay empleado seleccionado, cargar el usuario de sesión
-      if (mode === "create" && (!defaultValues.responsable_id || defaultValues.responsable_id === 0)) {
+      setEmployeeError(null);
+
+      // Si estamos en modo creación, cargar obligatoriamente el empleado del perfil de sesión
+      if (mode === "create") {
         try {
           const user = getUser();
           
           if (!user) {
             logDevelopmentWarning("No user found in session");
+            setEmployeeError("No se encontró una sesión de usuario activa.");
             return;
           }
           
           if (!user.username) {
             logDevelopmentWarning("User has no username/cedula:", user);
+            setEmployeeError("El usuario en sesión no posee cédula para asociar como responsable.");
             return;
           }
 
           if (!isActive) return;
 
-          // Buscar empleado por cédula (username)
-          const empleado = await getEmpleadoByCedula(user.username);
-          
+          let empleado: Empleado | null = null;
+          let fetchFailed = false;
+
+          const userCedula = String(user.username).trim().toLowerCase();
+
+          try {
+            empleado = await getEmpleadoByCedula(user.username);
+          } catch (err) {
+            if (isNetworkOrServerError(err)) {
+              fetchFailed = true;
+            }
+            if (user.id && Number(user.id) > 0) {
+              try {
+                const candidate = await getEmpleadoById(Number(user.id));
+                const candidateCedula = String(candidate?.cedula || "").trim().toLowerCase();
+                if (candidate && candidateCedula === userCedula) {
+                  empleado = candidate;
+                  fetchFailed = false;
+                } else {
+                  empleado = null;
+                }
+              } catch (idErr) {
+                if (isNetworkOrServerError(idErr)) {
+                  fetchFailed = true;
+                }
+                empleado = null;
+              }
+            }
+          }
+
           if (!isActive) return;
 
-          if (empleado) {
+          const isExactMatch =
+            Boolean(empleado) &&
+            String(empleado?.cedula || "").trim().toLowerCase() === userCedula;
+
+          if (empleado && isExactMatch) {
             setSelectedEmployee(empleado);
+            setIsIdentityResolved(true);
+            setEmployeeError(null);
             setValue("responsable_id", empleado.id);
             setValue("responsable_snapshot", buildResponsableSnapshot(empleado));
-            
+
             if (empleado.link_foto) {
               preloadAvatar(empleado.link_foto);
             }
+          } else {
+            // Descartar coincidencias parciales: si no hay coincidencia exacta por cédula, no asignar responsable
+            setSelectedEmployee(null);
+            setIsIdentityResolved(false);
+            setValue("responsable_id", 0);
+            setEmployeeError(
+              fetchFailed
+                ? "Error de conexión al consultar el perfil de empleado."
+                : "No se encontró un empleado activo que coincida exactamente con tu cédula."
+            );
           }
         } catch (error) {
+          if (!isActive) return;
+          setSelectedEmployee(null);
+          setIsIdentityResolved(false);
+          setValue("responsable_id", 0);
+          setEmployeeError(
+            "Error al consultar el perfil de empleado: " +
+              (error instanceof Error ? error.message : "Error de red")
+          );
           logDevelopmentWarning(
             "Could not load employee for current user:",
             error instanceof Error ? error.message : String(error),
@@ -216,17 +320,19 @@ export const useActividadFormLogic = ({
       }
 
       // Modo edición o ya hay un responsable
-      if (defaultValues.responsable_id && defaultValues.responsable_id > 0) {
+      const targetEmpId =
+        memoizedDefaultValues.responsable_snapshot?.empleado_id ||
+        memoizedDefaultValues.responsable_id;
+
+      if (targetEmpId && targetEmpId > 0) {
         try {
-          const empleadoBase = getSnapshotEmpleado(defaultValues);
+          const empleadoBase = getSnapshotEmpleado(memoizedDefaultValues);
 
           if (empleadoBase && isActive) {
             setSelectedEmployee(empleadoBase);
           }
 
-          const empleadoFull = await getEmpleadoById(
-            defaultValues.responsable_id,
-          );
+          const empleadoFull = await getEmpleadoById(targetEmpId);
           if (!isActive) return;
 
           setSelectedEmployee({
@@ -248,10 +354,14 @@ export const useActividadFormLogic = ({
     return () => {
       isActive = false;
     };
-  }, [defaultValues, reset, mode, setValue]);
+  }, [memoizedDefaultValues, mode, setValue, retryTrigger]);
 
   // Aplicar errores del backend al formulario
   useBackendErrors(backendErrors, setError);
+
+  const retryLoadEmployee = () => {
+    setRetryTrigger((prev) => prev + 1);
+  };
 
   const handleEmployeeChange = (empleado: Empleado | null) => {
     setSelectedEmployee(empleado);
@@ -277,5 +387,8 @@ export const useActividadFormLogic = ({
     handleInvalidSubmit,
     selectedEmployee,
     handleEmployeeChange,
+    isIdentityResolved,
+    employeeError,
+    retryLoadEmployee,
   };
 };

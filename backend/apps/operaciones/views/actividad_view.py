@@ -32,6 +32,8 @@ class ActividadViewSet(ModelViewSet):
         'nodo',
         'fecha_inicio_desde',
         'fecha_inicio_hasta',
+        'todas',
+        'ver_todas',
     )
 
     def _get_filtros(self):
@@ -58,6 +60,7 @@ class ActividadViewSet(ModelViewSet):
         return ActividadService.listar(
             usuario_id=usuario_id,
             filtros=self._get_filtros(),
+            user=user,
         )
 
     def get_serializer_class(self):
@@ -184,10 +187,16 @@ class ActividadViewSet(ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         actor_user_id = self._get_authenticated_user_id(request.user)
-        actividad = ActividadService.crear(
-            serializer.validated_data,
-            actor_user_id=actor_user_id,
-        )
+        try:
+            actividad = ActividadService.crear(
+                serializer.validated_data,
+                actor_user_id=actor_user_id,
+            )
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         return Response(
             ActividadSerializer(actividad).data,
