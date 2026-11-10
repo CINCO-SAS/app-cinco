@@ -260,7 +260,19 @@ class AgendaService:
     def save_agenda(data: Dict[str, Any], user: Optional[Any] = None) -> Dict[str, Any]:
         """
         Crea o actualiza un agendamiento en la tabla `operaciones_agenda`.
-        Soporta el formato limpio relacional y el formato data_form de retrocompatibilidad.
+
+        Soporta el formato relacional y retrocompatibilidad con `data_form`.
+        Preserva los datos macro de la actividad (no sobreescribe responsable ni fechas de OTs).
+
+        Args:
+            data: Diccionario con la información del agendamiento y técnico asignado.
+            user: Usuario autenticado que realiza la operación.
+
+        Returns:
+            Dict[str, Any]: Diccionario con el resultado de la operación y el registro persistido.
+
+        Raises:
+            ValueError: Si los datos son inválidos, las fechas son incorrectas o no existe la actividad.
         """
         if not data or not isinstance(data, dict):
             raise ValueError("No se recibieron datos válidos para agendar.")
@@ -305,6 +317,15 @@ class AgendaService:
             responsable_id = actividad.responsable_id
 
         responsable = User.objects.filter(id=responsable_id, is_active=True).first()
+        if not responsable and responsable_id:
+            from apps.empleados.services import EmpleadoService
+            emp = EmpleadoService().obtener_basico(responsable_id)
+            if emp and emp.get("cedula"):
+                responsable = User.objects.filter(username=emp["cedula"], is_active=True).first()
+
+        if not responsable and actividad.responsable_id:
+            responsable = User.objects.filter(id=actividad.responsable_id, is_active=True).first()
+
         if not responsable:
             raise ValueError(f"El técnico con ID {responsable_id} no existe en los usuarios del sistema.")
 
@@ -363,33 +384,16 @@ class AgendaService:
                 )
                 msg = "Agendamiento creado correctamente."
 
-            # 1. Sincronizar Actividad principal (operaciones_actividades)
-            act_updates = []
+            # 1. Sincronizar estado en Actividad principal (si se especifica)
+            # NOTA DE DOMINIO: El responsable de la actividad es el jefe creador de la OT y una actividad
+            # puede vincularse a múltiples técnicos en la agenda. No se debe sobreescribir responsable_id
+            # ni las fechas macro de la actividad en cada agendamiento individual.
             nuevo_estado = data.get("estado") or (data_form.get("estado") if isinstance(data_form, dict) else None)
             if nuevo_estado and str(nuevo_estado).strip():
-                actividad.estado = str(nuevo_estado).strip().upper()
-                act_updates.append("estado")
-
-            if actividad.responsable_id != responsable.id:
-                actividad.responsable_id = responsable.id
-                act_updates.append("responsable_id")
-
-            if actividad.fecha_inicio != f_ini:
-                actividad.fecha_inicio = f_ini
-                act_updates.append("fecha_inicio")
-
-            if actividad.fecha_fin_estimado != f_fin:
-                actividad.fecha_fin_estimado = f_fin
-                act_updates.append("fecha_fin_estimado")
-
-            if act_updates:
-                actividad.save(update_fields=act_updates)
-
-            # Sincronizar fechas en las relaciones de OTs vinculadas
-            actividad.ot_relaciones.filter(is_active=True).update(
-                fecha_inicio=f_ini,
-                fecha_fin=f_fin
-            )
+                estado_clean = str(nuevo_estado).strip().lower()
+                if actividad.estado != estado_clean:
+                    actividad.estado = estado_clean
+                    actividad.save(update_fields=["estado"])
 
             # 2. Sincronizar Detalle (operaciones_actividaddetalle)
             tipo_trabajo = data.get("tipo_trabajo") or (data_form.get("nombre_param") if isinstance(data_form, dict) else None)
