@@ -2,134 +2,29 @@ import logging
 import re
 import time
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
-import msal
 import requests
-from django.conf import settings
 from django.utils import timezone
 
+from apps.common.services import SharePointGraphClient
 from apps.implementacion_fo.models import MappingPredio, SharePointMappingConfig
 
 logger = logging.getLogger(__name__)
 
 
-class SharePointMappingService:
+class SharePointMappingService(SharePointGraphClient):
     """
     Servicio de integración entre el módulo de Mapping de Implementación FO
     y Microsoft SharePoint mediante Microsoft Graph API.
 
     Gestiona:
-    - Autenticación segura con token de Azure (MSAL).
+    - Autenticación segura con token de Azure (MSAL, heredada de SharePointGraphClient).
     - Mapeo dinámico de filas por barrio hacia archivos Excel (.xlsx) o Listas.
     - Reintentos con retroceso exponencial ante bloqueos (423/409) o cuotas (429).
     - Inserción individual o en lote (batch) para alta concurrencia.
     """
 
-    GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
-    _msal_app: Optional[msal.ConfidentialClientApplication] = None
     _list_columns_cache: Dict[str, Dict[str, Any]] = {}
-
-    @classmethod
-    def get_msal_client(cls) -> msal.ConfidentialClientApplication:
-        """Obtiene o inicializa el cliente MSAL con caché interna de tokens."""
-        if cls._msal_app is None:
-            tenant_id = getattr(settings, "SHAREPOINT_TENANT_ID", "") or ""
-            client_id = getattr(settings, "SHAREPOINT_CLIENT_ID", "") or ""
-            client_secret = getattr(settings, "SHAREPOINT_CLIENT_SECRET", "") or ""
-
-            if not (tenant_id and client_id and client_secret):
-                raise ValueError(
-                    "Faltan credenciales de Microsoft Graph en settings / .env: "
-                    "SHAREPOINT_TENANT_ID, SHAREPOINT_CLIENT_ID, SHAREPOINT_CLIENT_SECRET"
-                )
-
-            authority = f"https://login.microsoftonline.com/{tenant_id}"
-            cls._msal_app = msal.ConfidentialClientApplication(
-                client_id=client_id,
-                client_credential=client_secret,
-                authority=authority,
-            )
-        return cls._msal_app
-
-    @classmethod
-    def get_access_token(cls) -> str:
-        """
-        Adquiere un token de acceso para Microsoft Graph API.
-        MSAL busca automáticamente en su caché en memoria y renueva el token cuando expira.
-        """
-        app = cls.get_msal_client()
-        scopes = ["https://graph.microsoft.com/.default"]
-        result = app.acquire_token_silent(scopes=scopes, account=None)
-
-        if not result:
-            logger.info("Adquiriendo nuevo token de Microsoft Graph con credenciales de cliente...")
-            result = app.acquire_token_for_client(scopes=scopes)
-
-        if "access_token" in result:
-            return result["access_token"]
-
-        error_desc = result.get("error_description", result.get("error", "Error desconocido al obtener token"))
-        logger.error(f"Error al autenticar con Microsoft Graph: {error_desc}")
-        raise RuntimeError(f"Error al autenticar con Microsoft Graph: {error_desc}")
-
-    @classmethod
-    def _headers(cls) -> Dict[str, str]:
-        token = cls.get_access_token()
-        return {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-
-    @classmethod
-    @classmethod
-    def resolve_site_info(cls, site_url: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Dada una URL de SharePoint (incluso si incluye carpetas o parámetros de vista),
-        resuelve el ID único del sitio (Site ID) y la ruta relativa.
-        Ejemplos soportados:
-        - https://empresa.sharepoint.com/sites/MiSitio
-        - https://empresa.sharepoint.com/sites/MiSitio/Documentos Compartidos/CarpetaMapping
-        """
-        url = site_url or getattr(settings, "SHAREPOINT_SITE_URL", "")
-        if not url:
-            raise ValueError("No se configuró SHAREPOINT_SITE_URL en las variables de entorno.")
-
-        parsed = urlparse(url)
-        hostname = parsed.netloc
-
-        # Extraer solo la parte del sitio /sites/<nombre> o /teams/<nombre>
-        path_segments = [seg for seg in parsed.path.strip("/").split("/") if seg]
-        if len(path_segments) >= 2 and path_segments[0].lower() in ("sites", "teams"):
-            site_relative_path = f"/{path_segments[0]}/{path_segments[1]}"
-        else:
-            site_relative_path = parsed.path.rstrip("/")
-
-        endpoint = f"{cls.GRAPH_BASE_URL}/sites/{hostname}:{site_relative_path}"
-        response = requests.get(endpoint, headers=cls._headers(), timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        return {
-            "site_id": data["id"],
-            "site_name": data.get("displayName") or data.get("name"),
-            "hostname": hostname,
-            "site_relative_path": site_relative_path,
-        }
-
-    @classmethod
-    def resolve_site_id(cls, site_url: Optional[str] = None) -> str:
-        """Retorna únicamente el Site ID."""
-        info = cls.resolve_site_info(site_url)
-        return info["site_id"]
-
-    @classmethod
-    def list_drives(cls, site_id: str) -> List[Dict[str, Any]]:
-        """Lista las bibliotecas de documentos (Drives) dentro de un sitio."""
-        endpoint = f"{cls.GRAPH_BASE_URL}/sites/{site_id}/drives"
-        response = requests.get(endpoint, headers=cls._headers(), timeout=15)
-        response.raise_for_status()
-        return response.json().get("value", [])
 
     @classmethod
     def list_excel_files(cls, drive_id: str, folder_item_id: Optional[str] = None) -> List[Dict[str, Any]]:

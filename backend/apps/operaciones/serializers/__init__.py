@@ -5,3 +5,4 @@ from .agenda_serializer import (
     AgendaGuardarSerializer,
     AgendaImportarCsvSerializer,
 )
+from .incidente_serializer import IncidenteBuscarQuerySerializer
