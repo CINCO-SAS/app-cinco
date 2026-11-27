@@ -373,3 +373,60 @@ SHAREPOINT_CLIENT_ID = os.environ.get('SHAREPOINT_CLIENT_ID', '')
 SHAREPOINT_CLIENT_SECRET = os.environ.get('SHAREPOINT_CLIENT_SECRET', '')
 SHAREPOINT_SITE_URL = os.environ.get('SHAREPOINT_SITE_URL', '')
 
+# SharePoint Incidentes - Catálogo de archivos Excel
+SHAREPOINT_INCIDENTES_CACHE_TTL_SECONDS = int(
+    os.environ.get('SHAREPOINT_INCIDENTES_CACHE_TTL_SECONDS', '300')
+)
+SHAREPOINT_INCIDENTES_STALE_TTL_SECONDS = int(
+    os.environ.get('SHAREPOINT_INCIDENTES_STALE_TTL_SECONDS', '86400')
+)
+SHAREPOINT_INCIDENTES_REFRESH_COOLDOWN_SECONDS = int(
+    os.environ.get('SHAREPOINT_INCIDENTES_REFRESH_COOLDOWN_SECONDS', '60')
+)
+
+
+def _build_sharepoint_incidente_source(
+    key: str,
+    prefix: str,
+    default_label: str,
+    default_file_name: str = '',
+    default_sheet_name: str = 'BACKLOG',
+    default_table_name: str = 'INFO_4',
+) -> dict:
+    file_url = os.environ.get(f'{prefix}_FILE_URL', '').strip()
+    site_url = os.environ.get(f'{prefix}_SITE_URL', '').strip()
+    file_name = os.environ.get(f'{prefix}_FILE_NAME', default_file_name).strip()
+    sheet_name = os.environ.get(f'{prefix}_SHEET_NAME', default_sheet_name).strip()
+    table_name = os.environ.get(f'{prefix}_TABLE_NAME', default_table_name).strip()
+    label = os.environ.get(f'{prefix}_LABEL', default_label).strip() or default_label
+    return {
+        'key': key,
+        'label': label,
+        'file_url': file_url,
+        'site_url': site_url,
+        'file_name': file_name,
+        'sheet_name': sheet_name,
+        'table_name': table_name,
+        'habilitado': bool(file_url or (site_url and file_name)),
+    }
+
+
+SHAREPOINT_INCIDENTES_FUENTES = {
+    'back_mtto_2026': _build_sharepoint_incidente_source(
+        key='back_mtto_2026',
+        prefix='SHAREPOINT_INCIDENTES_1',
+        default_label='BACK_MTTO_INFO_2026',
+        default_file_name='BACK_MTTO_INFO_2026.xlsx',
+        default_sheet_name='BACKLOG',
+        default_table_name='INFO_4',
+    ),
+    'archivo_2': _build_sharepoint_incidente_source(
+        key='archivo_2',
+        prefix='SHAREPOINT_INCIDENTES_2',
+        default_label='Segundo Archivo (Pendiente)',
+        default_file_name='',
+        default_sheet_name='BACKLOG',
+        default_table_name='INFO_4',
+    ),
+}
+
