@@ -37,6 +37,10 @@ const defaultNavItems: NavItem[] = [
         name: "Agenda de Trabajos",
         path: "/operaciones/agenda",
       },
+      {
+        name: "Incidentes",
+        path: "/operaciones/incidentes",
+      },
     ],
   },
   {
